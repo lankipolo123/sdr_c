@@ -18,7 +18,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1030
-#define CLIENT_HEIGHT 780
+#define CLIENT_HEIGHT 810
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -33,6 +33,17 @@ static const char PARITY_CODES[] = { 'N', 'O', 'E', 'M', 'S' };
 #define PARITY_OPTIONS_COUNT 5
 
 static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
+
+/* Kill switch: forces all 16 channels off if the sensor reports a
+ * dangerously high temperature. Manual reset only, deliberately - once
+ * tripped, channels stay off (and new ON/Set/level commands are blocked)
+ * even if the temperature drops back down, until the user explicitly
+ * clicks Reset. Auto-resuming at the threshold would let it silently
+ * cycle on/off right at the boundary, defeating the point of a safety
+ * cutoff. */
+#define KILL_SWITCH_THRESHOLD_C 60.0f
+
+#define LOG_MAX_ENTRIES 200
 
 /* MILITRONIX Dark palette - same as the single-channel app. */
 #define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
@@ -60,7 +71,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 #define CARD_H 146
 #define CARD_GAP 8
 #define GRID_LEFT 10
-#define GRID_TOP 152
+#define GRID_TOP 182
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
@@ -73,13 +84,13 @@ static HBRUSH g_brush_field;
 static HBRUSH g_brush_accent;
 static HBRUSH g_brush_accent_dis;
 static HBRUSH g_brush_dot;
-static HBRUSH g_brush_warn;
 static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
 static HBRUSH g_brush_silver;
 
 static Connection g_conn;
 static Sensor g_sensor;
+static bool g_kill_switch_tripped;
 
 /* ---- small control-creation helper ---- */
 
@@ -198,6 +209,7 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
  * panel. */
 #define ICON_PLUG 0
 #define ICON_WAVE 2
+#define ICON_LIST 5
 
 static void draw_header_icon(HDC hdc, int x, int y, int type) {
     switch (type) {
@@ -217,6 +229,11 @@ static void draw_header_icon(HDC hdc, int x, int y, int type) {
             Polyline(hdc, pts, 5);
             break;
         }
+        case ICON_LIST:
+            MoveToEx(hdc, x + 2, y + 3, NULL);  LineTo(hdc, x + 12, y + 3);
+            MoveToEx(hdc, x + 2, y + 7, NULL);  LineTo(hdc, x + 12, y + 7);
+            MoveToEx(hdc, x + 2, y + 11, NULL); LineTo(hdc, x + 12, y + 11);
+            break;
         default:
             break;
     }
@@ -281,9 +298,37 @@ static void draw_dot_grid(HDC hdc, const RECT *rc) {
     }
 }
 
-/* ---- connection -> UI callbacks ---- */
+/* ---- activity log ---- */
 
-static void ui_show_warning(const char *message);
+static void log_add(const char *message) {
+    HWND list = GetDlgItem(g_hwnd, IDC_LOG_LISTBOX);
+    SYSTEMTIME st;
+    char line[160];
+    int count;
+
+    GetLocalTime(&st);
+    wsprintfA(line, "[%02d:%02d:%02d] %s", st.wHour, st.wMinute, st.wSecond, message);
+    SendMessageA(list, LB_ADDSTRING, 0, (LPARAM)line);
+
+    count = (int)SendMessageA(list, LB_GETCOUNT, 0, 0);
+    while (count > LOG_MAX_ENTRIES) {
+        SendMessageA(list, LB_DELETESTRING, 0, 0);
+        count--;
+    }
+    SendMessageA(list, LB_SETTOPINDEX, (WPARAM)(count > 0 ? count - 1 : 0), 0);
+}
+
+/* Errors used to pop into a separate ephemeral warning box; now they
+ * just land in the same activity log everything else does (matching
+ * sdr_app/sdr_react, which don't have a separate transient warning
+ * panel either), marked with a "!" prefix so they stand out. */
+static void ui_show_warning(const char *message) {
+    char line[160];
+    wsprintfA(line, "! %s", message);
+    log_add(line);
+}
+
+/* ---- connection -> UI callbacks ---- */
 
 static void conn_on_connected_changed(bool connected, void *ctx) {
     (void)ctx;
@@ -304,11 +349,6 @@ static void conn_on_frame(const ProtoParsedFrame *frame, void *ctx) {
 static void conn_on_error(const char *message, void *ctx) {
     (void)ctx;
     ui_show_warning(message);
-}
-
-static void ui_show_warning(const char *message) {
-    SetDlgItemTextA(g_hwnd, IDC_WARNING_LBL, message);
-    ShowWindow(GetDlgItem(g_hwnd, IDC_WARNING_LBL), SW_SHOW);
 }
 
 /* ---- port list / connect ---- */
@@ -469,6 +509,56 @@ static void ui_refresh_sensor(void) {
     g_sensor_ui_humidity = st->humidity_pct;
 }
 
+/* ---- kill switch ---- */
+
+static bool g_kill_ui_valid;
+static bool g_kill_ui_tripped;
+
+static void ui_refresh_kill_switch(void) {
+    if (g_kill_ui_valid && g_kill_ui_tripped == g_kill_switch_tripped) {
+        return;
+    }
+    if (g_kill_switch_tripped) {
+        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "KILL SWITCH TRIPPED - channels OFF");
+        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), SW_SHOW);
+        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_SHOW);
+    } else {
+        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
+        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
+    }
+    g_kill_ui_valid = true;
+    g_kill_ui_tripped = g_kill_switch_tripped;
+}
+
+/* Manual reset only, by design - see the KILL_SWITCH_THRESHOLD_C comment
+ * up top for why. Call once per timer tick; no-ops once already tripped
+ * or while temperature is unknown/below threshold. */
+static void check_kill_switch(void) {
+    const SensorState *st = sensor_get_state(&g_sensor);
+    int i;
+    char msg[96];
+
+    if (g_kill_switch_tripped) {
+        return;
+    }
+    if (!st->has_reading || st->temperature_c < KILL_SWITCH_THRESHOLD_C) {
+        return;
+    }
+
+    g_kill_switch_tripped = true;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        channel_turn_output_off(i);
+    }
+    wsprintfA(msg, "KILL SWITCH TRIPPED: %d.%d C >= %d C threshold - all channels forced OFF",
+              (int)st->temperature_c, (int)(st->temperature_c * 10) % 10, (int)KILL_SWITCH_THRESHOLD_C);
+    log_add(msg);
+}
+
+static void on_kill_reset_clicked(void) {
+    g_kill_switch_tripped = false;
+    log_add("Kill switch reset by user");
+}
+
 /* ---- channel card UI ---- */
 
 static int channel_mode_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_MODE_OFFSET; }
@@ -587,6 +677,16 @@ static void ui_refresh_channel(int index) {
         return; /* nothing this channel's card shows has changed */
     }
 
+    /* A send just settled (busy true -> false) - log what it applied,
+     * matching sdr_app/sdr_react's TX/RX activity log. Every blind send
+     * ends up "unconfirmed" by design (see channels.h), so that flag
+     * isn't worth repeating on every single line here. */
+    if (cache->valid && cache->busy && !ch->busy) {
+        char log_line[64];
+        wsprintfA(log_line, "CH%d: %s", index + 1, ch->last_command);
+        log_add(log_line);
+    }
+
     status_ctl = GetDlgItem(g_hwnd, channel_status_id(index));
     track = GetDlgItem(g_hwnd, channel_track_id(index));
 
@@ -634,7 +734,7 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    add_panel(hwnd, 10, 6, 335, 138);
+    add_panel(hwnd, 10, 6, 335, 168);
     add_header_icon(hwnd, 22, 14, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 40, 14, 300, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 36, 32, 16, 0);
@@ -650,7 +750,7 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 108, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 106, 70, 100, IDC_PARITY_COMBO);
 
-    add_panel(hwnd, 355, 6, 300, 138);
+    add_panel(hwnd, 355, 6, 300, 168);
     add_header_icon(hwnd, 367, 14, ICON_WAVE);
     add_header(hwnd, "Temp / Humidity Sensor", 385, 14, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 367, 36, 32, 16, 0);
@@ -659,9 +759,17 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 367, 60, 270, 16, IDC_SENSOR_STATUS_LBL);
     add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX, 367, 88, 270, 18, IDC_SENSOR_TEMP_LBL);
     add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 367, 110, 270, 18, IDC_SENSOR_HUMIDITY_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 367, 136, 190, 18, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 563, 134, 80, 22, IDC_KILL_RESET_BTN);
+    ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 665, 6, CLIENT_WIDTH - 665 - 10, 138, IDC_WARNING_LBL);
-    ShowWindow(GetDlgItem(hwnd, IDC_WARNING_LBL), SW_HIDE);
+    add_panel(hwnd, 665, 6, 355, 168);
+    add_header_icon(hwnd, 677, 14, ICON_LIST);
+    add_header(hwnd, "Activity Log", 695, 14, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 949, 12, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
+             677, 36, 333, 130, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -735,6 +843,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ui_refresh_all_channels();
                 sensor_poll(&g_sensor);
                 ui_refresh_sensor();
+                check_kill_switch();
+                ui_refresh_kill_switch();
             }
             return 0;
 
@@ -764,6 +874,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_sensor_connect_clicked();
                 return 0;
             }
+            if (id == IDC_KILL_RESET_BTN && code == BN_CLICKED) {
+                on_kill_reset_clicked();
+                return 0;
+            }
+            if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
+                SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
+                return 0;
+            }
             {
                 int idx;
                 if (channel_index_from_id(id, &idx)) {
@@ -771,13 +889,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     /* Mode selection is local/uncommitted until Set is
                      * clicked - matches the reference apps exactly
                      * (selecting a mode does NOT apply it by itself). */
+                    /* OFF always works, even tripped - turning things off
+                     * is never unsafe. SET/ON are blocked while tripped so
+                     * the kill switch can't be trivially defeated by just
+                     * clicking a channel back on before acknowledging it -
+                     * that's the whole point of "manual reset only". */
                     if (offset == IDC_CH_SET_OFFSET && code == BN_CLICKED) {
-                        int sel = (int)SendDlgItemMessageA(hwnd, channel_mode_id(idx), CB_GETCURSEL, 0, 0);
-                        if (sel >= 0) {
-                            channel_set_mode(idx, (uint8_t)sel);
+                        if (!g_kill_switch_tripped) {
+                            int sel = (int)SendDlgItemMessageA(hwnd, channel_mode_id(idx), CB_GETCURSEL, 0, 0);
+                            if (sel >= 0) {
+                                channel_set_mode(idx, (uint8_t)sel);
+                            }
                         }
                     } else if (offset == IDC_CH_ON_OFFSET && code == BN_CLICKED) {
-                        channel_turn_output_on(idx);
+                        if (!g_kill_switch_tripped) {
+                            channel_turn_output_on(idx);
+                        }
                     } else if (offset == IDC_CH_OFF_OFFSET && code == BN_CLICKED) {
                         channel_turn_output_off(idx);
                     }
@@ -798,7 +925,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                  * same intent as the web reference's slider debounce. */
                 if (LOWORD(wParam) != SB_THUMBTRACK) {
                     int pos = (int)SendMessageA(ctl, TBM_GETPOS, 0, 0);
-                    channel_set_level(idx, pos);
+                    /* Off is always allowed even tripped - same reasoning
+                     * as the OFF button above. */
+                    if (pos == LEVEL_OFF || !g_kill_switch_tripped) {
+                        channel_set_level(idx, pos);
+                    }
                 }
             }
             return 0;
@@ -823,10 +954,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
-            if (ctl == GetDlgItem(hwnd, IDC_WARNING_LBL)) {
-                SetTextColor(hdc, RGB(146, 64, 14));
-                SetBkColor(hdc, RGB(254, 243, 199));
-                return (LRESULT)g_brush_warn;
+            if (ctl == GetDlgItem(hwnd, IDC_KILL_STATUS_LBL)) {
+                SetTextColor(hdc, COLOR_APP_DISCONNECTED);
+                SetBkMode(hdc, TRANSPARENT);
+                return (LRESULT)g_brush_panel;
             }
             if (channel_index_from_id(ctl_id, &idx)) {
                 int offset = (ctl_id - IDC_CH_BASE) % IDC_CH_STRIDE;
@@ -941,7 +1072,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_accent) DeleteObject(g_brush_accent);
             if (g_brush_accent_dis) DeleteObject(g_brush_accent_dis);
             if (g_brush_dot) DeleteObject(g_brush_dot);
-            if (g_brush_warn) DeleteObject(g_brush_warn);
             if (g_brush_connected) DeleteObject(g_brush_connected);
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
             if (g_brush_silver) DeleteObject(g_brush_silver);
@@ -969,7 +1099,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_accent = CreateSolidBrush(COLOR_APP_ACCENT);
     g_brush_accent_dis = CreateSolidBrush(COLOR_APP_ACCENT_DIS);
     g_brush_dot = CreateSolidBrush(COLOR_APP_DOT);
-    g_brush_warn = CreateSolidBrush(RGB(254, 243, 199));
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
     g_brush_silver = CreateSolidBrush(COLOR_APP_SILVER);
