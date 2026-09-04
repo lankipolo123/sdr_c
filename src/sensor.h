@@ -17,7 +17,15 @@
 #include <stdbool.h>
 
 #define SENSOR_SLAVE_ADDR      1
-#define SENSOR_START_REGISTER  2
+/* QModMaster's status bar showed "Base Addr: 1" throughout - its Start
+ * Address field is very likely 1-based display over a 0-based wire
+ * address, meaning its "Start Address: 2" (which worked) actually put
+ * wire address 1 on the bus, not 2. Real hardware testing of address 2
+ * got a 5-byte reply (the exact length of a Modbus exception frame,
+ * i.e. a real "invalid register" answer, not a timeout) - consistent
+ * with this off-by-one theory. Trying 1 here; not yet re-confirmed
+ * against real hardware. */
+#define SENSOR_START_REGISTER  1
 #define SENSOR_REGISTER_COUNT  2
 #define SENSOR_RESPONSE_TIMEOUT_MS 500
 #define SENSOR_POLL_INTERVAL_MS    3000 /* temperature doesn't change fast */
