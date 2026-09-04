@@ -17,7 +17,7 @@
 #include "channels.h"
 
 #define CLIENT_WIDTH  1030
-#define CLIENT_HEIGHT 710
+#define CLIENT_HEIGHT 780
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -56,7 +56,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 #define GRID_COLS 4
 #define GRID_ROWS 4
 #define CARD_W 246
-#define CARD_H 130
+#define CARD_H 146
 #define CARD_GAP 8
 #define GRID_LEFT 10
 #define GRID_TOP 152
@@ -380,9 +380,9 @@ static bool channel_index_from_id(int id, int *out_idx) {
     return true;
 }
 
-/* Card layout mirrors the sdr_react/sdr_app channel-card pattern: a left
- * column (Mode combo + Set button, ON/OFF power buttons, status line) and
- * a right column (vertical level trackbar + High/Medium/Low/Off labels). */
+/* Card layout: a left column (Mode combo + Set button, ON/OFF power
+ * buttons, status line), then a full-width horizontal level trackbar
+ * with Off/Low/Medium/High labels underneath it. */
 static void add_channel_card(HWND hwnd, int index) {
     int col = index % GRID_COLS;
     int row = index / GRID_COLS;
@@ -418,29 +418,27 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
              x + 8, y + 78, 146, 16, channel_status_id(index));
 
-    /* Right column: vertical level trackbar (min at bottom, like a
-     * volume slider) + tick labels, matching the web reference's
-     * vertical level-slider + level-labels pair. */
-    /* A plain vertical trackbar puts its minimum at the TOP and maximum
-     * at the BOTTOM - the opposite of the "High on top, Off on bottom"
-     * layout the label stack below uses (matching the web reference's
-     * volume-slider-style orientation). Rather than rely on
-     * TBS_DOWNISLEFT (unreliable across comctl32/Wine versions), the
-     * native position is just kept inverted from the level everywhere
-     * it's read or set: nativePos = 3 - level. */
+    /* Horizontal level trackbar spanning the card width, below the
+     * status line, with Off/Low/Medium/High labels in a row underneath
+     * it left-to-right - a plain horizontal trackbar already puts its
+     * minimum at the left and maximum at the right, so no inversion
+     * hack is needed here the way the earlier vertical layout required. */
     track = CreateWindowExA(0, TRACKBAR_CLASSA, NULL,
-                             WS_CHILD | WS_VISIBLE | TBS_VERT | TBS_NOTICKS,
-                             x + 164, y + 26, 26, 88, hwnd,
+                             WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
+                             x + 8, y + 100, CARD_W - 16, 22, hwnd,
                              (HMENU)(INT_PTR)channel_track_id(index), g_hinst, NULL);
     if (track) {
         SendMessageA(track, TBM_SETRANGE, TRUE, MAKELPARAM(0, 3));
-        SendMessageA(track, TBM_SETPOS, TRUE, 3 - LEVEL_OFF);
+        SendMessageA(track, TBM_SETPOS, TRUE, LEVEL_OFF);
     }
 
-    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 194, y + 26, 44, 16, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 194, y + 48, 44, 16, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 194, y + 70, 44, 16, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 194, y + 92, 44, 16, channel_lbl_off_id(index));
+    {
+        int lbl_w = (CARD_W - 16) / 4;
+        add_ctrl(hwnd, "STATIC", "Off",    SS_CENTER | SS_NOPREFIX, x + 8 + 0 * lbl_w, y + 124, lbl_w, 16, channel_lbl_off_id(index));
+        add_ctrl(hwnd, "STATIC", "Low",    SS_CENTER | SS_NOPREFIX, x + 8 + 1 * lbl_w, y + 124, lbl_w, 16, channel_lbl_low_id(index));
+        add_ctrl(hwnd, "STATIC", "Medium", SS_CENTER | SS_NOPREFIX, x + 8 + 2 * lbl_w, y + 124, lbl_w, 16, channel_lbl_medium_id(index));
+        add_ctrl(hwnd, "STATIC", "High",   SS_CENTER | SS_NOPREFIX, x + 8 + 3 * lbl_w, y + 124, lbl_w, 16, channel_lbl_high_id(index));
+    }
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -489,7 +487,7 @@ static void ui_refresh_channel(int index) {
 
     /* Don't fight the user mid-drag. */
     if (GetFocus() != track) {
-        SendMessageA(track, TBM_SETPOS, TRUE, 3 - ch->level);
+        SendMessageA(track, TBM_SETPOS, TRUE, ch->level);
     }
 
     InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
@@ -651,7 +649,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
-        case WM_VSCROLL: {
+        case WM_HSCROLL: {
             HWND ctl = (HWND)lParam;
             int id = ctl ? GetDlgCtrlID(ctl) : -1;
             int idx;
@@ -662,7 +660,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                  * same intent as the web reference's slider debounce. */
                 if (LOWORD(wParam) != SB_THUMBTRACK) {
                     int pos = (int)SendMessageA(ctl, TBM_GETPOS, 0, 0);
-                    channel_set_level(idx, 3 - pos);
+                    channel_set_level(idx, pos);
                 }
             }
             return 0;
