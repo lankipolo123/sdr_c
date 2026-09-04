@@ -5,8 +5,11 @@
  * device.c's wait-for-ACK model. See channels.h for why.
  *
  * No Qt, no pywebview, no vendor DLL - just user32/gdi32/kernel32/advapi32,
- * same as the single-channel app.
+ * same as the single-channel app (plus msimg32 for GradientFill, used by
+ * the temperature gauge).
  */
+#define _WIN32_WINNT 0x0600 /* Vista+ - needed so windows.h declares
+                              * GradientFill/TRIVERTEX/GRADIENT_RECT */
 #include <windows.h>
 #include <commctrl.h>
 #include <stdint.h>
@@ -17,8 +20,8 @@
 #include "channels.h"
 #include "sensor.h"
 
-#define CLIENT_WIDTH  1030
-#define CLIENT_HEIGHT 728
+#define CLIENT_WIDTH  1373
+#define CLIENT_HEIGHT 560
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -70,8 +73,11 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 #define CARD_W 246
 #define CARD_H 130
 #define CARD_GAP 8
-#define GRID_LEFT 10
-#define GRID_TOP 170
+#define GRID_LEFT 355
+#define GRID_TOP 6
+
+#define SIDEBAR_X 10
+#define SIDEBAR_W 335
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
@@ -298,6 +304,137 @@ static void draw_dot_grid(HDC hdc, const RECT *rc) {
     }
 }
 
+/* ---- temperature gauge ----
+ * A horizontal gradient scale (not a fill-to-value bar): the full track
+ * always shows the whole 0-GAUGE_MAX_C color range, white -> green ->
+ * blue -> orange -> red, and a thin marker line shows where the current
+ * reading sits on it. Matches the confirmed bands: 0-19 white, 20-39
+ * green, 40-55 blue, 56-65 orange, 66+ red - the gradient stops sit at
+ * each band's midpoint so the color sweep reads smoothly rather than in
+ * hard steps. */
+#define GAUGE_MAX_C 80.0f
+#define GAUGE_STOP_COUNT 5
+
+static const float GAUGE_STOP_TEMPS[GAUGE_STOP_COUNT] = { 0.0f, 20.0f, 48.0f, 61.0f, 80.0f };
+
+static COLORREF gauge_stop_color(int i) {
+    switch (i) {
+        case 0: return RGB(255, 255, 255); /* white - freezing */
+        case 1: return COLOR_APP_CONNECTED; /* green - low */
+        case 2: return RGB(58, 133, 224);   /* blue */
+        case 3: return RGB(224, 146, 34);   /* orange */
+        default: return COLOR_APP_DISCONNECTED; /* red - hot */
+    }
+}
+
+/* Which of the 5 confirmed bands a reading falls in - used to color the
+ * position marker and the numeric readout beside the gauge, matching the
+ * gradient it sits on. */
+static COLORREF temp_band_color(float temp_c) {
+    if (temp_c < 20.0f) return RGB(255, 255, 255);
+    if (temp_c < 40.0f) return COLOR_APP_CONNECTED;
+    if (temp_c < 56.0f) return RGB(58, 133, 224);
+    if (temp_c < 66.0f) return RGB(224, 146, 34);
+    return COLOR_APP_DISCONNECTED;
+}
+
+static void gradient_fill_h(HDC hdc, int x0, int x1, int y0, int y1, COLORREF c0, COLORREF c1) {
+    TRIVERTEX v[2];
+    GRADIENT_RECT gr;
+
+    if (x1 <= x0) {
+        return;
+    }
+
+    v[0].x = x0; v[0].y = y0;
+    v[0].Red   = (COLOR16)(GetRValue(c0) << 8);
+    v[0].Green = (COLOR16)(GetGValue(c0) << 8);
+    v[0].Blue  = (COLOR16)(GetBValue(c0) << 8);
+    v[0].Alpha = 0;
+
+    v[1].x = x1; v[1].y = y1;
+    v[1].Red   = (COLOR16)(GetRValue(c1) << 8);
+    v[1].Green = (COLOR16)(GetGValue(c1) << 8);
+    v[1].Blue  = (COLOR16)(GetBValue(c1) << 8);
+    v[1].Alpha = 0;
+
+    gr.UpperLeft = 0;
+    gr.LowerRight = 1;
+    GradientFill(hdc, v, 2, &gr, 1, GRADIENT_FILL_RECT_H);
+}
+
+static LRESULT CALLBACK gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        const SensorState *st;
+        int i;
+        int w;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        w = rc.right - rc.left;
+
+        /* Gradient stops mapped from temperature-space to pixel-space,
+         * drawn as GAUGE_STOP_COUNT-1 back-to-back two-color segments -
+         * GradientFill only interpolates between 2 colors per call, so a
+         * multi-color sweep is just several of those in a row. */
+        for (i = 0; i + 1 < GAUGE_STOP_COUNT; i++) {
+            int x0 = rc.left + (int)(GAUGE_STOP_TEMPS[i] / GAUGE_MAX_C * w);
+            int x1 = rc.left + (int)(GAUGE_STOP_TEMPS[i + 1] / GAUGE_MAX_C * w);
+            gradient_fill_h(hdc, x0, x1, rc.top, rc.bottom,
+                             gauge_stop_color(i), gauge_stop_color(i + 1));
+        }
+
+        st = sensor_get_state(&g_sensor);
+        if (st->has_reading) {
+            float t = st->temperature_c;
+            int marker_x;
+            HPEN pen, old_pen;
+
+            if (t < 0.0f) t = 0.0f;
+            if (t > GAUGE_MAX_C) t = GAUGE_MAX_C;
+            marker_x = rc.left + (int)(t / GAUGE_MAX_C * w);
+
+            pen = CreatePen(PS_SOLID, 2, RGB(20, 20, 22));
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            MoveToEx(hdc, marker_x, rc.top, NULL);
+            LineTo(hdc, marker_x, rc.bottom);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+
+        {
+            HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            HPEN old_pen = (HPEN)SelectObject(hdc, pen);
+            HBRUSH old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_gauge(HWND parent, int x, int y, int w, int h, int id) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, id);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)gauge_subclass_proc);
+    }
+    return ctrl;
+}
+
 /* ---- activity log ---- */
 
 static void log_add(const char *message) {
@@ -481,12 +618,14 @@ static void ui_refresh_sensor(void) {
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
 
     if (st->has_reading) {
-        wsprintfA(text, "Temp: %d.%d C",
+        wsprintfA(text, "%d.%d C",
                   (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
     } else {
-        lstrcpynA(text, "Temp: -", (int)sizeof(text));
+        lstrcpynA(text, "-", (int)sizeof(text));
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
+    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_GAUGE), NULL, FALSE);
 
     if (st->has_reading) {
         wsprintfA(text, "Humidity: %d.%d %%",
@@ -519,7 +658,7 @@ static void ui_refresh_kill_switch(void) {
         return;
     }
     if (g_kill_switch_tripped) {
-        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "KILL SWITCH TRIPPED - channels OFF");
+        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "KILL SWITCH TRIPPED");
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), SW_SHOW);
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_SHOW);
     } else {
@@ -804,7 +943,7 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    add_panel(hwnd, 10, 6, 335, 156);
+    add_panel(hwnd, SIDEBAR_X, 6, SIDEBAR_W, 156);
     add_header_icon(hwnd, 22, 14, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 40, 14, 300, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 36, 32, 16, 0);
@@ -820,26 +959,32 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 108, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 106, 70, 100, IDC_PARITY_COMBO);
 
-    add_panel(hwnd, 355, 6, 300, 156);
-    add_header_icon(hwnd, 367, 14, ICON_WAVE);
-    add_header(hwnd, "Temp / Humidity Sensor", 385, 14, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 367, 36, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 401, 34, 112, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 519, 34, 66, 22, IDC_SENSOR_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 367, 60, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX, 367, 84, 270, 18, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 367, 104, 270, 18, IDC_SENSOR_HUMIDITY_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 367, 124, 190, 18, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 563, 122, 80, 22, IDC_KILL_RESET_BTN);
+    /* Sidebar: Connection & Settings (above), Temp/Humidity Sensor, then
+     * Activity Log, all stacked in one left-hand column - main content
+     * (the channel grid) is to the right, matching the app's request for
+     * a sidebar + main-content split instead of 3 panels across the top. */
+    add_panel(hwnd, SIDEBAR_X, 170, SIDEBAR_W, 156);
+    add_header_icon(hwnd, 22, 178, ICON_WAVE);
+    add_header(hwnd, "Temp / Humidity Sensor", 40, 178, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 200, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 198, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 198, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 198, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 222, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 244, 230, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 258, 244, 60, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 268, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 292, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 290, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_panel(hwnd, 665, 6, 355, 156);
-    add_header_icon(hwnd, 677, 14, ICON_LIST);
-    add_header(hwnd, "Activity Log", 695, 14, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 949, 12, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_panel(hwnd, SIDEBAR_X, 334, SIDEBAR_W, 216);
+    add_header_icon(hwnd, 22, 342, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 342, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 277, 340, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             677, 36, 333, 118, IDC_LOG_LISTBOX);
+             22, 364, 311, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -941,6 +1086,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_connect_clicked();
                 return 0;
             }
+            if (id == IDC_SENSOR_REFRESH_BTN && code == BN_CLICKED) {
+                refresh_sensor_port_list();
+                return 0;
+            }
             if (id == IDC_SENSOR_CONNECT_BTN && code == BN_CLICKED) {
                 on_sensor_connect_clicked();
                 return 0;
@@ -1023,6 +1172,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                              : st->online ? COLOR_APP_CONNECTED
                              : COLOR_APP_ACCENT;
                 SetTextColor(hdc, col);
+                SetBkMode(hdc, TRANSPARENT);
+                return (LRESULT)g_brush_panel;
+            }
+            if (ctl == GetDlgItem(hwnd, IDC_SENSOR_TEMP_LBL)) {
+                const SensorState *st = sensor_get_state(&g_sensor);
+                SetTextColor(hdc, st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
