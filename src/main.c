@@ -728,6 +728,76 @@ static void ui_refresh_all_channels(void) {
     }
 }
 
+/* ---- saved settings (port/baud/parity/data bits selections only - never
+ * channel states or the kill switch, and never auto-connects anything.
+ * A restart should never silently re-enable RF output on its own; it
+ * just saves you re-picking the same COM port and baud every launch.
+ * Stored next to the exe as a plain .ini, matching this app's
+ * portable/no-installer approach - not AppData. ---- */
+
+static void get_ini_path(char *path /* at least MAX_PATH + 8 bytes */) {
+    char *dot;
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    dot = strrchr(path, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+    lstrcatA(path, ".ini");
+}
+
+static void select_combo_by_text(HWND combo, const char *text) {
+    int idx = (int)SendMessageA(combo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)text);
+    if (idx != CB_ERR) {
+        SendMessageA(combo, CB_SETCURSEL, idx, 0);
+    }
+}
+
+static void save_settings(void) {
+    char path[MAX_PATH + 8];
+    char buf[32];
+
+    get_ini_path(path);
+
+    GetDlgItemTextA(g_hwnd, IDC_PORT_COMBO, buf, sizeof(buf));
+    WritePrivateProfileStringA("RS422", "Port", buf, path);
+    GetDlgItemTextA(g_hwnd, IDC_BAUD_COMBO, buf, sizeof(buf));
+    WritePrivateProfileStringA("RS422", "Baud", buf, path);
+    GetDlgItemTextA(g_hwnd, IDC_DATABITS_COMBO, buf, sizeof(buf));
+    WritePrivateProfileStringA("RS422", "DataBits", buf, path);
+    GetDlgItemTextA(g_hwnd, IDC_PARITY_COMBO, buf, sizeof(buf));
+    WritePrivateProfileStringA("RS422", "Parity", buf, path);
+
+    GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, buf, sizeof(buf));
+    WritePrivateProfileStringA("Sensor", "Port", buf, path);
+}
+
+/* Call after build_controls() has populated every combo's item list -
+ * this only ever picks an existing item by matching text, never adds
+ * one, so a saved port that's no longer plugged in just falls back to
+ * whatever refresh_port_list() already defaulted to. */
+static void load_settings(void) {
+    char path[MAX_PATH + 8];
+    char buf[32];
+
+    get_ini_path(path);
+
+    if (GetPrivateProfileStringA("RS422", "Port", "", buf, sizeof(buf), path) > 0) {
+        select_combo_by_text(GetDlgItem(g_hwnd, IDC_PORT_COMBO), buf);
+    }
+    if (GetPrivateProfileStringA("RS422", "Baud", "", buf, sizeof(buf), path) > 0) {
+        select_combo_by_text(GetDlgItem(g_hwnd, IDC_BAUD_COMBO), buf);
+    }
+    if (GetPrivateProfileStringA("RS422", "DataBits", "", buf, sizeof(buf), path) > 0) {
+        select_combo_by_text(GetDlgItem(g_hwnd, IDC_DATABITS_COMBO), buf);
+    }
+    if (GetPrivateProfileStringA("RS422", "Parity", "", buf, sizeof(buf), path) > 0) {
+        select_combo_by_text(GetDlgItem(g_hwnd, IDC_PARITY_COMBO), buf);
+    }
+    if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) > 0) {
+        select_combo_by_text(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), buf);
+    }
+}
+
 /* ---- layout ---- */
 
 static void build_controls(HWND hwnd) {
@@ -821,6 +891,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             build_controls(hwnd);
             refresh_port_list();
             refresh_sensor_port_list();
+            load_settings();
 
             memset(&ccb, 0, sizeof(ccb));
             ccb.on_connected_changed = conn_on_connected_changed;
@@ -1059,6 +1130,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         case WM_DESTROY:
+            save_settings();
             KillTimer(hwnd, ID_POLL_TIMER);
             if (conn_is_connected(&g_conn)) {
                 conn_disconnect(&g_conn);
