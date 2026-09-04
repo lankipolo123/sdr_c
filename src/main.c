@@ -18,7 +18,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1030
-#define CLIENT_HEIGHT 740
+#define CLIENT_HEIGHT 728
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -71,7 +71,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 #define CARD_H 130
 #define CARD_GAP 8
 #define GRID_LEFT 10
-#define GRID_TOP 182
+#define GRID_TOP 170
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
@@ -804,7 +804,7 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    add_panel(hwnd, 10, 6, 335, 168);
+    add_panel(hwnd, 10, 6, 335, 156);
     add_header_icon(hwnd, 22, 14, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 40, 14, 300, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 36, 32, 16, 0);
@@ -820,26 +820,26 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 108, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 106, 70, 100, IDC_PARITY_COMBO);
 
-    add_panel(hwnd, 355, 6, 300, 168);
+    add_panel(hwnd, 355, 6, 300, 156);
     add_header_icon(hwnd, 367, 14, ICON_WAVE);
     add_header(hwnd, "Temp / Humidity Sensor", 385, 14, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 367, 36, 32, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 401, 34, 112, 160, IDC_SENSOR_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 519, 34, 66, 22, IDC_SENSOR_CONNECT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 367, 60, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX, 367, 88, 270, 18, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 367, 110, 270, 18, IDC_SENSOR_HUMIDITY_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 367, 136, 190, 18, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 563, 134, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX, 367, 84, 270, 18, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 367, 104, 270, 18, IDC_SENSOR_HUMIDITY_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 367, 124, 190, 18, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 563, 122, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_panel(hwnd, 665, 6, 355, 168);
+    add_panel(hwnd, 665, 6, 355, 156);
     add_header_icon(hwnd, 677, 14, ICON_LIST);
     add_header(hwnd, "Activity Log", 695, 14, 200, 18);
     add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 949, 12, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             677, 36, 333, 130, IDC_LOG_LISTBOX);
+             677, 36, 333, 118, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
