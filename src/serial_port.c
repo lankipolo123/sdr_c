@@ -40,6 +40,15 @@ bool serial_open(SerialPort *sp, const char *port_name, DWORD baud, char parity,
     dcb.fBinary = TRUE;
     dcb.fParity = (dcb.Parity != NOPARITY);
 
+    /* Explicitly set rather than leaving whatever GetCommState() read as
+     * the port's prior/driver-default state. Matters most for RS-485
+     * USB adapters that use RTS as a transmit/receive direction switch:
+     * an inherited "stuck asserted" RTS can leave the adapter latched in
+     * transmit mode, so requests go out fine but it never listens for a
+     * reply - indistinguishable from a dead sensor without this fix. */
+    dcb.fRtsControl = RTS_CONTROL_DISABLE;
+    dcb.fDtrControl = DTR_CONTROL_ENABLE;
+
     if (!SetCommState(sp->handle, &dcb)) {
         CloseHandle(sp->handle);
         sp->handle = INVALID_HANDLE_VALUE;
