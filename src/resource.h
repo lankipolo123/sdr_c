@@ -12,6 +12,12 @@
 
 #define IDC_WARNING_LBL      1008
 
+#define IDC_SENSOR_PORT_COMBO    1010
+#define IDC_SENSOR_CONNECT_BTN   1011
+#define IDC_SENSOR_STATUS_LBL    1012
+#define IDC_SENSOR_TEMP_LBL      1013
+#define IDC_SENSOR_HUMIDITY_LBL  1014
+
 #define ID_POLL_TIMER        1
 
 /* Each of the 16 channel cards gets its controls at

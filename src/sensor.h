@@ -1,0 +1,64 @@
+/* XY-MD02 temperature/humidity sensor over Modbus RTU, on its own COM
+ * port completely independent of the RS-422 channel control connection.
+ *
+ * Unlike channels.c's blind send (fire once, apply optimistically), a
+ * register read genuinely needs the reply - there's no value to show
+ * without it - so this waits for a real response, same shape as the
+ * single-channel app's device.c. Still non-blocking / no threads: driven
+ * off the same WM_TIMER tick as the rest of this app, one send in flight
+ * at a time.
+ *
+ * Settings confirmed against the real hardware via QModMaster (see
+ * PLAN_temp_sensor.md) - not guessed: slave address 1, function 0x04,
+ * registers 2 (temperature) and 3 (humidity), both raw/10.
+ */
+#pragma once
+#include "serial_port.h"
+#include <stdbool.h>
+
+#define SENSOR_SLAVE_ADDR      1
+#define SENSOR_START_REGISTER  2
+#define SENSOR_REGISTER_COUNT  2
+#define SENSOR_RESPONSE_TIMEOUT_MS 500
+#define SENSOR_POLL_INTERVAL_MS    3000 /* temperature doesn't change fast */
+
+typedef struct {
+    bool connected;
+    bool online;       /* true once a request has actually gotten a valid reply */
+    bool has_reading;  /* false until a real reading has confirmed a value -
+                         * the UI shows "-" rather than a guessed default
+                         * until this is true, same rule used elsewhere in
+                         * this app family. */
+    float temperature_c;
+    float humidity_pct;
+} SensorState;
+
+typedef struct Sensor Sensor;
+
+void sensor_init(Sensor *s);
+bool sensor_connect(Sensor *s, const char *port_name, DWORD baud, char parity, uint8_t data_bits);
+void sensor_disconnect(Sensor *s);
+bool sensor_is_connected(const Sensor *s);
+const SensorState *sensor_get_state(const Sensor *s);
+
+/* Non-blocking: call every timer tick. Advances the send/wait state
+ * machine and applies a completed reading (or marks offline on
+ * timeout/error) - never blocks waiting on the port. */
+void sensor_poll(Sensor *s);
+
+/* Full definition here (not opaque) so callers can declare a plain
+ * static Sensor, same as Connection's style in this app - callers should
+ * still only touch it through the functions above. */
+struct Sensor {
+    SerialPort port;
+    bool connected;
+
+    enum { SENSOR_POLL_IDLE, SENSOR_POLL_WAITING } poll_state;
+    DWORD next_poll_at;       /* GetTickCount() deadline, valid when idle */
+    DWORD response_deadline;  /* GetTickCount() deadline, valid when waiting */
+
+    uint8_t rx_buf[64];
+    uint16_t rx_len;
+
+    SensorState state;
+};

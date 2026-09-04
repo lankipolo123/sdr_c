@@ -15,6 +15,7 @@
 #include "resource.h"
 #include "connection.h"
 #include "channels.h"
+#include "sensor.h"
 
 #define CLIENT_WIDTH  1030
 #define CLIENT_HEIGHT 780
@@ -78,6 +79,7 @@ static HBRUSH g_brush_disconnected;
 static HBRUSH g_brush_silver;
 
 static Connection g_conn;
+static Sensor g_sensor;
 
 /* ---- small control-creation helper ---- */
 
@@ -351,6 +353,112 @@ static void on_connect_clicked(void) {
     conn_connect(&g_conn, port, (DWORD)baud, parity, (uint8_t)databits);
 }
 
+/* ---- temp/humidity sensor UI ----
+ * Separate Port/Connect controls from the RS-422 side above - this is a
+ * second, independent serial connection. Baud/parity/data bits aren't
+ * user-editable here: they're fixed at the values confirmed against the
+ * real XY-MD02 sensor (9600 8N1), so there's nothing to expose that would
+ * ever need changing - fewer knobs, matching the "user friendly" ask. */
+#define SENSOR_BAUD 9600
+#define SENSOR_PARITY 'N'
+#define SENSOR_DATABITS 8
+
+static void refresh_sensor_port_list(void) {
+    char names[32][16];
+    int n, i;
+    HWND combo = GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO);
+
+    SendMessageA(combo, CB_RESETCONTENT, 0, 0);
+    n = serial_list_ports(names, 32);
+    for (i = 0; i < n; i++) {
+        SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)names[i]);
+    }
+    if (n > 0) {
+        SendMessageA(combo, CB_SETCURSEL, 0, 0);
+    }
+}
+
+static void on_sensor_connect_clicked(void) {
+    char port[16];
+
+    if (sensor_is_connected(&g_sensor)) {
+        sensor_disconnect(&g_sensor);
+        return;
+    }
+
+    if (GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, port, sizeof(port)) == 0) {
+        MessageBoxA(g_hwnd, "Select a port first", "No port", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    if (!sensor_connect(&g_sensor, port, SENSOR_BAUD, SENSOR_PARITY, SENSOR_DATABITS)) {
+        char msg[128];
+        wsprintfA(msg, "Failed to open %s", port);
+        ui_show_warning(msg);
+    }
+}
+
+/* Cached last-shown values so the 100ms poll tick only touches the
+ * controls when something actually changed - the multi-channel cards
+ * originally force-redrew unconditionally every tick and that caused
+ * visible flicker; this panel is built with the fix in from the start. */
+static bool g_sensor_ui_valid;
+static bool g_sensor_ui_connected;
+static bool g_sensor_ui_online;
+static bool g_sensor_ui_has_reading;
+static float g_sensor_ui_temp;
+static float g_sensor_ui_humidity;
+
+static void ui_refresh_sensor(void) {
+    const SensorState *st = sensor_get_state(&g_sensor);
+    bool connected = sensor_is_connected(&g_sensor);
+    char text[64];
+
+    if (g_sensor_ui_valid && g_sensor_ui_connected == connected &&
+        g_sensor_ui_online == st->online && g_sensor_ui_has_reading == st->has_reading &&
+        g_sensor_ui_temp == st->temperature_c && g_sensor_ui_humidity == st->humidity_pct) {
+        return; /* nothing shown by this panel has changed */
+    }
+
+    if (!connected) {
+        lstrcpynA(text, "Disconnected", (int)sizeof(text));
+    } else if (st->online) {
+        lstrcpynA(text, "Online", (int)sizeof(text));
+    } else if (st->has_reading) {
+        lstrcpynA(text, "Not responding", (int)sizeof(text));
+    } else {
+        lstrcpynA(text, "Reading...", (int)sizeof(text));
+    }
+    SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
+    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
+
+    if (st->has_reading) {
+        wsprintfA(text, "Temp: %d.%d C",
+                  (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
+    } else {
+        lstrcpynA(text, "Temp: -", (int)sizeof(text));
+    }
+    SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
+
+    if (st->has_reading) {
+        wsprintfA(text, "Humidity: %d.%d %%",
+                  (int)st->humidity_pct, (int)(st->humidity_pct * 10) % 10);
+    } else {
+        lstrcpynA(text, "Humidity: -", (int)sizeof(text));
+    }
+    SetDlgItemTextA(g_hwnd, IDC_SENSOR_HUMIDITY_LBL, text);
+
+    EnableWindow(GetDlgItem(g_hwnd, IDC_SENSOR_CONNECT_BTN), TRUE);
+    SetWindowTextA(GetDlgItem(g_hwnd, IDC_SENSOR_CONNECT_BTN), connected ? "Disconnect" : "Connect");
+
+    g_sensor_ui_valid = true;
+    g_sensor_ui_connected = connected;
+    g_sensor_ui_online = st->online;
+    g_sensor_ui_has_reading = st->has_reading;
+    g_sensor_ui_temp = st->temperature_c;
+    g_sensor_ui_humidity = st->humidity_pct;
+}
+
 /* ---- channel card UI ---- */
 
 static int channel_mode_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_MODE_OFFSET; }
@@ -532,7 +640,17 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 108, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 106, 70, 100, IDC_PARITY_COMBO);
 
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 355, 6, CLIENT_WIDTH - 355 - 10, 138, IDC_WARNING_LBL);
+    add_panel(hwnd, 355, 6, 300, 138);
+    add_header_icon(hwnd, 367, 14, ICON_WAVE);
+    add_header(hwnd, "Temp / Humidity Sensor", 385, 14, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 367, 36, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 401, 34, 112, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 519, 34, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 367, 60, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX, 367, 88, 270, 18, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 367, 110, 270, 18, IDC_SENSOR_HUMIDITY_LBL);
+
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 665, 6, CLIENT_WIDTH - 665 - 10, 138, IDC_WARNING_LBL);
     ShowWindow(GetDlgItem(hwnd, IDC_WARNING_LBL), SW_HIDE);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
@@ -584,6 +702,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             build_controls(hwnd);
             refresh_port_list();
+            refresh_sensor_port_list();
 
             memset(&ccb, 0, sizeof(ccb));
             ccb.on_connected_changed = conn_on_connected_changed;
@@ -591,9 +710,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ccb.on_error = conn_on_error;
             conn_init(&g_conn, ccb);
             channels_init(&g_conn);
+            sensor_init(&g_sensor);
 
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
             ui_refresh_all_channels();
+            ui_refresh_sensor();
             return 0;
         }
 
@@ -602,6 +723,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 conn_poll(&g_conn);
                 channels_poll();
                 ui_refresh_all_channels();
+                sensor_poll(&g_sensor);
+                ui_refresh_sensor();
             }
             return 0;
 
@@ -620,10 +743,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             if (id == IDC_REFRESH_BTN && code == BN_CLICKED) {
                 refresh_port_list();
+                refresh_sensor_port_list();
                 return 0;
             }
             if (id == IDC_CONNECT_BTN && code == BN_CLICKED) {
                 on_connect_clicked();
+                return 0;
+            }
+            if (id == IDC_SENSOR_CONNECT_BTN && code == BN_CLICKED) {
+                on_sensor_connect_clicked();
                 return 0;
             }
             {
@@ -673,6 +801,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             int idx;
             if (ctl == GetDlgItem(hwnd, IDC_CONN_STATUS_LBL)) {
                 SetTextColor(hdc, conn_is_connected(&g_conn) ? COLOR_APP_CONNECTED : COLOR_APP_DISCONNECTED);
+                SetBkMode(hdc, TRANSPARENT);
+                return (LRESULT)g_brush_panel;
+            }
+            if (ctl == GetDlgItem(hwnd, IDC_SENSOR_STATUS_LBL)) {
+                const SensorState *st = sensor_get_state(&g_sensor);
+                COLORREF col = !sensor_is_connected(&g_sensor) ? COLOR_APP_DISCONNECTED
+                             : st->online ? COLOR_APP_CONNECTED
+                             : COLOR_APP_ACCENT;
+                SetTextColor(hdc, col);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
@@ -784,6 +921,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             KillTimer(hwnd, ID_POLL_TIMER);
             if (conn_is_connected(&g_conn)) {
                 conn_disconnect(&g_conn);
+            }
+            if (sensor_is_connected(&g_sensor)) {
+                sensor_disconnect(&g_sensor);
             }
             if (g_brush_panel) DeleteObject(g_brush_panel);
             if (g_brush_page) DeleteObject(g_brush_page);
