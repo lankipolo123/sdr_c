@@ -965,7 +965,7 @@ static void build_controls(HWND hwnd) {
      * a sidebar + main-content split instead of 3 panels across the top. */
     add_panel(hwnd, SIDEBAR_X, 170, SIDEBAR_W, 156);
     add_header_icon(hwnd, 22, 178, ICON_WAVE);
-    add_header(hwnd, "Temp / Humidity Sensor", 40, 178, 260, 18);
+    add_header(hwnd, "Amplifier Temperature", 40, 178, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 200, 32, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 198, 90, 160, IDC_SENSOR_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 198, 56, 22, IDC_SENSOR_REFRESH_BTN);
