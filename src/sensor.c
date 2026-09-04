@@ -27,6 +27,8 @@ bool sensor_connect(Sensor *s, const char *port_name, DWORD baud, char parity, u
     s->state.online = false;
     s->state.has_reading = false;
     s->state.connected = true;
+    s->state.attempt_count = 0;
+    s->state.last_rx_len = 0;
     return true;
 }
 
@@ -41,6 +43,8 @@ void sensor_disconnect(Sensor *s) {
     s->state.connected = false;
     s->state.online = false;
     s->state.has_reading = false;
+    s->state.attempt_count = 0;
+    s->state.last_rx_len = 0;
 }
 
 bool sensor_is_connected(const Sensor *s) {
@@ -55,6 +59,7 @@ static void sensor_send_request(Sensor *s) {
     ModbusFrame frame;
     modbus_build_read_input_registers(&frame, SENSOR_SLAVE_ADDR, SENSOR_START_REGISTER, SENSOR_REGISTER_COUNT);
     s->rx_len = 0;
+    s->state.attempt_count++;
     if (!serial_write(&s->port, frame.data, frame.len, NULL)) {
         /* Couldn't even send - try again next interval rather than
          * spinning immediately. */
@@ -68,6 +73,7 @@ static void sensor_send_request(Sensor *s) {
 }
 
 static void sensor_finish_cycle(Sensor *s, bool got_valid_reply) {
+    s->state.last_rx_len = s->rx_len;
     s->rx_len = 0;
     s->poll_state = SENSOR_POLL_IDLE;
     s->next_poll_at = GetTickCount() + SENSOR_POLL_INTERVAL_MS;

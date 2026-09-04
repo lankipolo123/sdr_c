@@ -408,6 +408,8 @@ static bool g_sensor_ui_online;
 static bool g_sensor_ui_has_reading;
 static float g_sensor_ui_temp;
 static float g_sensor_ui_humidity;
+static int g_sensor_ui_attempt_count;
+static uint16_t g_sensor_ui_last_rx_len;
 
 static void ui_refresh_sensor(void) {
     const SensorState *st = sensor_get_state(&g_sensor);
@@ -416,7 +418,8 @@ static void ui_refresh_sensor(void) {
 
     if (g_sensor_ui_valid && g_sensor_ui_connected == connected &&
         g_sensor_ui_online == st->online && g_sensor_ui_has_reading == st->has_reading &&
-        g_sensor_ui_temp == st->temperature_c && g_sensor_ui_humidity == st->humidity_pct) {
+        g_sensor_ui_temp == st->temperature_c && g_sensor_ui_humidity == st->humidity_pct &&
+        g_sensor_ui_attempt_count == st->attempt_count && g_sensor_ui_last_rx_len == st->last_rx_len) {
         return; /* nothing shown by this panel has changed */
     }
 
@@ -425,9 +428,14 @@ static void ui_refresh_sensor(void) {
     } else if (st->online) {
         lstrcpynA(text, "Online", (int)sizeof(text));
     } else if (st->has_reading) {
-        lstrcpynA(text, "Not responding", (int)sizeof(text));
+        wsprintfA(text, "Not responding (try %d, last %d B)", st->attempt_count, st->last_rx_len);
     } else {
-        lstrcpynA(text, "Reading...", (int)sizeof(text));
+        /* Diagnostic counts shown even on the very first attempt, so a
+         * stuck "Reading..." is debuggable without extra tools: 0 bytes
+         * back after several tries means nothing is answering at all
+         * (wiring/adapter/settings), while >0 bytes means something
+         * replied but didn't parse as a valid Modbus frame. */
+        wsprintfA(text, "Reading... (try %d, last %d B)", st->attempt_count, st->last_rx_len);
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
@@ -455,6 +463,8 @@ static void ui_refresh_sensor(void) {
     g_sensor_ui_connected = connected;
     g_sensor_ui_online = st->online;
     g_sensor_ui_has_reading = st->has_reading;
+    g_sensor_ui_attempt_count = st->attempt_count;
+    g_sensor_ui_last_rx_len = st->last_rx_len;
     g_sensor_ui_temp = st->temperature_c;
     g_sensor_ui_humidity = st->humidity_pct;
 }

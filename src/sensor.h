@@ -31,6 +31,14 @@ typedef struct {
                          * this app family. */
     float temperature_c;
     float humidity_pct;
+
+    /* Diagnostics, so a stuck "waiting" state is debuggable without a
+     * separate tool: how many requests have been sent, and how many
+     * bytes came back on the most recent one (0 means truly nothing
+     * replied - a wiring/adapter issue - vs >0 meaning something
+     * answered but didn't parse as a valid response). */
+    int attempt_count;
+    uint16_t last_rx_len;
 } SensorState;
 
 typedef struct Sensor Sensor;
