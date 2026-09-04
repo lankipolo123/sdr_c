@@ -46,6 +46,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 #define COLOR_APP_DISCONNECTED RGB(224, 90, 90)
 #define COLOR_APP_DOT       RGB(50, 52, 57)
 #define COLOR_APP_PANEL_BORDER RGB(63, 66, 71)
+#define COLOR_APP_SILVER    RGB(176, 180, 186)
 
 #define PANEL_CHAMFER 8
 #define DOT_GRID_SPACING 8
@@ -74,6 +75,7 @@ static HBRUSH g_brush_dot;
 static HBRUSH g_brush_warn;
 static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
+static HBRUSH g_brush_silver;
 
 static Connection g_conn;
 
@@ -100,8 +102,9 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         HDC hdc;
         RECT rc;
         POINT pts[8];
+        POINT tri[3];
         HBRUSH old_brush;
-        HPEN pen, old_pen;
+        HPEN pen, old_pen, silver_pen, old_silver_pen;
         int c = PANEL_CHAMFER;
 
         hdc = BeginPaint(hwnd, &ps);
@@ -124,6 +127,42 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
 
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
+
+        /* A small silver triangle floating near each corner, inset from
+         * the panel's chamfer edge - same accent as the single-channel
+         * app's panels. */
+        {
+            int t = c - 2; /* smaller than the chamfer cut itself */
+            if (t < 2) t = 2;
+
+            silver_pen = CreatePen(PS_SOLID, 1, COLOR_APP_SILVER);
+            old_silver_pen = (HPEN)SelectObject(hdc, silver_pen);
+            SelectObject(hdc, g_brush_silver);
+
+            tri[0].x = rc.left;       tri[0].y = rc.top;
+            tri[1].x = rc.left + t;   tri[1].y = rc.top;
+            tri[2].x = rc.left;       tri[2].y = rc.top + t;
+            Polygon(hdc, tri, 3);
+
+            tri[0].x = rc.right - 1;      tri[0].y = rc.top;
+            tri[1].x = rc.right - 1 - t;  tri[1].y = rc.top;
+            tri[2].x = rc.right - 1;      tri[2].y = rc.top + t;
+            Polygon(hdc, tri, 3);
+
+            tri[0].x = rc.right - 1;      tri[0].y = rc.bottom - 1;
+            tri[1].x = rc.right - 1 - t;  tri[1].y = rc.bottom - 1;
+            tri[2].x = rc.right - 1;      tri[2].y = rc.bottom - 1 - t;
+            Polygon(hdc, tri, 3);
+
+            tri[0].x = rc.left;       tri[0].y = rc.bottom - 1;
+            tri[1].x = rc.left + t;   tri[1].y = rc.bottom - 1;
+            tri[2].x = rc.left;       tri[2].y = rc.bottom - 1 - t;
+            Polygon(hdc, tri, 3);
+
+            SelectObject(hdc, old_silver_pen);
+            DeleteObject(silver_pen);
+        }
+
         SelectObject(hdc, old_brush);
 
         EndPaint(hwnd, &ps);
@@ -147,6 +186,81 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
     HWND ctrl = add_ctrl(parent, "STATIC", text, SS_LEFT, x, y, w, h, 0);
     if (ctrl && g_header_font) {
         SendMessageA(ctrl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
+    }
+    return ctrl;
+}
+
+/* Small thin-line icons next to each panel title - same set as the
+ * single-channel app (plain GDI lines/rectangles, no arcs). ICON_WAVE is
+ * used for each channel card (RF signal), ICON_PLUG for the connection
+ * panel. */
+#define ICON_PLUG 0
+#define ICON_WAVE 2
+
+static void draw_header_icon(HDC hdc, int x, int y, int type) {
+    switch (type) {
+        case ICON_PLUG:
+            Rectangle(hdc, x + 3, y + 6, x + 11, y + 13);
+            MoveToEx(hdc, x + 5, y + 6, NULL); LineTo(hdc, x + 5, y + 2);
+            MoveToEx(hdc, x + 9, y + 6, NULL); LineTo(hdc, x + 9, y + 2);
+            break;
+        case ICON_WAVE: {
+            POINT pts[6];
+            pts[0].x = x + 1;  pts[0].y = y + 7;
+            pts[1].x = x + 4;  pts[1].y = y + 2;
+            pts[2].x = x + 7;  pts[2].y = y + 12;
+            pts[3].x = x + 10; pts[3].y = y + 2;
+            pts[4].x = x + 13; pts[4].y = y + 12;
+            pts[5].x = x + 13; pts[5].y = y + 7;
+            Polyline(hdc, pts, 5);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+static LRESULT CALLBACK icon_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        HPEN pen, old_pen;
+        HBRUSH old_brush;
+        int type;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, g_brush_panel);
+
+        type = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+        pen = CreatePen(PS_SOLID, 1, COLOR_APP_HEADER);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+        old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+        draw_header_icon(hdc, rc.left, rc.top, type);
+
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_header_icon(HWND parent, int x, int y, int type) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, 14, 14, 0);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_USERDATA, (LONG_PTR)type);
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)icon_subclass_proc);
     }
     return ctrl;
 }
@@ -279,8 +393,9 @@ static void add_channel_card(HWND hwnd, int index) {
     HWND mode_combo, track;
 
     add_panel(hwnd, x, y, CARD_W, CARD_H);
+    add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "CH %d", index + 1);
-    add_header(hwnd, header, x + 10, y + 6, 100, 16);
+    add_header(hwnd, header, x + 26, y + 6, 100, 16);
 
     /* Left column */
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
@@ -328,11 +443,36 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 194, y + 92, 44, 16, channel_lbl_off_id(index));
 }
 
+/* What was last actually painted for each channel card - lets the 10Hz
+ * poll tick skip repainting anything that hasn't changed, instead of
+ * force-erasing and redrawing all 6 per-channel controls every tick
+ * regardless of whether their state moved. Force-erasing a plain STATIC
+ * control flashes the system default background for a frame before
+ * WM_CTLCOLORSTATIC repaints it correctly - at 10Hz across 16 channels
+ * that reads as constant flicker/twitching. */
+typedef struct {
+    bool valid;
+    bool busy;
+    bool output_on;
+    int level;
+} ChannelUiCache;
+
+static ChannelUiCache g_ui_cache[MAX_CHANNELS];
+
 static void ui_refresh_channel(int index) {
     const ChannelState *ch = channels_get(index);
-    HWND status_ctl = GetDlgItem(g_hwnd, channel_status_id(index));
-    HWND track = GetDlgItem(g_hwnd, channel_track_id(index));
+    ChannelUiCache *cache = &g_ui_cache[index];
+    HWND status_ctl;
+    HWND track;
     char text[32];
+
+    if (cache->valid && cache->busy == ch->busy &&
+        cache->output_on == ch->output_on && cache->level == ch->level) {
+        return; /* nothing this channel's card shows has changed */
+    }
+
+    status_ctl = GetDlgItem(g_hwnd, channel_status_id(index));
+    track = GetDlgItem(g_hwnd, channel_track_id(index));
 
     /* Matches sdr_react's ChannelCard status text exactly:
      * busy -> SENDING..., on -> the level name, off -> STANDBY. */
@@ -345,19 +485,24 @@ static void ui_refresh_channel(int index) {
         lstrcpynA(text, "STANDBY", (int)sizeof(text));
     }
     SetWindowTextA(status_ctl, text);
-    InvalidateRect(status_ctl, NULL, TRUE);
+    InvalidateRect(status_ctl, NULL, FALSE);
 
     /* Don't fight the user mid-drag. */
     if (GetFocus() != track) {
         SendMessageA(track, TBM_SETPOS, TRUE, 3 - ch->level);
     }
 
-    InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, TRUE);
-    InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, TRUE);
-    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_high_id(index)), NULL, TRUE);
-    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_medium_id(index)), NULL, TRUE);
-    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_low_id(index)), NULL, TRUE);
-    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_off_id(index)), NULL, TRUE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_high_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_medium_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_low_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_off_id(index)), NULL, FALSE);
+
+    cache->valid = true;
+    cache->busy = ch->busy;
+    cache->output_on = ch->output_on;
+    cache->level = ch->level;
 }
 
 static void ui_refresh_all_channels(void) {
@@ -374,7 +519,8 @@ static void build_controls(HWND hwnd) {
     int idx;
 
     add_panel(hwnd, 10, 6, 335, 138);
-    add_header(hwnd, "Connection && Settings", 22, 14, 300, 18);
+    add_header_icon(hwnd, 22, 14, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 40, 14, 300, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 36, 32, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 34, 112, 160, IDC_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 34, 56, 22, IDC_REFRESH_BTN);
@@ -650,6 +796,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_warn) DeleteObject(g_brush_warn);
             if (g_brush_connected) DeleteObject(g_brush_connected);
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
+            if (g_brush_silver) DeleteObject(g_brush_silver);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             PostQuitMessage(0);
             return 0;
@@ -677,6 +824,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_warn = CreateSolidBrush(RGB(254, 243, 199));
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
+    g_brush_silver = CreateSolidBrush(COLOR_APP_SILVER);
 
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
