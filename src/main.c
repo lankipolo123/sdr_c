@@ -11,7 +11,6 @@
 #define _WIN32_WINNT 0x0600 /* Vista+ - needed so windows.h declares
                               * GradientFill/TRIVERTEX/GRADIENT_RECT */
 #include <windows.h>
-#include <commctrl.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -338,21 +337,24 @@ static COLORREF temp_band_color(float temp_c) {
     return COLOR_APP_DISCONNECTED;
 }
 
-static void gradient_fill_h(HDC hdc, int x0, int x1, int y0, int y1, COLORREF c0, COLORREF c1) {
+/* Shared by both gauges (temperature: horizontal, per-channel level:
+ * vertical) - GradientFill only interpolates between 2 colors per call,
+ * so a multi-stop sweep is just several of these back to back. */
+static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool vertical) {
     TRIVERTEX v[2];
     GRADIENT_RECT gr;
 
-    if (x1 <= x0) {
+    if (r.right <= r.left || r.bottom <= r.top) {
         return;
     }
 
-    v[0].x = x0; v[0].y = y0;
+    v[0].x = r.left;  v[0].y = r.top;
     v[0].Red   = (COLOR16)(GetRValue(c0) << 8);
     v[0].Green = (COLOR16)(GetGValue(c0) << 8);
     v[0].Blue  = (COLOR16)(GetBValue(c0) << 8);
     v[0].Alpha = 0;
 
-    v[1].x = x1; v[1].y = y1;
+    v[1].x = r.right; v[1].y = r.bottom;
     v[1].Red   = (COLOR16)(GetRValue(c1) << 8);
     v[1].Green = (COLOR16)(GetGValue(c1) << 8);
     v[1].Blue  = (COLOR16)(GetBValue(c1) << 8);
@@ -360,7 +362,7 @@ static void gradient_fill_h(HDC hdc, int x0, int x1, int y0, int y1, COLORREF c0
 
     gr.UpperLeft = 0;
     gr.LowerRight = 1;
-    GradientFill(hdc, v, 2, &gr, 1, GRADIENT_FILL_RECT_H);
+    GradientFill(hdc, v, 2, &gr, 1, vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
 }
 
 static LRESULT CALLBACK gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -384,10 +386,10 @@ static LRESULT CALLBACK gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * GradientFill only interpolates between 2 colors per call, so a
          * multi-color sweep is just several of those in a row. */
         for (i = 0; i + 1 < GAUGE_STOP_COUNT; i++) {
-            int x0 = rc.left + (int)(GAUGE_STOP_TEMPS[i] / GAUGE_MAX_C * w);
-            int x1 = rc.left + (int)(GAUGE_STOP_TEMPS[i + 1] / GAUGE_MAX_C * w);
-            gradient_fill_h(hdc, x0, x1, rc.top, rc.bottom,
-                             gauge_stop_color(i), gauge_stop_color(i + 1));
+            RECT seg = rc;
+            seg.left = rc.left + (int)(GAUGE_STOP_TEMPS[i] / GAUGE_MAX_C * w);
+            seg.right = rc.left + (int)(GAUGE_STOP_TEMPS[i + 1] / GAUGE_MAX_C * w);
+            gradient_fill_rect(hdc, seg, gauge_stop_color(i), gauge_stop_color(i + 1), false);
         }
 
         st = sensor_get_state(&g_sensor);
@@ -490,19 +492,36 @@ static void conn_on_error(const char *message, void *ctx) {
 
 /* ---- port list / connect ---- */
 
-static void refresh_port_list(void) {
+static void refresh_combo_ports(HWND combo, int (*list_fn)(char[][16], int)) {
     char names[32][16];
+    char prev[16];
     int n, i;
-    HWND combo = GetDlgItem(g_hwnd, IDC_PORT_COMBO);
+    LRESULT idx;
+
+    /* Keep whatever port was selected (loaded from .ini, or picked by
+     * hand) across a refresh instead of always jumping back to index 0 -
+     * a plugged-in device shouldn't silently switch to a different port
+     * just because the list got rebuilt. Falls back to index 0 only when
+     * that port is no longer in the refreshed list (unplugged). */
+    if (GetWindowTextA(combo, prev, sizeof(prev)) == 0) {
+        prev[0] = '\0';
+    }
 
     SendMessageA(combo, CB_RESETCONTENT, 0, 0);
-    n = conn_list_ports(names, 32);
+    n = list_fn(names, 32);
     for (i = 0; i < n; i++) {
         SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)names[i]);
     }
-    if (n > 0) {
-        SendMessageA(combo, CB_SETCURSEL, 0, 0);
+    if (n == 0) {
+        return;
     }
+
+    idx = (prev[0] != '\0') ? SendMessageA(combo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)prev) : CB_ERR;
+    SendMessageA(combo, CB_SETCURSEL, (idx != CB_ERR) ? (WPARAM)idx : 0, 0);
+}
+
+static void refresh_port_list(void) {
+    refresh_combo_ports(GetDlgItem(g_hwnd, IDC_PORT_COMBO), conn_list_ports);
 }
 
 static void on_connect_clicked(void) {
@@ -541,18 +560,7 @@ static void on_connect_clicked(void) {
 #define SENSOR_DATABITS 8
 
 static void refresh_sensor_port_list(void) {
-    char names[32][16];
-    int n, i;
-    HWND combo = GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO);
-
-    SendMessageA(combo, CB_RESETCONTENT, 0, 0);
-    n = serial_list_ports(names, 32);
-    for (i = 0; i < n; i++) {
-        SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)names[i]);
-    }
-    if (n > 0) {
-        SendMessageA(combo, CB_SETCURSEL, 0, 0);
-    }
+    refresh_combo_ports(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), serial_list_ports);
 }
 
 static void on_sensor_connect_clicked(void) {
@@ -727,6 +735,138 @@ static bool channel_index_from_id(int id, int *out_idx) {
     return true;
 }
 
+/* ---- per-channel level gradient gauge ----
+ * Replaces the native trackbar with a custom-drawn vertical gradient
+ * (muted gray -> green -> orange -> red, Off at bottom to High at top)
+ * plus a marker line for the current level - same visual language as
+ * the temperature gauge, and click/drag anywhere on it to set the
+ * level directly instead of dragging a thumb. Reuses gradient_fill_rect
+ * (already linked via msimg32 for the temperature gauge), so this adds
+ * no new dependency or meaningful size. */
+static COLORREF ch_gauge_stop_color(int level) {
+    switch (level) {
+        case LEVEL_OFF:    return COLOR_APP_MUTED;
+        case LEVEL_LOW:    return COLOR_APP_CONNECTED;
+        case LEVEL_MEDIUM: return RGB(224, 146, 34);
+        default:           return COLOR_APP_DISCONNECTED; /* LEVEL_HIGH */
+    }
+}
+
+/* Maps a Y coordinate inside the gauge to a level (0-3), top=High,
+ * bottom=Off - shared by painting the marker and by click/drag input. */
+static int ch_gauge_level_from_y(int y, int h) {
+    int band = (h > 0) ? (y * 4 / h) : 0;
+    if (band < 0) band = 0;
+    if (band > 3) band = 3;
+    return 3 - band;
+}
+
+static void ch_gauge_apply_click(HWND hwnd, int y) {
+    RECT rc;
+    int idx, level;
+
+    if (!channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
+        return;
+    }
+    GetClientRect(hwnd, &rc);
+    level = ch_gauge_level_from_y(y, rc.bottom - rc.top);
+
+    /* Off is always allowed even kill-switch-tripped - same reasoning
+     * as the ON/OFF buttons and mode Set. */
+    if (level == LEVEL_OFF || !g_kill_switch_tripped) {
+        channel_set_level(idx, level);
+    }
+}
+
+static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        int idx;
+        int h;
+        int i;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        h = rc.bottom - rc.top;
+
+        for (i = 0; i < 3; i++) {
+            RECT seg = rc;
+            seg.top = rc.top + h * i / 3;
+            seg.bottom = rc.top + h * (i + 1) / 3;
+            /* i=0 is the bottom third (Off->Low), i=2 the top third
+             * (Medium->High) - stop colors indexed 0..3 bottom to top. */
+            gradient_fill_rect(hdc, seg, ch_gauge_stop_color(i), ch_gauge_stop_color(i + 1), true);
+        }
+
+        if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
+            const ChannelState *ch = channels_get(idx);
+            /* Centered in the quarter-band ch_gauge_level_from_y() maps
+             * to this level (band 0 = top/HIGH .. band 3 = bottom/OFF) -
+             * must match that function's banding, not the gradient's
+             * thirds, or the line lands on a band edge instead of
+             * inside the zone a click on it actually selects. */
+            int band = 3 - ch->level;
+            int marker_y = rc.top + (2 * band + 1) * h / 8;
+            HPEN pen = CreatePen(PS_SOLID, 2, RGB(20, 20, 22));
+            HPEN old_pen = (HPEN)SelectObject(hdc, pen);
+            MoveToEx(hdc, rc.left, marker_y, NULL);
+            LineTo(hdc, rc.right, marker_y);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+
+        {
+            HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            HPEN old_pen = (HPEN)SelectObject(hdc, pen);
+            HBRUSH old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    if (msg == WM_LBUTTONDOWN) {
+        SetCapture(hwnd);
+        ch_gauge_apply_click(hwnd, (short)HIWORD(lParam));
+        return 0;
+    }
+    if (msg == WM_MOUSEMOVE) {
+        if (GetCapture() == hwnd) {
+            ch_gauge_apply_click(hwnd, (short)HIWORD(lParam));
+        }
+        return 0;
+    }
+    if (msg == WM_LBUTTONUP) {
+        if (GetCapture() == hwnd) {
+            ReleaseCapture();
+        }
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_channel_gauge(HWND parent, int x, int y, int w, int h, int id) {
+    /* SS_NOTIFY, not just SS_LEFT: a plain static's default WM_NCHITTEST
+     * returns HTTRANSPARENT, so clicks fall through to the parent window
+     * instead of reaching this control's subclass proc. */
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | SS_NOTIFY, x, y, w, h, id);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)channel_gauge_subclass_proc);
+    }
+    return ctrl;
+}
+
 /* Card layout: a left column (Mode combo + Set button, ON/OFF power
  * buttons, status line), then a full-width horizontal level trackbar
  * with Off/Low/Medium/High labels underneath it. */
@@ -737,7 +877,7 @@ static void add_channel_card(HWND hwnd, int index) {
     int y = GRID_TOP + row * (CARD_H + CARD_GAP);
     char header[16];
     int i;
-    HWND mode_combo, track;
+    HWND mode_combo;
 
     add_panel(hwnd, x, y, CARD_W, CARD_H);
     add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
@@ -765,22 +905,9 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
              x + 8, y + 78, 146, 16, channel_status_id(index));
 
-    /* Right column: vertical level trackbar (min at bottom, like a
-     * volume slider) + tick labels - back to vertical per request
-     * (the horizontal layout ate too much card width). A plain
-     * vertical trackbar puts its minimum at the TOP and maximum at
-     * the BOTTOM by default - the opposite of the "High on top, Off
-     * on bottom" layout the label stack uses - so the native position
-     * is kept inverted from the level everywhere it's read or set:
-     * nativePos = 3 - level. */
-    track = CreateWindowExA(0, TRACKBAR_CLASSA, NULL,
-                             WS_CHILD | WS_VISIBLE | TBS_VERT | TBS_NOTICKS,
-                             x + 164, y + 26, 26, 88, hwnd,
-                             (HMENU)(INT_PTR)channel_track_id(index), g_hinst, NULL);
-    if (track) {
-        SendMessageA(track, TBM_SETRANGE, TRUE, MAKELPARAM(0, 3));
-        SendMessageA(track, TBM_SETPOS, TRUE, 3 - LEVEL_OFF);
-    }
+    /* Right column: custom gradient level gauge (Off at bottom, High at
+     * top, like a volume slider) + tick labels. */
+    add_channel_gauge(hwnd, x + 164, y + 26, 26, 88, channel_track_id(index));
 
     add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 194, y + 26, 44, 16, channel_lbl_high_id(index));
     add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 194, y + 48, 44, 16, channel_lbl_medium_id(index));
@@ -841,11 +968,7 @@ static void ui_refresh_channel(int index) {
     }
     SetWindowTextA(status_ctl, text);
     InvalidateRect(status_ctl, NULL, FALSE);
-
-    /* Don't fight the user mid-drag. */
-    if (GetFocus() != track) {
-        SendMessageA(track, TBM_SETPOS, TRUE, 3 - ch->level);
-    }
+    InvalidateRect(track, NULL, FALSE);
 
     InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
@@ -1017,14 +1140,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     switch (msg) {
         case WM_CREATE: {
             ConnectionCallbacks ccb;
-            INITCOMMONCONTROLSEX icc;
 
             g_hwnd = hwnd;
             g_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-
-            icc.dwSize = sizeof(icc);
-            icc.dwICC = ICC_BAR_CLASSES;
-            InitCommonControlsEx(&icc);
 
             g_header_font = CreateFontA(-13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                          ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -1079,7 +1197,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             if (id == IDC_REFRESH_BTN && code == BN_CLICKED) {
                 refresh_port_list();
-                refresh_sensor_port_list();
                 return 0;
             }
             if (id == IDC_CONNECT_BTN && code == BN_CLICKED) {
@@ -1129,28 +1246,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         channel_turn_output_off(idx);
                     }
                     return 0;
-                }
-            }
-            return 0;
-        }
-
-        case WM_VSCROLL: {
-            HWND ctl = (HWND)lParam;
-            int id = ctl ? GetDlgCtrlID(ctl) : -1;
-            int idx;
-            if (ctl && channel_index_from_id(id, &idx) &&
-                (id - IDC_CH_BASE) % IDC_CH_STRIDE == IDC_CH_TRACKBAR_OFFSET) {
-                /* Apply once the drag settles (release, arrow step, page
-                 * step) rather than on every intermediate THUMBTRACK tick -
-                 * same intent as the web reference's slider debounce. */
-                if (LOWORD(wParam) != SB_THUMBTRACK) {
-                    int pos = (int)SendMessageA(ctl, TBM_GETPOS, 0, 0);
-                    int level = 3 - pos;
-                    /* Off is always allowed even tripped - same reasoning
-                     * as the OFF button above. */
-                    if (level == LEVEL_OFF || !g_kill_switch_tripped) {
-                        channel_set_level(idx, level);
-                    }
                 }
             }
             return 0;

@@ -13,7 +13,7 @@ gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -mwindows -Os -s ^
     -fno-ident -fno-asynchronous-unwind-tables ^
     -ffunction-sections -fdata-sections -Wl,--gc-sections ^
     -o digital_noise_config_multi.exe src\main.c src\connection.c src\channels.c src\protocol.c src\serial_port.c src\modbus.c src\sensor.c src\app_res.o ^
-    -ladvapi32 -lgdi32 -luser32 -lcomctl32 -lmsimg32
+    -ladvapi32 -lgdi32 -luser32 -lmsimg32
 
 if %ERRORLEVEL% NEQ 0 (
     echo Build failed.
