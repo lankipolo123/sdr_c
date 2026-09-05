@@ -1,5 +1,16 @@
-/* XY-MD02 temperature/humidity sensor over Modbus RTU, on its own COM
- * port completely independent of the RS-422 channel control connection.
+/* XY-MD02 temperature/humidity sensor(s) over Modbus RTU, on their own
+ * COM port completely independent of the RS-422 channel control
+ * connection.
+ *
+ * Two hardware topologies, selectable at runtime as a "mode":
+ *   - SENSOR_MODE_SCAN: one sensor for the whole rack, at
+ *     SENSOR_SLAVE_ADDR. Its reading is mirrored into every unit's slot
+ *     below, so callers never need to branch on mode to read a unit's
+ *     temperature - they just always ask for their own index.
+ *   - SENSOR_MODE_PER_UNIT: one sensor per unit, address == unit number
+ *     (1-16, matching MAX_CHANNELS) - each unit's slot holds only its
+ *     own reading, polled round-robin instead of the fixed 3s interval
+ *     scan mode uses (16 addresses to get through, not 1).
  *
  * Unlike channels.c's blind send (fire once, apply optimistically), a
  * register read genuinely needs the reply - there's no value to show
@@ -9,29 +20,48 @@
  * at a time.
  *
  * Settings confirmed against the real hardware via QModMaster (see
- * PLAN_temp_sensor.md) - not guessed: slave address 1, function 0x04,
- * registers 2 (temperature) and 3 (humidity), both raw/10.
+ * PLAN_temp_sensor.md) - not guessed: function 0x04, register 1, count
+ * 2, both raw/10. The slave address for per-unit mode (1-16) has not
+ * itself been confirmed against real per-unit hardware - only the
+ * single-sensor-at-address-1 case has been.
  */
 #pragma once
 #include "serial_port.h"
 #include <stdbool.h>
 
-#define SENSOR_SLAVE_ADDR      1
+#define SENSOR_MAX_UNITS 16 /* matches MAX_CHANNELS (channels.h) - kept
+                              * as its own constant so this header doesn't
+                              * need to depend on channels.h */
+#define SENSOR_SLAVE_ADDR      1 /* scan mode's one address; per-unit mode
+                                   * uses unit_index + 1 instead (1-16) */
 /* QModMaster's status bar showed "Base Addr: 1" throughout - its Start
  * Address field is very likely 1-based display over a 0-based wire
  * address, meaning its "Start Address: 2" (which worked) actually put
  * wire address 1 on the bus, not 2. Real hardware testing of address 2
  * got a 5-byte reply (the exact length of a Modbus exception frame,
  * i.e. a real "invalid register" answer, not a timeout) - consistent
- * with this off-by-one theory. Trying 1 here; not yet re-confirmed
- * against real hardware. */
+ * with this off-by-one theory. Confirmed working against real hardware
+ * in scan mode. */
 #define SENSOR_START_REGISTER  1
 #define SENSOR_REGISTER_COUNT  2
 #define SENSOR_RESPONSE_TIMEOUT_MS 500
-#define SENSOR_POLL_INTERVAL_MS    3000 /* temperature doesn't change fast */
+#define SENSOR_POLL_INTERVAL_MS    3000 /* scan mode: gap between polls of
+                                          * the one address - temperature
+                                          * doesn't change fast */
+#define SENSOR_PER_UNIT_GAP_MS     150  /* per-unit mode: gap between
+                                          * finishing one unit and moving
+                                          * to the next - round-robins
+                                          * continuously rather than
+                                          * waiting a full 3s per unit,
+                                          * or a full 16-unit round would
+                                          * take 48s+ to notice an overtemp */
+
+typedef enum {
+    SENSOR_MODE_SCAN = 0,
+    SENSOR_MODE_PER_UNIT = 1
+} SensorMode;
 
 typedef struct {
-    bool connected;
     bool online;       /* true once a request has actually gotten a valid reply */
     bool has_reading;  /* false until a real reading has confirmed a value -
                          * the UI shows "-" rather than a guessed default
@@ -55,7 +85,19 @@ void sensor_init(Sensor *s);
 bool sensor_connect(Sensor *s, const char *port_name, DWORD baud, char parity, uint8_t data_bits);
 void sensor_disconnect(Sensor *s);
 bool sensor_is_connected(const Sensor *s);
-const SensorState *sensor_get_state(const Sensor *s);
+
+/* unit_index is 0-based (0..SENSOR_MAX_UNITS-1), matching channel index
+ * elsewhere in this app. In SENSOR_MODE_SCAN every index reads the same
+ * mirrored value - callers never need to check the mode just to display
+ * a reading. */
+const SensorState *sensor_get_state(const Sensor *s, int unit_index);
+
+SensorMode sensor_get_mode(const Sensor *s);
+/* Switching modes clears every unit's reading back to "unknown" (has_reading
+ * false) rather than leaving stale values on screen - e.g. a mirrored
+ * scan-mode reading would otherwise sit there mislabeled as a real
+ * per-unit reading until that unit's own next poll comes around. */
+void sensor_set_mode(Sensor *s, SensorMode mode);
 
 /* Non-blocking: call every timer tick. Advances the send/wait state
  * machine and applies a completed reading (or marks offline on
@@ -68,6 +110,9 @@ void sensor_poll(Sensor *s);
 struct Sensor {
     SerialPort port;
     bool connected;
+    SensorMode mode;
+    int current_unit; /* 0-based; which unit's address sensor_send_request()
+                        * queries next - always 0 in scan mode */
 
     enum { SENSOR_POLL_IDLE, SENSOR_POLL_WAITING } poll_state;
     DWORD next_poll_at;       /* GetTickCount() deadline, valid when idle */
@@ -76,5 +121,5 @@ struct Sensor {
     uint8_t rx_buf[64];
     uint16_t rx_len;
 
-    SensorState state;
+    SensorState units[SENSOR_MAX_UNITS];
 };

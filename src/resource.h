@@ -19,6 +19,9 @@
 #define IDC_KILL_RESET_BTN       1016
 #define IDC_SENSOR_REFRESH_BTN   1017
 #define IDC_SENSOR_TEMP_GAUGE    1018
+#define IDC_SENSOR_MODE_SCAN_BTN 1030
+#define IDC_SENSOR_MODE_UNIT_BTN 1031
+#define IDC_SENSOR_MODE_NOTE_LBL 1032
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
@@ -33,7 +36,7 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             10
+#define IDC_CH_STRIDE             11
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
@@ -44,3 +47,10 @@
 #define IDC_CH_LBL_MEDIUM_OFFSET  7
 #define IDC_CH_LBL_LOW_OFFSET     8
 #define IDC_CH_LBL_OFF_OFFSET     9
+/* Per-unit temperature readout in the card header - shows that unit's
+ * own sensor reading (mode 2 / per-unit) or the shared scan reading
+ * (mode 1 / scan), colored by band. Doubles as that unit's kill-switch
+ * reset control: click it while tripped (shown in red) to reset just
+ * this one unit, independent of the others - the whole point of moving
+ * to per-unit sensors instead of one shared reading. */
+#define IDC_CH_TEMP_LBL_OFFSET    10
