@@ -764,12 +764,22 @@ static int ch_gauge_level_from_y(int y, int h) {
 static void ch_gauge_apply_click(HWND hwnd, int y) {
     RECT rc;
     int idx, level;
+    const ChannelState *ch;
 
     if (!channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
         return;
     }
+    ch = channels_get(idx);
     GetClientRect(hwnd, &rc);
     level = ch_gauge_level_from_y(y, rc.bottom - rc.top);
+
+    /* The gauge only adjusts an already-running channel's level - it
+     * won't power one on by itself. That's the ON button's job, same
+     * as the reference app: level is something you dial in once
+     * output is already active, not a way to sneak around ON/OFF. */
+    if (level != LEVEL_OFF && !ch->output_on) {
+        return;
+    }
 
     /* Off is always allowed even kill-switch-tripped - same reasoning
      * as the ON/OFF buttons and mode Set. */
