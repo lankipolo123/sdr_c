@@ -58,9 +58,17 @@ bool conn_send(Connection *conn, const uint8_t *data, uint8_t len) {
         return false;
     }
     if (!serial_write(&conn->port, data, len, NULL)) {
+        /* A hard write failure (as opposed to "nothing to read yet") means
+         * the port itself is gone - most commonly the USB adapter was
+         * unplugged. Disconnect so the UI reflects that immediately,
+         * rather than staying "Connected" with a dead handle forever
+         * (which is what made a re-plugged adapter look like it wouldn't
+         * reconnect - the app never noticed it had disconnected in the
+         * first place, so Connect looked like a no-op). */
         if (conn->cb.on_error) {
-            conn->cb.on_error("Write failed", conn->cb.ctx);
+            conn->cb.on_error("Write failed - port disconnected", conn->cb.ctx);
         }
+        conn_disconnect(conn);
         return false;
     }
     if (conn->cb.on_raw_tx) {
@@ -78,9 +86,14 @@ void conn_poll(Connection *conn) {
     }
 
     if (!serial_read(&conn->port, chunk, sizeof(chunk), &read_len)) {
+        /* Same reasoning as the write-failure case above: a hard read
+         * error means the device is gone, not just quiet. Disconnect
+         * once instead of logging "Read failed" on every 100ms tick
+         * forever. */
         if (conn->cb.on_error) {
-            conn->cb.on_error("Read failed", conn->cb.ctx);
+            conn->cb.on_error("Read failed - port disconnected", conn->cb.ctx);
         }
+        conn_disconnect(conn);
         return;
     }
     if (read_len == 0) {

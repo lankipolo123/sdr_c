@@ -61,11 +61,15 @@ static void sensor_send_request(Sensor *s) {
     s->rx_len = 0;
     s->state.attempt_count++;
     if (!serial_write(&s->port, frame.data, frame.len, NULL)) {
-        /* Couldn't even send - try again next interval rather than
-         * spinning immediately. */
-        s->poll_state = SENSOR_POLL_IDLE;
-        s->next_poll_at = GetTickCount() + SENSOR_POLL_INTERVAL_MS;
-        s->state.online = false;
+        /* Unlike a Modbus timeout (the sensor just didn't answer this
+         * cycle - normal, stays connected), a hard write failure means
+         * the port itself is gone, most likely the USB adapter was
+         * unplugged. Disconnect so the UI reflects that instead of
+         * staying "Connected" against a dead handle - which is what
+         * made re-plugging the adapter look like it wouldn't
+         * reconnect (Connect looked like a no-op because the app
+         * never noticed it had lost the port). */
+        sensor_disconnect(s);
         return;
     }
     s->poll_state = SENSOR_POLL_WAITING;
@@ -90,10 +94,15 @@ void sensor_poll(Sensor *s) {
 
     if (s->poll_state == SENSOR_POLL_WAITING) {
         if (s->rx_len < sizeof(s->rx_buf)) {
-            if (serial_read(&s->port, s->rx_buf + s->rx_len,
-                             (DWORD)(sizeof(s->rx_buf) - s->rx_len), &read_len)) {
-                s->rx_len = (uint16_t)(s->rx_len + read_len);
+            if (!serial_read(&s->port, s->rx_buf + s->rx_len,
+                              (DWORD)(sizeof(s->rx_buf) - s->rx_len), &read_len)) {
+                /* Hard read error, not just "no bytes yet" (that returns
+                 * true with read_len 0) - the port is gone. Same
+                 * disconnect-immediately reasoning as sensor_send_request(). */
+                sensor_disconnect(s);
+                return;
             }
+            s->rx_len = (uint16_t)(s->rx_len + read_len);
         }
 
         {
