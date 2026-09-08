@@ -103,7 +103,6 @@ static HINSTANCE g_hinst;
 static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
-static HFONT g_title_font; /* app-title header bar only - bigger than g_header_font's panel-title size */
 static WNDPROC g_panel_orig_proc;
 static HBRUSH g_brush_panel;
 static HBRUSH g_brush_page;
@@ -125,7 +124,6 @@ static bool g_kill_switch_tripped[MAX_CHANNELS];
  * have a retrievable control ID (channel_*_id() covers everything else
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
-static HWND g_title_ctrl;
 static HWND g_sidebar_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
@@ -245,16 +243,6 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
     HWND ctrl = add_ctrl(parent, "STATIC", text, SS_LEFT, x, y, w, h, 0);
     if (ctrl && g_header_font) {
         SendMessageA(ctrl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
-    }
-    return ctrl;
-}
-
-/* App-title header bar's title text - same idea as add_header() but with
- * the larger g_title_font. */
-static HWND add_title(HWND parent, LPCSTR text, int x, int y, int w, int h) {
-    HWND ctrl = add_ctrl(parent, "STATIC", text, SS_LEFT, x, y, w, h, 0);
-    if (ctrl && g_title_font) {
-        SendMessageA(ctrl, WM_SETFONT, (WPARAM)g_title_font, (LPARAM)TRUE);
     }
     return ctrl;
 }
@@ -1278,12 +1266,11 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    /* App-title header bar: title on top, the Connection & Settings
-     * controls (moved up from the sidebar) as a single command row
-     * underneath - full width, same 6px top margin and 8px
-     * gap-before-content as every other panel-to-panel spacing below. */
+    /* App header bar: the Connection & Settings controls (moved up from
+     * the sidebar) as a single command row - full width, same 6px top
+     * margin and 8px gap-before-content as every other panel-to-panel
+     * spacing below. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
-    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 42, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 42);
 
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 94, 32, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 92, 112, 160, IDC_PORT_COMBO);
@@ -1427,7 +1414,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_title_ctrl, 22, 42, client_w - 2 * SIDEBAR_X - 32, 42, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -1464,13 +1450,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                          DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
             if (!g_header_font) {
                 g_header_font = g_font;
-            }
-
-            g_title_font = CreateFontA(-30, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                                        ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                        DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
-            if (!g_title_font) {
-                g_title_font = g_header_font;
             }
 
             build_controls(hwnd);
@@ -1684,7 +1663,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             {
                 HFONT ctl_font = (HFONT)SendMessageA(ctl, WM_GETFONT, 0, 0);
-                if (ctl_font == g_header_font || ctl_font == g_title_font) {
+                if (ctl_font == g_header_font) {
                     SetTextColor(hdc, COLOR_APP_HEADER);
                 } else {
                     SetTextColor(hdc, COLOR_APP_MUTED);
@@ -1784,7 +1763,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
-            if (g_title_font && g_title_font != g_header_font) DeleteObject(g_title_font);
             PostQuitMessage(0);
             return 0;
     }
