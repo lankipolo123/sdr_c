@@ -1923,13 +1923,43 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
      * its designed size within whatever the window's actual size is. */
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME, FALSE, 0);
 
-    hwnd = CreateWindowExA(0, "DigitalNoiseConfigMultiMainWindow", "Digital Noise Configuration - Multi",
+    /* WS_EX_COMPOSITED: makes Windows/DWM composite this window and all
+     * its children off-screen before presenting, instead of each of the
+     * 240+ individually custom-painted controls (panels, gauges,
+     * owner-draw buttons) drawing straight to screen one at a time -
+     * that's what made a full repaint (on resize/maximize, on being
+     * uncovered by alt-tab, on restore from minimize) visibly draw
+     * itself piece by piece instead of just appearing. */
+    hwnd = CreateWindowExA(WS_EX_COMPOSITED, "DigitalNoiseConfigMultiMainWindow", "Digital Noise Configuration - Multi",
                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             rect.right - rect.left, rect.bottom - rect.top,
                             NULL, NULL, hInstance, NULL);
     if (!hwnd) {
         return 0;
+    }
+
+    /* The window is still hidden here (no WS_VISIBLE) - WM_CREATE has
+     * already run build_controls(), so every control exists at its
+     * small design-size position. Lay everything out for the maximized
+     * size RIGHT NOW, before the window is ever shown, instead of
+     * showing it small first and visibly snapping/rearranging to fill
+     * the screen once WM_SIZE's own relayout runs a moment later. */
+    {
+        RECT work_area;
+        RECT chrome;
+        int client_w, client_h;
+
+        if (SystemParametersInfoA(SPI_GETWORKAREA, 0, &work_area, 0)) {
+            chrome.left = 0;
+            chrome.top = 0;
+            chrome.right = 0;
+            chrome.bottom = 0;
+            AdjustWindowRectEx(&chrome, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME, FALSE, 0);
+            client_w = (work_area.right - work_area.left) - (chrome.right - chrome.left);
+            client_h = (work_area.bottom - work_area.top) - (chrome.bottom - chrome.top);
+            relayout_for_size(hwnd, client_w, client_h);
+        }
     }
 
     ShowWindow(hwnd, SW_SHOWMAXIMIZED);
