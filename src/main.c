@@ -1294,7 +1294,12 @@ static void build_controls(HWND hwnd) {
     add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
     add_title(hwnd, "Digital Noise Configuration - Multi", 22, 16, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 28);
 
-    add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, 156);
+    /* Sidebar: one tall box spanning the channel grid's full height,
+     * Connection & Settings / Amplifier Temperature / Activity Log
+     * stacked inside it as sections (headers only, no separate borders
+     * between them) instead of 3 separately-bordered panels. */
+    add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
+
     add_header_icon(hwnd, 22, 70, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 40, 70, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 92, 32, 16, 0);
@@ -1310,41 +1315,35 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 164, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 162, 70, 100, IDC_PARITY_COMBO);
 
-    /* Sidebar: Connection & Settings (above), Temp/Humidity Sensor, then
-     * Activity Log, all stacked in one left-hand column - main content
-     * (the channel grid) is to the right, matching the app's request for
-     * a sidebar + main-content split instead of 3 panels across the top. */
-    add_panel(hwnd, SIDEBAR_X, 226, SIDEBAR_W, 182);
-    add_header_icon(hwnd, 22, 234, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 40, 234, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 256, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 254, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 254, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 254, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_header_icon(hwnd, 22, 204, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 40, 204, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 226, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 224, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 224, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 224, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* Scan: one sensor for the whole rack (address 1), mirrored to every
      * unit's card. Per-Unit: one sensor per unit, address == unit number -
      * each card shows and protects only its own reading. */
-    add_ctrl(hwnd, "STATIC", "Mode:", SS_LEFT, 22, 280, 38, 16, 0);
-    add_ctrl(hwnd, "BUTTON", "Scan", BS_OWNERDRAW | WS_TABSTOP, 62, 276, 66, 22, IDC_SENSOR_MODE_SCAN_BTN);
-    add_ctrl(hwnd, "BUTTON", "Per-Unit", BS_OWNERDRAW | WS_TABSTOP, 132, 276, 74, 22, IDC_SENSOR_MODE_UNIT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 306, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 328, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 328, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 352, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
+    add_ctrl(hwnd, "STATIC", "Mode:", SS_LEFT, 22, 250, 38, 16, 0);
+    add_ctrl(hwnd, "BUTTON", "Scan", BS_OWNERDRAW | WS_TABSTOP, 62, 246, 66, 22, IDC_SENSOR_MODE_SCAN_BTN);
+    add_ctrl(hwnd, "BUTTON", "Per-Unit", BS_OWNERDRAW | WS_TABSTOP, 132, 246, 74, 22, IDC_SENSOR_MODE_UNIT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 276, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 298, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 298, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 322, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
     add_ctrl(hwnd, "STATIC", "Per-unit mode: each unit's own reading shows on its own card above.",
-             SS_LEFT, 22, 306, 270, 44, IDC_SENSOR_MODE_NOTE_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 376, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 374, 80, 22, IDC_KILL_RESET_BTN);
+             SS_LEFT, 22, 276, 270, 44, IDC_SENSOR_MODE_NOTE_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 346, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 344, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_SENSOR_MODE_NOTE_LBL), SW_HIDE); /* default mode is Scan */
 
-    add_panel(hwnd, SIDEBAR_X, 416, SIDEBAR_W, 216);
-    add_header_icon(hwnd, 22, 424, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 424, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 422, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_header_icon(hwnd, 22, 394, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 394, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 392, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 446, 281, 176, IDC_LOG_LISTBOX);
+             22, 416, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1718,6 +1717,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     (void)hPrevInstance;
     (void)lpCmdLine;
+    (void)nCmdShow; /* always starts maximized instead - see SW_SHOWMAXIMIZED below */
 
     g_hinst = hInstance;
 
@@ -1750,10 +1750,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     rect.top = 0;
     rect.right = CLIENT_WIDTH;
     rect.bottom = CLIENT_HEIGHT;
-    AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
+    /* WS_THICKFRAME + WS_MAXIMIZEBOX: resizable and maximizable, not just
+     * a fixed-size dialog-style window - starts maximized (below) since
+     * the app is meant to run fullscreen, but the user can still restore/
+     * resize it manually. The fixed-pixel content layout itself doesn't
+     * yet reflow to fill extra space - it just sits anchored top-left at
+     * its designed size within whatever the window's actual size is. */
+    AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME, FALSE, 0);
 
     hwnd = CreateWindowExA(0, "DigitalNoiseConfigMultiMainWindow", "Digital Noise Configuration - Multi",
-                            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             rect.right - rect.left, rect.bottom - rect.top,
                             NULL, NULL, hInstance, NULL);
@@ -1761,7 +1767,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    ShowWindow(hwnd, nCmdShow);
+    ShowWindow(hwnd, SW_SHOWMAXIMIZED);
     UpdateWindow(hwnd);
 
     while (GetMessageA(&msg, NULL, 0, 0)) {
