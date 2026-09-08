@@ -20,15 +20,17 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 644
+#define CLIENT_HEIGHT 586
 
 /* App-title header bar across the top, above the sidebar/grid content -
  * empty except for a title for now, room left for whatever gets added
  * to it later. HEADER_H is the bar's own height; CONTENT_TOP is where
  * the sidebar panels and channel grid start beneath it (same 6px top
- * margin and 8px panel-to-panel gap used everywhere else). */
-#define HEADER_H     48
-#define CONTENT_TOP  62
+ * margin and 8px panel-to-panel gap used everywhere else). Grown from
+ * 48 to 72 - freed up by shrinking the cards (see CARD_W/CARD_H) and
+ * compressing the sidebar (removed the sensor mode toggle). */
+#define HEADER_H     72
+#define CONTENT_TOP  86
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -46,20 +48,18 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 
 /* Kill switch: forces a unit off if its sensor reports a dangerously
  * high temperature - its own unit only, not the other 15, since each
- * has its own independent sensor in per-unit mode (scan mode's single
- * shared reading is mirrored into every unit, so it naturally trips all
- * of them together instead needing separate logic for that case).
- * Manual reset only, deliberately, per unit - once tripped, that unit
- * stays off (and new ON/Set/level commands for it are blocked) even if
- * its temperature drops back down, until the user explicitly resets it.
- * Auto-resuming at the threshold would let it silently cycle on/off
- * right at the boundary, defeating the point of a safety cutoff. */
+ * has its own independent sensor at its own address (see
+ * UNIT_TEMP_ADDR). Manual reset only, deliberately, per unit - once
+ * tripped, that unit stays off (and new ON/Set/level commands for it
+ * are blocked) even if its temperature drops back down, until the user
+ * explicitly resets it. Auto-resuming at the threshold would let it
+ * silently cycle on/off right at the boundary, defeating the point of a
+ * safety cutoff. */
 #define KILL_SWITCH_THRESHOLD_C 60.0f
 
 #define LOG_MAX_ENTRIES 200
 
-/* Modbus slave address each unit's own temperature sensor is wired to,
- * used in per-unit mode only (scan mode always polls SENSOR_SLAVE_ADDR).
+/* Modbus slave address each unit's own temperature sensor is wired to.
  * Defaults to the unit number, 1-indexed - edit this table once the real
  * per-unit wiring is known, since it's very likely not sequential. Not
  * shown in the UI (see the card's Temp readout instead) - pushed into
@@ -90,8 +90,8 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 /* --- grid layout for the 16 channel cards --- */
 #define GRID_COLS 4
 #define GRID_ROWS 4
-#define CARD_W 246
-#define CARD_H 130
+#define CARD_W 220
+#define CARD_H 116
 #define CARD_GAP 8
 #define GRID_LEFT 325
 #define GRID_TOP CONTENT_TOP
@@ -448,7 +448,8 @@ static LRESULT CALLBACK gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         PAINTSTRUCT ps;
         HDC hdc;
         RECT rc;
-        const SensorState *st;
+        bool has_avg;
+        float avg_c;
         int i;
         int w;
 
@@ -467,9 +468,9 @@ static LRESULT CALLBACK gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             gradient_fill_rect(hdc, seg, gauge_stop_color(i), gauge_stop_color(i + 1), false);
         }
 
-        st = sensor_get_state(&g_sensor, 0);
-        if (st->has_reading) {
-            float t = st->temperature_c;
+        has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+        if (has_avg) {
+            float t = avg_c;
             int marker_x;
             HPEN pen, old_pen;
 
@@ -664,25 +665,21 @@ static void on_sensor_connect_clicked(void) {
  * visible flicker; this panel is built with the fix in from the start. */
 static bool g_sensor_ui_valid;
 static bool g_sensor_ui_connected;
-static bool g_sensor_ui_online;
 static bool g_sensor_ui_has_reading;
 static float g_sensor_ui_temp;
-static float g_sensor_ui_humidity;
-static int g_sensor_ui_attempt_count;
-static uint16_t g_sensor_ui_last_rx_len;
 
 static bool g_sensor_connect_btn_valid;
 static bool g_sensor_connect_btn_connected;
 
 static void ui_refresh_sensor(void) {
-    /* Sidebar always shows unit 0's reading - meaningful in scan mode
-     * (the one shared reading, mirrored into every unit anyway) and
-     * hidden entirely in per-unit mode (see ui_refresh_sensor_mode()) in
-     * favor of each card showing its own. The Connect button itself is
-     * mode-independent (same physical port either way) and has its own
-     * small change-detection gate below, separate from the mode check. */
-    const SensorState *st = sensor_get_state(&g_sensor, 0);
+    /* Sidebar shows a rack-wide summary - the average across every unit
+     * that currently has a reading - since each unit now always has its
+     * own sensor at its own address (see UNIT_TEMP_ADDR); each card
+     * still shows its own individual reading. The Connect button has its
+     * own small change-detection gate below, separate from the average. */
     bool connected = sensor_is_connected(&g_sensor);
+    bool has_avg;
+    float avg_c = 0.0f;
     char text[64];
 
     if (!g_sensor_connect_btn_valid || g_sensor_connect_btn_connected != connected) {
@@ -692,99 +689,42 @@ static void ui_refresh_sensor(void) {
         g_sensor_connect_btn_connected = connected;
     }
 
-    if (sensor_get_mode(&g_sensor) != SENSOR_MODE_SCAN) {
-        return;
-    }
+    has_avg = sensor_average_temperature(&g_sensor, &avg_c);
 
     if (g_sensor_ui_valid && g_sensor_ui_connected == connected &&
-        g_sensor_ui_online == st->online && g_sensor_ui_has_reading == st->has_reading &&
-        g_sensor_ui_temp == st->temperature_c && g_sensor_ui_humidity == st->humidity_pct &&
-        g_sensor_ui_attempt_count == st->attempt_count && g_sensor_ui_last_rx_len == st->last_rx_len) {
+        g_sensor_ui_has_reading == has_avg && g_sensor_ui_temp == avg_c) {
         return; /* nothing shown by this panel has changed */
     }
 
     if (!connected) {
         lstrcpynA(text, "Disconnected", (int)sizeof(text));
-    } else if (st->online) {
+    } else if (has_avg) {
         lstrcpynA(text, "Online", (int)sizeof(text));
-    } else if (st->has_reading) {
-        wsprintfA(text, "Not responding (try %d, last %d B)", st->attempt_count, st->last_rx_len);
     } else {
-        /* Diagnostic counts shown even on the very first attempt, so a
-         * stuck "Reading..." is debuggable without extra tools: 0 bytes
-         * back after several tries means nothing is answering at all
-         * (wiring/adapter/settings), while >0 bytes means something
-         * replied but didn't parse as a valid Modbus frame. */
-        wsprintfA(text, "Reading... (try %d, last %d B)", st->attempt_count, st->last_rx_len);
+        lstrcpynA(text, "Reading...", (int)sizeof(text));
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
 
-    if (st->has_reading) {
-        wsprintfA(text, "%d.%d C",
-                  (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
+    if (has_avg) {
+        wsprintfA(text, "Avg %d.%d C", (int)avg_c, (int)(avg_c * 10) % 10);
     } else {
-        lstrcpynA(text, "-", (int)sizeof(text));
+        lstrcpynA(text, "Avg -", (int)sizeof(text));
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_GAUGE), NULL, FALSE);
 
-    if (st->has_reading) {
-        wsprintfA(text, "Humidity: %d.%d %%",
-                  (int)st->humidity_pct, (int)(st->humidity_pct * 10) % 10);
-    } else {
-        lstrcpynA(text, "Humidity: -", (int)sizeof(text));
-    }
-    SetDlgItemTextA(g_hwnd, IDC_SENSOR_HUMIDITY_LBL, text);
-
     g_sensor_ui_valid = true;
     g_sensor_ui_connected = connected;
-    g_sensor_ui_online = st->online;
-    g_sensor_ui_has_reading = st->has_reading;
-    g_sensor_ui_attempt_count = st->attempt_count;
-    g_sensor_ui_last_rx_len = st->last_rx_len;
-    g_sensor_ui_temp = st->temperature_c;
-    g_sensor_ui_humidity = st->humidity_pct;
-}
-
-/* Switches which sidebar controls are visible for the current sensor
- * mode - the single-reading status/gauge/temp/humidity block only means
- * anything in scan mode (one shared reading); per-unit mode shows a
- * short note instead and lets each card speak for itself. Called once
- * right after a mode change (not every tick - the visible set doesn't
- * change again until the user picks a different mode). */
-static void ui_refresh_sensor_mode(void) {
-    bool scan = sensor_get_mode(&g_sensor) == SENSOR_MODE_SCAN;
-    int i;
-
-    ShowWindow(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), scan ? SW_SHOW : SW_HIDE);
-    ShowWindow(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_GAUGE), scan ? SW_SHOW : SW_HIDE);
-    ShowWindow(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), scan ? SW_SHOW : SW_HIDE);
-    ShowWindow(GetDlgItem(g_hwnd, IDC_SENSOR_HUMIDITY_LBL), scan ? SW_SHOW : SW_HIDE);
-    ShowWindow(GetDlgItem(g_hwnd, IDC_SENSOR_MODE_NOTE_LBL), scan ? SW_HIDE : SW_SHOW);
-
-    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_MODE_SCAN_BTN), NULL, FALSE);
-    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_MODE_UNIT_BTN), NULL, FALSE);
-
-    /* Force the sidebar's own cache to re-evaluate on the next tick
-     * (harmless when re-entering scan mode with an unchanged reading -
-     * it'll just re-set the same text) and every card's temp readout to
-     * repaint with its now-current (freshly cleared by
-     * sensor_set_mode()) value instead of whatever was left over from
-     * the previous mode. */
-    g_sensor_ui_valid = false;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        InvalidateRect(GetDlgItem(g_hwnd, IDC_CH_BASE + i * IDC_CH_STRIDE + IDC_CH_TEMP_LBL_OFFSET), NULL, FALSE);
-    }
+    g_sensor_ui_has_reading = has_avg;
+    g_sensor_ui_temp = avg_c;
 }
 
 /* ---- kill switch ----
- * One trip flag per unit (see KILL_SWITCH_THRESHOLD_C's comment for why
- * per-unit): scan mode's mirrored reading naturally trips every unit in
- * the same tick since they all cross the threshold together, so no
- * separate "global" code path is needed - this loop handles both modes
- * uniformly. */
+ * One trip flag per unit (see KILL_SWITCH_THRESHOLD_C's comment for
+ * why) - each unit has its own sensor, so this loop just checks each
+ * one's own reading independently. */
 
 static bool g_kill_ui_valid;
 static int g_kill_ui_tripped_count;
@@ -850,9 +790,8 @@ static void check_kill_switch(void) {
     }
 }
 
-/* Sidebar's Reset button - resets every currently-tripped unit at once.
- * In scan mode that's normally all 16 (they trip together); in per-unit
- * mode it's whichever ones happen to be over - a convenient "reset
+/* Sidebar's Reset button - resets every currently-tripped unit at once
+ * (whichever ones happen to be over threshold) - a convenient "reset
  * everything" alongside each card's own single-unit reset (see
  * on_unit_kill_reset()). */
 static void on_kill_reset_clicked(void) {
@@ -1121,14 +1060,12 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_panel[index] = add_panel(hwnd, x, y, CARD_W, CARD_H);
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
-    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 200, 16);
+    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 180, 16);
 
-    /* Left column - compressed a bit (was y+26/52/78 with 22px-tall
-     * buttons) to make clean room for the Bandwidth/Temp row below it,
-     * rather than just relying on the slack the taller gauge column
-     * already left underneath. */
+    /* Left column - narrower than before (CARD_W shrunk 246->220) to
+     * leave room for the gauge column without the two overlapping. */
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 24, 96, 120, channel_mode_id(index));
+                           x + 8, y + 22, 84, 110, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
         SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -1137,48 +1074,39 @@ static void add_channel_card(HWND hwnd, int index) {
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 108, y + 24, 46, 20, channel_set_id(index));
+             x + 96, y + 22, 40, 18, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-             x + 8, y + 46, 71, 20, channel_on_id(index));
+             x + 8, y + 42, 58, 18, channel_on_id(index));
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-             x + 83, y + 46, 71, 20, channel_off_id(index));
+             x + 70, y + 42, 58, 18, channel_off_id(index));
 
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
-             x + 8, y + 68, 146, 16, channel_status_id(index));
+             x + 8, y + 62, 120, 14, channel_status_id(index));
 
-    /* Bottom row: this channel's (currently fixed/blind, not per-channel
-     * configurable - see CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h)
-     * bandwidth, and this unit's own temperature - its own sensor
-     * reading (mode 2 / per-unit) or the shared scan reading (mode 1) -
-     * see IDC_CH_TEMP_LBL_OFFSET in resource.h for why it's also the
-     * per-unit kill-switch reset. */
     /* Right column: custom gradient level gauge (Off at bottom, High at
-     * top, like a volume slider) + tick labels. Trimmed from 88 to 78
-     * tall (and labels re-spaced to match) to leave room below it for
-     * the full-width Bandwidth/Temp row - it needs the whole card width,
-     * so it has to sit below where this column ends, not beside it. */
-    add_channel_gauge(hwnd, x + 164, y + 26, 26, 78, channel_track_id(index));
+     * top, like a volume slider) + tick labels. */
+    add_channel_gauge(hwnd, x + 138, y + 24, 24, 70, channel_track_id(index));
 
-    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 194, y + 26, 44, 16, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 194, y + 45, 44, 16, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 194, y + 64, 44, 16, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 194, y + 83, 44, 16, channel_lbl_off_id(index));
+    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 166, y + 24, 44, 14, channel_lbl_high_id(index));
+    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 166, y + 42, 44, 14, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 166, y + 60, 44, 14, channel_lbl_low_id(index));
+    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 166, y + 78, 44, 14, channel_lbl_off_id(index));
 
     /* Bottom row, full card width, below both columns: this channel's
      * (currently fixed/blind, not per-channel configurable - see
      * CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h) bandwidth, and this
-     * unit's own temperature - its own sensor reading (mode 2 / per-unit)
-     * or the shared scan reading (mode 1) - see IDC_CH_TEMP_LBL_OFFSET in
-     * resource.h for why it's also the per-unit kill-switch reset. */
+     * unit's own temperature - its own sensor's reading - see
+     * IDC_CH_TEMP_LBL_OFFSET in resource.h for why it's also the
+     * per-unit kill-switch reset. */
     {
         char bw_text[24];
         wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
         g_card_bandwidth_lbl[index] = add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
-                                                x + 8, y + 108, 96, 16, 0);
+                                                x + 8, y + 96, 96, 14, 0);
     }
     add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 104, y + 108, 134, 16, channel_temp_id(index));
+             x + 96, y + 96, 116, 14, channel_temp_id(index));
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -1358,7 +1286,7 @@ static void build_controls(HWND hwnd) {
      * gets added here later. Full width, same 6px top margin and 8px
      * gap-before-content as every other panel-to-panel spacing below. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
-    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 16, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 28);
+    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 22, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 40);
 
     /* Sidebar: one tall box spanning the channel grid's full height,
      * Connection & Settings / Amplifier Temperature / Activity Log
@@ -1387,29 +1315,22 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 224, 90, 160, IDC_SENSOR_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 224, 56, 22, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 224, 66, 22, IDC_SENSOR_CONNECT_BTN);
-    /* Scan: one sensor for the whole rack (address 1), mirrored to every
-     * unit's card. Per-Unit: one sensor per unit, address == unit number -
-     * each card shows and protects only its own reading. */
-    add_ctrl(hwnd, "STATIC", "Mode:", SS_LEFT, 22, 250, 38, 16, 0);
-    add_ctrl(hwnd, "BUTTON", "Scan", BS_OWNERDRAW | WS_TABSTOP, 62, 246, 66, 22, IDC_SENSOR_MODE_SCAN_BTN);
-    add_ctrl(hwnd, "BUTTON", "Per-Unit", BS_OWNERDRAW | WS_TABSTOP, 132, 246, 74, 22, IDC_SENSOR_MODE_UNIT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 276, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 298, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 298, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 322, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
-    add_ctrl(hwnd, "STATIC", "Per-unit mode: each unit's own reading shows on its own card above.",
-             SS_LEFT, 22, 276, 270, 44, IDC_SENSOR_MODE_NOTE_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 346, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 344, 80, 22, IDC_KILL_RESET_BTN);
+    /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
+     * no mode toggle needed anymore. This status/gauge shows the rack-
+     * wide average; each card shows its own individual reading. */
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 250, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 272, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 272, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 296, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 294, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-    ShowWindow(GetDlgItem(hwnd, IDC_SENSOR_MODE_NOTE_LBL), SW_HIDE); /* default mode is Scan */
 
-    add_header_icon(hwnd, 22, 394, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 394, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 392, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_header_icon(hwnd, 22, 346, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 346, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 344, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 416, 281, 176, IDC_LOG_LISTBOX);
+             22, 368, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1466,22 +1387,22 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 
     PLACE(g_card_panel[index], x, y, card_w, card_h);
     PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
-    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(200), SY(16));
+    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(180), SY(16));
 
-    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(96), 120);
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(108), y + SY(24), SX(46), SY(20));
-    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(46), SX(71), SY(20));
-    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(83), y + SY(46), SX(71), SY(20));
-    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(68), SX(146), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(22), SX(84), 110);
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(96), y + SY(22), SX(40), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(42), SX(58), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(70), y + SY(42), SX(58), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(62), SX(120), SY(14));
 
-    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(164), y + SY(26), SX(26), SY(78));
-    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(26), SX(44), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(45), SX(44), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(64), SX(44), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(83), SX(44), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(138), y + SY(24), SX(24), SY(70));
+    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(166), y + SY(24), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(166), y + SY(42), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(166), y + SY(60), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(166), y + SY(78), SX(44), SY(14));
 
-    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(108), SX(96), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(104), y + SY(108), SX(134), SY(16));
+    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(96), SX(96), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(96), y + SY(96), SX(116), SY(14));
 
 #undef SX
 #undef SY
@@ -1512,7 +1433,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     if (card_h < CARD_H) card_h = CARD_H;
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_title_ctrl, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, FALSE);
+    MoveWindow(g_title_ctrl, 22, 22, client_w - 2 * SIDEBAR_X - 32, 40, FALSE);
 
     sidebar_h = GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, FALSE);
@@ -1520,7 +1441,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
     listbox = GetDlgItem(hwnd, IDC_LOG_LISTBOX);
     if (listbox) {
-        MoveWindow(listbox, 22, 416, 281, 176 + extra_log_h, FALSE);
+        MoveWindow(listbox, 22, 368, 281, 176 + extra_log_h, FALSE);
     }
 
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -1559,7 +1480,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_header_font = g_font;
             }
 
-            g_title_font = CreateFontA(-24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            g_title_font = CreateFontA(-32, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                         ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                         DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
             if (!g_title_font) {
@@ -1588,7 +1509,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
             ui_refresh_all_channels();
             ui_refresh_sensor();
-            ui_refresh_sensor_mode();
             return 0;
         }
 
@@ -1669,16 +1589,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_sensor_connect_clicked();
                 return 0;
             }
-            if (id == IDC_SENSOR_MODE_SCAN_BTN && code == BN_CLICKED) {
-                sensor_set_mode(&g_sensor, SENSOR_MODE_SCAN);
-                ui_refresh_sensor_mode();
-                return 0;
-            }
-            if (id == IDC_SENSOR_MODE_UNIT_BTN && code == BN_CLICKED) {
-                sensor_set_mode(&g_sensor, SENSOR_MODE_PER_UNIT);
-                ui_refresh_sensor_mode();
-                return 0;
-            }
             if (id == IDC_KILL_RESET_BTN && code == BN_CLICKED) {
                 on_kill_reset_clicked();
                 return 0;
@@ -1732,17 +1642,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return (LRESULT)g_brush_panel;
             }
             if (ctl == GetDlgItem(hwnd, IDC_SENSOR_STATUS_LBL)) {
-                const SensorState *st = sensor_get_state(&g_sensor, 0);
+                float avg_c;
+                bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
                 COLORREF col = !sensor_is_connected(&g_sensor) ? COLOR_APP_DISCONNECTED
-                             : st->online ? COLOR_APP_CONNECTED
+                             : has_avg ? COLOR_APP_CONNECTED
                              : COLOR_APP_ACCENT;
                 SetTextColor(hdc, col);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
             if (ctl == GetDlgItem(hwnd, IDC_SENSOR_TEMP_LBL)) {
-                const SensorState *st = sensor_get_state(&g_sensor, 0);
-                SetTextColor(hdc, st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED);
+                float avg_c;
+                bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+                SetTextColor(hdc, has_avg ? temp_band_color(avg_c) : COLOR_APP_MUTED);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
@@ -1834,32 +1746,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     HBRUSH fill = active
                         ? (offset == IDC_CH_ON_OFFSET ? g_brush_connected : g_brush_disconnected)
                         : g_brush_panel;
-                    HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-                    HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
-                    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, fill);
-
-                    Rectangle(dis->hDC, rc.left, rc.top, rc.right, rc.bottom);
-                    SelectObject(dis->hDC, old_brush);
-                    SelectObject(dis->hDC, old_pen);
-                    DeleteObject(pen);
-
-                    SetTextColor(dis->hDC, active ? RGB(255, 255, 255) : COLOR_APP_MUTED);
-                    SetBkMode(dis->hDC, TRANSPARENT);
-                    GetWindowTextA(dis->hwndItem, text, sizeof(text));
-                    DrawTextA(dis->hDC, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                    return TRUE;
-                }
-
-                /* Scan / Per-Unit sensor mode - same active/inactive
-                 * pattern as ON/OFF above (solid fill for the active
-                 * one), just both sharing one accent color instead of
-                 * green/red since neither reading is inherently good or
-                 * bad the way power on/off is. */
-                if (dis->CtlID == IDC_SENSOR_MODE_SCAN_BTN || dis->CtlID == IDC_SENSOR_MODE_UNIT_BTN) {
-                    bool active = (dis->CtlID == IDC_SENSOR_MODE_SCAN_BTN)
-                        ? (sensor_get_mode(&g_sensor) == SENSOR_MODE_SCAN)
-                        : (sensor_get_mode(&g_sensor) == SENSOR_MODE_PER_UNIT);
-                    HBRUSH fill = active ? g_brush_accent : g_brush_panel;
                     HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
                     HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
                     HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, fill);

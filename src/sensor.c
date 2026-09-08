@@ -14,7 +14,6 @@ void sensor_init(Sensor *s) {
     memset(s, 0, sizeof(*s));
     s->port.handle = INVALID_HANDLE_VALUE;
     s->poll_state = SENSOR_POLL_IDLE;
-    s->mode = SENSOR_MODE_SCAN;
     for (i = 0; i < SENSOR_MAX_UNITS; i++) {
         s->unit_addr[i] = (uint8_t)(i + 1);
     }
@@ -64,26 +63,24 @@ const SensorState *sensor_get_state(const Sensor *s, int unit_index) {
     return &s->units[unit_index];
 }
 
-SensorMode sensor_get_mode(const Sensor *s) {
-    return s->mode;
-}
-
-void sensor_set_mode(Sensor *s, SensorMode mode) {
-    if (s->mode == mode) {
-        return;
+bool sensor_average_temperature(const Sensor *s, float *out_avg_c) {
+    int i, count = 0;
+    float sum = 0.0f;
+    for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+        if (s->units[i].has_reading) {
+            sum += s->units[i].temperature_c;
+            count++;
+        }
     }
-    s->mode = mode;
-    s->current_unit = 0;
-    sensor_reset_units(s);
-    /* Re-poll right away under the new mode instead of waiting out
-     * whatever interval was already in flight under the old one. */
-    if (s->poll_state == SENSOR_POLL_IDLE) {
-        s->next_poll_at = GetTickCount();
+    if (count == 0) {
+        return false;
     }
+    *out_avg_c = sum / (float)count;
+    return true;
 }
 
 static int sensor_current_slave_addr(const Sensor *s) {
-    return (s->mode == SENSOR_MODE_PER_UNIT) ? s->unit_addr[s->current_unit] : SENSOR_SLAVE_ADDR;
+    return s->unit_addr[s->current_unit];
 }
 
 void sensor_set_unit_address(Sensor *s, int unit_index, uint8_t addr) {
@@ -122,9 +119,8 @@ static void sensor_send_request(Sensor *s) {
     s->response_deadline = GetTickCount() + SENSOR_RESPONSE_TIMEOUT_MS;
 }
 
-/* Applies a finished cycle's result to whichever unit(s) it's for, then
- * schedules the next poll and advances current_unit (per-unit mode only -
- * scan mode always re-polls the same one address). */
+/* Applies a finished cycle's result, then schedules the next poll and
+ * advances to the next unit (round-robin). */
 static void sensor_finish_cycle(Sensor *s, bool got_valid_reply) {
     int polled_unit = s->current_unit;
     DWORD now = GetTickCount();
@@ -134,21 +130,8 @@ static void sensor_finish_cycle(Sensor *s, bool got_valid_reply) {
     s->rx_len = 0;
     s->poll_state = SENSOR_POLL_IDLE;
 
-    if (s->mode == SENSOR_MODE_SCAN) {
-        /* One shared reading for the whole rack - mirror it into every
-         * unit's slot so callers displaying a specific unit's card never
-         * need to know which mode is active. */
-        int i;
-        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-            if (i != polled_unit) {
-                s->units[i] = s->units[polled_unit];
-            }
-        }
-        s->next_poll_at = now + SENSOR_POLL_INTERVAL_MS;
-    } else {
-        s->current_unit = (polled_unit + 1) % SENSOR_MAX_UNITS;
-        s->next_poll_at = now + SENSOR_PER_UNIT_GAP_MS;
-    }
+    s->current_unit = (polled_unit + 1) % SENSOR_MAX_UNITS;
+    s->next_poll_at = now + SENSOR_PER_UNIT_GAP_MS;
 }
 
 void sensor_poll(Sensor *s) {
