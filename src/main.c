@@ -871,10 +871,11 @@ static bool channel_index_from_id(int id, int *out_idx) {
 
 /* ---- per-channel level gradient gauge ----
  * Replaces the native trackbar with a custom-drawn vertical gradient
- * (muted gray -> green -> orange -> red, Off at bottom to High at top)
- * plus a marker line for the current level - same visual language as
- * the temperature gauge, and click/drag anywhere on it to set the
- * level directly instead of dragging a thumb. Reuses gradient_fill_rect
+ * (muted gray -> green -> orange -> red, Off at bottom to High at top),
+ * divided into 4 clearly bordered zones (Off/Low/Medium/High) with the
+ * current one framed in a bright outline - same visual language as the
+ * temperature gauge, and click/drag anywhere on it to set the level
+ * directly instead of dragging a thumb. Reuses gradient_fill_rect
  * (already linked via msimg32 for the temperature gauge), so this adds
  * no new dependency or meaningful size. */
 static COLORREF ch_gauge_stop_color(int level) {
@@ -942,24 +943,52 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
             RECT seg = rc;
             seg.top = rc.top + h * i / 3;
             seg.bottom = rc.top + h * (i + 1) / 3;
-            /* i=0 is the bottom third (Off->Low), i=2 the top third
-             * (Medium->High) - stop colors indexed 0..3 bottom to top. */
-            gradient_fill_rect(hdc, seg, ch_gauge_stop_color(i), ch_gauge_stop_color(i + 1), true);
+            /* RECT.top is the smaller y (visually higher), so i=0 is
+             * the TOP third on screen - paint it from stop(3)=HIGH/red
+             * downward, matching the High/Medium/Low/Off labels'
+             * top-to-bottom order (and ch_gauge_level_from_y()'s
+             * banding). Stop colors indexed 0=OFF..3=HIGH. */
+            gradient_fill_rect(hdc, seg, ch_gauge_stop_color(3 - i), ch_gauge_stop_color(2 - i), true);
+        }
+
+        /* Divider lines at each of the 4 click zones' boundaries
+         * (Off/Low/Medium/High, bottom to top) - the gradient blends
+         * smoothly across them, so without these the zones a click
+         * actually snaps to (see ch_gauge_level_from_y()) were
+         * invisible; this is what made the gauge feel like "just a
+         * gradient with a hard-to-see line", not 4 clickable levels. */
+        {
+            HPEN divider_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PAGE_BG);
+            HPEN old_pen = (HPEN)SelectObject(hdc, divider_pen);
+            for (i = 1; i < 4; i++) {
+                int div_y = rc.top + h * i / 4;
+                MoveToEx(hdc, rc.left, div_y, NULL);
+                LineTo(hdc, rc.right, div_y);
+            }
+            SelectObject(hdc, old_pen);
+            DeleteObject(divider_pen);
         }
 
         if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
             const ChannelState *ch = channels_get(idx);
-            /* Centered in the quarter-band ch_gauge_level_from_y() maps
-             * to this level (band 0 = top/HIGH .. band 3 = bottom/OFF) -
-             * must match that function's banding, not the gradient's
-             * thirds, or the line lands on a band edge instead of
-             * inside the zone a click on it actually selects. */
+            /* Frame the whole selected zone, not just a thin line
+             * through it - band 0 = top/HIGH .. band 3 = bottom/OFF,
+             * matching ch_gauge_level_from_y()'s banding exactly so the
+             * frame lines up with the zone a click on it actually
+             * selects. Bright, high-contrast border (not a dark line
+             * that disappears into the gradient's own dark stops). */
             int band = 3 - ch->level;
-            int marker_y = rc.top + (2 * band + 1) * h / 8;
-            HPEN pen = CreatePen(PS_SOLID, 2, RGB(20, 20, 22));
-            HPEN old_pen = (HPEN)SelectObject(hdc, pen);
-            MoveToEx(hdc, rc.left, marker_y, NULL);
-            LineTo(hdc, rc.right, marker_y);
+            RECT zone = rc;
+            HPEN pen;
+            HPEN old_pen;
+            HBRUSH old_brush;
+            zone.top = rc.top + h * band / 4;
+            zone.bottom = rc.top + h * (band + 1) / 4;
+            pen = CreatePen(PS_SOLID, 2, COLOR_APP_TEXT);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            Rectangle(hdc, zone.left, zone.top, zone.right, zone.bottom);
+            SelectObject(hdc, old_brush);
             SelectObject(hdc, old_pen);
             DeleteObject(pen);
         }
