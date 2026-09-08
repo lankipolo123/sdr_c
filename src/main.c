@@ -133,6 +133,10 @@ static HWND g_card_header[MAX_CHANNELS];
 static HWND g_card_bandwidth_lbl[MAX_CHANNELS];
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
+static int g_last_client_w = -1; /* last size relayout_for_size() actually
+                                    * ran for - skip WM_SIZE calls that don't
+                                    * change this (see WM_SIZE below) */
+static int g_last_client_h = -1;
 
 /* ---- small control-creation helper ---- */
 
@@ -1607,7 +1611,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         case WM_SIZE:
             if (wParam != SIZE_MINIMIZED) {
-                relayout_for_size(hwnd, LOWORD(lParam), HIWORD(lParam));
+                /* Windows can send WM_SIZE with unchanged dimensions in
+                 * some edge cases (activation, DPI/monitor changes) -
+                 * skip the ~240-control relayout pass when the size
+                 * didn't actually change, including the redundant one
+                 * right after the startup pre-layout already handled
+                 * this exact size before the window was ever shown. */
+                int new_w = LOWORD(lParam);
+                int new_h = HIWORD(lParam);
+                if (new_w != g_last_client_w || new_h != g_last_client_h) {
+                    g_last_client_w = new_w;
+                    g_last_client_h = new_h;
+                    relayout_for_size(hwnd, new_w, new_h);
+                }
             }
             return 0;
 
@@ -1926,9 +1942,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_silver = CreateSolidBrush(COLOR_APP_SILVER);
     build_dot_pattern_brush();
 
+    /* NOT CS_HREDRAW | CS_VREDRAW - that forces the ENTIRE window to
+     * repaint on every resize, on top of the explicit repaint
+     * relayout_for_size() already does itself; on a live resize drag
+     * that was two full-window erase+repaints per frame instead of
+     * one. relayout_for_size() invalidating what it just changed is
+     * enough. */
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = 0;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hIcon = (HICON)LoadImageA(hInstance, MAKEINTRESOURCEA(IDI_APP_ICON), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
@@ -1987,6 +2009,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             client_w = (work_area.right - work_area.left) - (chrome.right - chrome.left);
             client_h = (work_area.bottom - work_area.top) - (chrome.bottom - chrome.top);
             relayout_for_size(hwnd, client_w, client_h);
+            g_last_client_w = client_w;
+            g_last_client_h = client_h;
         }
     }
 
