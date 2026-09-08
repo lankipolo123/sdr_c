@@ -114,6 +114,8 @@ static HBRUSH g_brush_dot;
 static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
 static HBRUSH g_brush_silver;
+static HBRUSH g_brush_dot_pattern; /* tiled DOT_GRID_SPACING x DOT_GRID_SPACING bitmap brush */
+static HBITMAP g_dot_pattern_bmp;
 
 static Connection g_conn;
 static Sensor g_sensor;
@@ -334,18 +336,42 @@ static HWND add_header_icon(HWND parent, int x, int y, int type) {
     return ctrl;
 }
 
-static void draw_dot_grid(HDC hdc, const RECT *rc) {
-    int x, y;
-    for (y = DOT_GRID_SPACING / 2; y < rc->bottom; y += DOT_GRID_SPACING) {
-        for (x = DOT_GRID_SPACING / 2; x < rc->right; x += DOT_GRID_SPACING) {
-            RECT dot;
-            dot.left = x;
-            dot.top = y;
-            dot.right = x + DOT_GRID_SIZE;
-            dot.bottom = y + DOT_GRID_SIZE;
-            FillRect(hdc, &dot, g_brush_dot);
-        }
-    }
+/* Builds an 8x8 (DOT_GRID_SPACING^2) tile bitmap with one dot in it and
+ * wraps it as a pattern brush - GDI tiles a pattern brush automatically
+ * on fill, so painting the whole background is ONE FillRect call
+ * instead of a manual loop calling FillRect once per dot. On a
+ * maximized real monitor (e.g. 1920x1080) the old loop was 30,000+
+ * individual GDI calls on every single background erase (every resize,
+ * every alt-tab back, every restore from minimized) - by far the
+ * biggest cost in the whole app, nothing else came close. */
+static void build_dot_pattern_brush(void) {
+    HDC screen_dc, mem_dc;
+    HBITMAP old_bmp;
+    RECT tile, dot;
+
+    screen_dc = GetDC(NULL);
+    mem_dc = CreateCompatibleDC(screen_dc);
+    g_dot_pattern_bmp = CreateCompatibleBitmap(screen_dc, DOT_GRID_SPACING, DOT_GRID_SPACING);
+    ReleaseDC(NULL, screen_dc);
+
+    old_bmp = (HBITMAP)SelectObject(mem_dc, g_dot_pattern_bmp);
+
+    tile.left = 0;
+    tile.top = 0;
+    tile.right = DOT_GRID_SPACING;
+    tile.bottom = DOT_GRID_SPACING;
+    FillRect(mem_dc, &tile, g_brush_page);
+
+    dot.left = DOT_GRID_SPACING / 2;
+    dot.top = DOT_GRID_SPACING / 2;
+    dot.right = dot.left + DOT_GRID_SIZE;
+    dot.bottom = dot.top + DOT_GRID_SIZE;
+    FillRect(mem_dc, &dot, g_brush_dot);
+
+    SelectObject(mem_dc, old_bmp);
+    DeleteDC(mem_dc);
+
+    g_brush_dot_pattern = CreatePatternBrush(g_dot_pattern_bmp);
 }
 
 /* ---- temperature gauge ----
@@ -1601,8 +1627,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             HDC hdc = (HDC)wParam;
             RECT rc;
             GetClientRect(hwnd, &rc);
-            FillRect(hdc, &rc, g_brush_page);
-            draw_dot_grid(hdc, &rc);
+            /* Pattern brush already encodes the page background color
+             * in its tile - no separate full-rect FillRect needed. */
+            FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
             return 1;
         }
 
@@ -1866,6 +1893,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_connected) DeleteObject(g_brush_connected);
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
             if (g_brush_silver) DeleteObject(g_brush_silver);
+            if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
+            if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             if (g_title_font && g_title_font != g_header_font) DeleteObject(g_title_font);
             PostQuitMessage(0);
@@ -1895,6 +1924,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
     g_brush_silver = CreateSolidBrush(COLOR_APP_SILVER);
+    build_dot_pattern_brush();
 
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
@@ -1923,14 +1953,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
      * its designed size within whatever the window's actual size is. */
     AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME, FALSE, 0);
 
-    /* WS_EX_COMPOSITED: makes Windows/DWM composite this window and all
-     * its children off-screen before presenting, instead of each of the
-     * 240+ individually custom-painted controls (panels, gauges,
-     * owner-draw buttons) drawing straight to screen one at a time -
-     * that's what made a full repaint (on resize/maximize, on being
-     * uncovered by alt-tab, on restore from minimize) visibly draw
-     * itself piece by piece instead of just appearing. */
-    hwnd = CreateWindowExA(WS_EX_COMPOSITED, "DigitalNoiseConfigMultiMainWindow", "Digital Noise Configuration - Multi",
+    /* NOT WS_EX_COMPOSITED - tried it here to smooth out full repaints,
+     * but with 240+ child controls it made DWM's per-child compositing
+     * overhead worse, not better (real hardware showed panels rendering
+     * with all their content missing/delayed). The actual cost was
+     * draw_dot_grid() below - fixed properly there instead. */
+    hwnd = CreateWindowExA(0, "DigitalNoiseConfigMultiMainWindow", "Digital Noise Configuration - Multi",
                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             rect.right - rect.left, rect.bottom - rect.top,
