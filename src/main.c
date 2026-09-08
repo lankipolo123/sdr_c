@@ -1385,40 +1385,54 @@ static void build_controls(HWND hwnd) {
     g_layout_ready = true;
 }
 
-/* Moves one channel card (and everything in it) to a new top-left,
- * without changing anything's size - called on WM_SIZE with a
- * recomputed (x, y) so the grid can spread out to fill a larger window.
- * Every offset here must match add_channel_card()'s creation offsets
- * exactly - keep the two in sync if either changes. */
-static void position_channel_card(HWND hwnd, int index, int x, int y) {
-    MoveWindow(g_card_panel[index], x, y, CARD_W, CARD_H, TRUE);
-    MoveWindow(g_card_icon[index], x + 8, y + 6, 14, 14, TRUE);
-    MoveWindow(g_card_header[index], x + 26, y + 6, 200, 16, TRUE);
+/* Moves AND resizes one channel card to a new rect, scaling every
+ * control inside it proportionally (card_w/card_h vs. the designed
+ * CARD_W/CARD_H) rather than leaving them their designed size - so
+ * extra window space actually gets used by the cards themselves
+ * instead of sitting empty as gaps between them. The icon stays a
+ * fixed 14x14 (icons scaling blurrily is worse than a small icon in a
+ * bigger card) and text stays the system font's normal size (buttons/
+ * labels just get more padding) - everything else's position and size
+ * scales. Every offset here must match add_channel_card()'s creation
+ * offsets exactly - keep the two in sync if either changes. */
+static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w, int card_h) {
+    double sx = (double)card_w / CARD_W;
+    double sy = (double)card_h / CARD_H;
+#define SX(v) ((int)((v) * sx + 0.5))
+#define SY(v) ((int)((v) * sy + 0.5))
 
-    MoveWindow(GetDlgItem(hwnd, channel_mode_id(index)), x + 8, y + 24, 96, 120, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_set_id(index)), x + 108, y + 24, 46, 20, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_on_id(index)), x + 8, y + 46, 71, 20, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_off_id(index)), x + 83, y + 46, 71, 20, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_status_id(index)), x + 8, y + 68, 146, 16, TRUE);
+    MoveWindow(g_card_panel[index], x, y, card_w, card_h, TRUE);
+    MoveWindow(g_card_icon[index], x + SX(8), y + SY(6), 14, 14, TRUE);
+    MoveWindow(g_card_header[index], x + SX(26), y + SY(6), SX(200), SY(16), TRUE);
 
-    MoveWindow(GetDlgItem(hwnd, channel_track_id(index)), x + 164, y + 26, 26, 78, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + 194, y + 26, 44, 16, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + 194, y + 45, 44, 16, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + 194, y + 64, 44, 16, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + 194, y + 83, 44, 16, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(96), 120, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_set_id(index)), x + SX(108), y + SY(24), SX(46), SY(20), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(46), SX(71), SY(20), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_off_id(index)), x + SX(83), y + SY(46), SX(71), SY(20), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(68), SX(146), SY(16), TRUE);
 
-    MoveWindow(g_card_bandwidth_lbl[index], x + 8, y + 108, 96, 16, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_temp_id(index)), x + 104, y + 108, 134, 16, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_track_id(index)), x + SX(164), y + SY(26), SX(26), SY(78), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(26), SX(44), SY(16), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(45), SX(44), SY(16), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(64), SX(44), SY(16), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(83), SX(44), SY(16), TRUE);
+
+    MoveWindow(g_card_bandwidth_lbl[index], x + SX(8), y + SY(108), SX(96), SY(16), TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(104), y + SY(108), SX(134), SY(16), TRUE);
+
+#undef SX
+#undef SY
 }
 
 /* Recomputes the whole layout for a new client size: header bar and
- * sidebar stretch to fill (their contents' positions stay fixed - only
- * the header's width and the sidebar's/log's height change), and the
- * 16 cards spread out to fill the rest by growing the gaps BETWEEN
- * them - each card stays its designed CARD_W x CARD_H size rather than
- * being stretched itself, so nothing inside a card needs rescaling. */
+ * sidebar stretch to fill (the sidebar's own content stays fixed size -
+ * only its and the log's height change), and the 16 cards themselves
+ * grow to fill the rest of the space (gap between them stays the
+ * designed CARD_GAP) - extra window space becomes bigger cards, not
+ * empty gaps. Never shrinks below the designed CARD_W x CARD_H (see
+ * WM_GETMINMAXINFO, which stops the window itself getting that small). */
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
-    int avail_w, avail_h, gap_x, gap_y, sidebar_h, extra_log_h, i;
+    int avail_w, avail_h, card_w, card_h, sidebar_h, extra_log_h, i;
     HWND listbox;
 
     if (!g_layout_ready) {
@@ -1428,15 +1442,15 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     avail_w = client_w - GRID_LEFT - SIDEBAR_X;
     avail_h = client_h - CONTENT_TOP - 12;
 
-    gap_x = (GRID_COLS > 1) ? (avail_w - GRID_COLS * CARD_W) / (GRID_COLS - 1) : CARD_GAP;
-    if (gap_x < CARD_GAP) gap_x = CARD_GAP;
-    gap_y = (GRID_ROWS > 1) ? (avail_h - GRID_ROWS * CARD_H) / (GRID_ROWS - 1) : CARD_GAP;
-    if (gap_y < CARD_GAP) gap_y = CARD_GAP;
+    card_w = (avail_w - (GRID_COLS - 1) * CARD_GAP) / GRID_COLS;
+    if (card_w < CARD_W) card_w = CARD_W;
+    card_h = (avail_h - (GRID_ROWS - 1) * CARD_GAP) / GRID_ROWS;
+    if (card_h < CARD_H) card_h = CARD_H;
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, TRUE);
     MoveWindow(g_title_ctrl, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, TRUE);
 
-    sidebar_h = GRID_ROWS * CARD_H + (GRID_ROWS - 1) * gap_y;
+    sidebar_h = GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, TRUE);
 
     extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
@@ -1448,9 +1462,9 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
-        int card_x = GRID_LEFT + col * (CARD_W + gap_x);
-        int card_y = CONTENT_TOP + row * (CARD_H + gap_y);
-        position_channel_card(hwnd, i, card_x, card_y);
+        int card_x = GRID_LEFT + col * (card_w + CARD_GAP);
+        int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
+        position_channel_card(hwnd, i, card_x, card_y, card_w, card_h);
     }
 }
 
