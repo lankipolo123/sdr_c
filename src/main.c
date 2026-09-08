@@ -883,14 +883,15 @@ static bool channel_index_from_id(int id, int *out_idx) {
 }
 
 /* ---- per-channel level gradient gauge ----
- * Replaces the native trackbar with a custom-drawn vertical gradient
- * (muted gray -> green -> orange -> red, Off at bottom to High at top),
- * divided into 4 clearly bordered zones (Off/Low/Medium/High) with the
- * current one framed in a bright outline - same visual language as the
- * temperature gauge, and click/drag anywhere on it to set the level
- * directly instead of dragging a thumb. Reuses gradient_fill_rect
- * (already linked via msimg32 for the temperature gauge), so this adds
- * no new dependency or meaningful size. */
+ * Replaces the native trackbar with 4 stacked solid-color blocks (Off
+ * at bottom to High at top, matching the High/Medium/Low/Off labels
+ * beside it) with a real gap between them - the selected level's block
+ * is shown at full color, the other 3 dimmed, so which of the 4 levels
+ * is active is obvious at a glance. (Earlier version used a smooth
+ * gradient with thin divider lines cut across it - looked like a
+ * blurry, blocky mess once the cards got bigger on a wide window;
+ * plain flat blocks read cleanly at any size.) Click/drag anywhere on
+ * it to set the level directly instead of dragging a thumb. */
 static COLORREF ch_gauge_stop_color(int level) {
     switch (level) {
         case LEVEL_OFF:    return COLOR_APP_MUTED;
@@ -898,6 +899,16 @@ static COLORREF ch_gauge_stop_color(int level) {
         case LEVEL_MEDIUM: return RGB(224, 146, 34);
         default:           return COLOR_APP_DISCONNECTED; /* LEVEL_HIGH */
     }
+}
+
+/* Blends c toward the panel background, for the 3 non-selected blocks -
+ * t=0 keeps c as-is, t=1 is fully background-colored. */
+static COLORREF ch_gauge_dim_color(COLORREF c) {
+    const double t = 0.6;
+    int r = (int)(GetRValue(c) * (1.0 - t) + GetRValue(COLOR_APP_PANEL_BG) * t + 0.5);
+    int g = (int)(GetGValue(c) * (1.0 - t) + GetGValue(COLOR_APP_PANEL_BG) * t + 0.5);
+    int b = (int)(GetBValue(c) * (1.0 - t) + GetBValue(COLOR_APP_PANEL_BG) * t + 0.5);
+    return RGB(r, g, b);
 }
 
 /* Maps a Y coordinate inside the gauge to a level (0-3), top=High,
@@ -952,58 +963,39 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         GetClientRect(hwnd, &rc);
         h = rc.bottom - rc.top;
 
-        for (i = 0; i < 3; i++) {
-            RECT seg = rc;
-            seg.top = rc.top + h * i / 3;
-            seg.bottom = rc.top + h * (i + 1) / 3;
-            /* RECT.top is the smaller y (visually higher), so i=0 is
-             * the TOP third on screen - paint it from stop(3)=HIGH/red
-             * downward, matching the High/Medium/Low/Off labels'
-             * top-to-bottom order (and ch_gauge_level_from_y()'s
-             * banding). Stop colors indexed 0=OFF..3=HIGH. */
-            gradient_fill_rect(hdc, seg, ch_gauge_stop_color(3 - i), ch_gauge_stop_color(2 - i), true);
-        }
-
-        /* Divider lines at each of the 4 click zones' boundaries
-         * (Off/Low/Medium/High, bottom to top) - the gradient blends
-         * smoothly across them, so without these the zones a click
-         * actually snaps to (see ch_gauge_level_from_y()) were
-         * invisible; this is what made the gauge feel like "just a
-         * gradient with a hard-to-see line", not 4 clickable levels. */
         {
-            HPEN divider_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PAGE_BG);
-            HPEN old_pen = (HPEN)SelectObject(hdc, divider_pen);
-            for (i = 1; i < 4; i++) {
-                int div_y = rc.top + h * i / 4;
-                MoveToEx(hdc, rc.left, div_y, NULL);
-                LineTo(hdc, rc.right, div_y);
+            int selected_level = -1; /* nothing selected yet -> everything dim */
+            if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
+                selected_level = channels_get(idx)->level;
             }
-            SelectObject(hdc, old_pen);
-            DeleteObject(divider_pen);
-        }
 
-        if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
-            const ChannelState *ch = channels_get(idx);
-            /* Frame the whole selected zone, not just a thin line
-             * through it - band 0 = top/HIGH .. band 3 = bottom/OFF,
-             * matching ch_gauge_level_from_y()'s banding exactly so the
-             * frame lines up with the zone a click on it actually
-             * selects. Bright, high-contrast border (not a dark line
-             * that disappears into the gradient's own dark stops). */
-            int band = 3 - ch->level;
-            RECT zone = rc;
-            HPEN pen;
-            HPEN old_pen;
-            HBRUSH old_brush;
-            zone.top = rc.top + h * band / 4;
-            zone.bottom = rc.top + h * (band + 1) / 4;
-            pen = CreatePen(PS_SOLID, 2, COLOR_APP_TEXT);
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            Rectangle(hdc, zone.left, zone.top, zone.right, zone.bottom);
-            SelectObject(hdc, old_brush);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
+            /* band 0 = top (HIGH) .. band 3 = bottom (OFF), matching the
+             * High/Medium/Low/Off labels beside it and
+             * ch_gauge_level_from_y()'s click banding exactly. A small
+             * gap between blocks (left as page-background) instead of a
+             * line drawn over a gradient - reads as 4 separate blocks,
+             * not a smooth scale with seams cut into it. */
+            for (i = 0; i < 4; i++) {
+                int level = 3 - i;
+                COLORREF color = ch_gauge_stop_color(level);
+                RECT block;
+                HBRUSH brush;
+
+                if (level != selected_level) {
+                    color = ch_gauge_dim_color(color);
+                }
+
+                block.left = rc.left;
+                block.right = rc.right;
+                block.top = rc.top + h * i / 4;
+                block.bottom = rc.top + h * (i + 1) / 4;
+                if (i > 0) block.top += 1;   /* 1px gap above, except the very top block */
+                if (i < 3) block.bottom -= 1; /* and below, except the very bottom block */
+
+                brush = CreateSolidBrush(color);
+                FillRect(hdc, &block, brush);
+                DeleteObject(brush);
+            }
         }
 
         {
@@ -1394,34 +1386,43 @@ static void build_controls(HWND hwnd) {
  * bigger card) and text stays the system font's normal size (buttons/
  * labels just get more padding) - everything else's position and size
  * scales. Every offset here must match add_channel_card()'s creation
- * offsets exactly - keep the two in sync if either changes. */
-static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w, int card_h) {
+ * offsets exactly - keep the two in sync if either changes.
+ *
+ * Takes part in the caller's single DeferWindowPos batch (*hdwp) rather
+ * than moving each control with its own MoveWindow call - 16 cards x 15
+ * controls is 240+ windows; individually repainting each one on every
+ * WM_SIZE (including the flood of them Windows sends during a live
+ * resize drag) is what made resizing feel laggy/unresponsive. */
+static void position_channel_card(HDWP *hdwp, HWND hwnd, int index, int x, int y, int card_w, int card_h) {
     double sx = (double)card_w / CARD_W;
     double sy = (double)card_h / CARD_H;
 #define SX(v) ((int)((v) * sx + 0.5))
 #define SY(v) ((int)((v) * sy + 0.5))
+#define DEFER(win, dx, dy, dw, dh) \
+    (*hdwp = DeferWindowPos(*hdwp, (win), NULL, (dx), (dy), (dw), (dh), SWP_NOZORDER | SWP_NOACTIVATE))
 
-    MoveWindow(g_card_panel[index], x, y, card_w, card_h, TRUE);
-    MoveWindow(g_card_icon[index], x + SX(8), y + SY(6), 14, 14, TRUE);
-    MoveWindow(g_card_header[index], x + SX(26), y + SY(6), SX(200), SY(16), TRUE);
+    DEFER(g_card_panel[index], x, y, card_w, card_h);
+    DEFER(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
+    DEFER(g_card_header[index], x + SX(26), y + SY(6), SX(200), SY(16));
 
-    MoveWindow(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(96), 120, TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_set_id(index)), x + SX(108), y + SY(24), SX(46), SY(20), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(46), SX(71), SY(20), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_off_id(index)), x + SX(83), y + SY(46), SX(71), SY(20), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(68), SX(146), SY(16), TRUE);
+    DEFER(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(96), 120);
+    DEFER(GetDlgItem(hwnd, channel_set_id(index)), x + SX(108), y + SY(24), SX(46), SY(20));
+    DEFER(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(46), SX(71), SY(20));
+    DEFER(GetDlgItem(hwnd, channel_off_id(index)), x + SX(83), y + SY(46), SX(71), SY(20));
+    DEFER(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(68), SX(146), SY(16));
 
-    MoveWindow(GetDlgItem(hwnd, channel_track_id(index)), x + SX(164), y + SY(26), SX(26), SY(78), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(26), SX(44), SY(16), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(45), SX(44), SY(16), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(64), SX(44), SY(16), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(83), SX(44), SY(16), TRUE);
+    DEFER(GetDlgItem(hwnd, channel_track_id(index)), x + SX(164), y + SY(26), SX(26), SY(78));
+    DEFER(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(26), SX(44), SY(16));
+    DEFER(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(45), SX(44), SY(16));
+    DEFER(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(64), SX(44), SY(16));
+    DEFER(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(83), SX(44), SY(16));
 
-    MoveWindow(g_card_bandwidth_lbl[index], x + SX(8), y + SY(108), SX(96), SY(16), TRUE);
-    MoveWindow(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(104), y + SY(108), SX(134), SY(16), TRUE);
+    DEFER(g_card_bandwidth_lbl[index], x + SX(8), y + SY(108), SX(96), SY(16));
+    DEFER(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(104), y + SY(108), SX(134), SY(16));
 
 #undef SX
 #undef SY
+#undef DEFER
 }
 
 /* Recomputes the whole layout for a new client size: header bar and
@@ -1434,6 +1435,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int avail_w, avail_h, card_w, card_h, sidebar_h, extra_log_h, i;
     HWND listbox;
+    HDWP hdwp;
 
     if (!g_layout_ready) {
         return;
@@ -1447,24 +1449,38 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     card_h = (avail_h - (GRID_ROWS - 1) * CARD_GAP) / GRID_ROWS;
     if (card_h < CARD_H) card_h = CARD_H;
 
-    MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, TRUE);
-    MoveWindow(g_title_ctrl, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, TRUE);
+    /* One DeferWindowPos batch for every control being moved (~240 of
+     * them across all 16 cards, plus the header/sidebar/log) - applies
+     * them all in a single pass with one repaint instead of 240+
+     * individual synchronous ones. The count passed to
+     * BeginDeferWindowPos is just a sizing hint, not a hard cap. */
+    hdwp = BeginDeferWindowPos(4 + MAX_CHANNELS * 15);
+    if (!hdwp) {
+        return;
+    }
+
+    hdwp = DeferWindowPos(hdwp, g_header_panel, NULL, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, SWP_NOZORDER | SWP_NOACTIVATE);
+    hdwp = DeferWindowPos(hdwp, g_title_ctrl, NULL, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, SWP_NOZORDER | SWP_NOACTIVATE);
 
     sidebar_h = GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
-    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, TRUE);
+    hdwp = DeferWindowPos(hdwp, g_sidebar_panel, NULL, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, SWP_NOZORDER | SWP_NOACTIVATE);
 
     extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
     listbox = GetDlgItem(hwnd, IDC_LOG_LISTBOX);
     if (listbox) {
-        MoveWindow(listbox, 22, 416, 281, 176 + extra_log_h, TRUE);
+        hdwp = DeferWindowPos(hdwp, listbox, NULL, 22, 416, 281, 176 + extra_log_h, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    for (i = 0; i < MAX_CHANNELS; i++) {
+    for (i = 0; i < MAX_CHANNELS && hdwp; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
         int card_x = GRID_LEFT + col * (card_w + CARD_GAP);
         int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
-        position_channel_card(hwnd, i, card_x, card_y, card_w, card_h);
+        position_channel_card(&hdwp, hwnd, i, card_x, card_y, card_w, card_h);
+    }
+
+    if (hdwp) {
+        EndDeferWindowPos(hdwp);
     }
 }
 
