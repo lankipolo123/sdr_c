@@ -119,6 +119,19 @@ static Connection g_conn;
 static Sensor g_sensor;
 static bool g_kill_switch_tripped[MAX_CHANNELS];
 
+/* Handles needed to reposition things on WM_SIZE that don't otherwise
+ * have a retrievable control ID (channel_*_id() covers everything else
+ * per-card - GetDlgItem() finds those directly). */
+static HWND g_header_panel;
+static HWND g_title_ctrl;
+static HWND g_sidebar_panel;
+static HWND g_card_panel[MAX_CHANNELS];
+static HWND g_card_icon[MAX_CHANNELS];
+static HWND g_card_header[MAX_CHANNELS];
+static HWND g_card_bandwidth_lbl[MAX_CHANNELS];
+static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
+                              * fires during window creation, before that */
+
 /* ---- small control-creation helper ---- */
 
 static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, int y, int w, int h, int id) {
@@ -1052,10 +1065,10 @@ static void add_channel_card(HWND hwnd, int index) {
     int i;
     HWND mode_combo;
 
-    add_panel(hwnd, x, y, CARD_W, CARD_H);
-    add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
+    g_card_panel[index] = add_panel(hwnd, x, y, CARD_W, CARD_H);
+    g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
-    add_header(hwnd, header, x + 26, y + 6, 200, 16);
+    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 200, 16);
 
     /* Left column - compressed a bit (was y+26/52/78 with 22px-tall
      * buttons) to make clean room for the Bandwidth/Temp row below it,
@@ -1108,8 +1121,8 @@ static void add_channel_card(HWND hwnd, int index) {
     {
         char bw_text[24];
         wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
-        add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
-                 x + 8, y + 108, 96, 16, 0);
+        g_card_bandwidth_lbl[index] = add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
+                                                x + 8, y + 108, 96, 16, 0);
     }
     add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
              x + 104, y + 108, 134, 16, channel_temp_id(index));
@@ -1291,14 +1304,14 @@ static void build_controls(HWND hwnd) {
     /* App-title header bar - empty except for the title for now, more
      * gets added here later. Full width, same 6px top margin and 8px
      * gap-before-content as every other panel-to-panel spacing below. */
-    add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
-    add_title(hwnd, "Digital Noise Configuration - Multi", 22, 16, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 28);
+    g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
+    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 16, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 28);
 
     /* Sidebar: one tall box spanning the channel grid's full height,
      * Connection & Settings / Amplifier Temperature / Activity Log
      * stacked inside it as sections (headers only, no separate borders
      * between them) instead of 3 separately-bordered panels. */
-    add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
+    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
 
     add_header_icon(hwnd, 22, 70, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 40, 70, 260, 18);
@@ -1368,6 +1381,77 @@ static void build_controls(HWND hwnd) {
         SendDlgItemMessageA(hwnd, IDC_PARITY_COMBO, CB_ADDSTRING, 0, (LPARAM)PARITY_LABELS[i]);
     }
     SendDlgItemMessageA(hwnd, IDC_PARITY_COMBO, CB_SETCURSEL, 0, 0);
+
+    g_layout_ready = true;
+}
+
+/* Moves one channel card (and everything in it) to a new top-left,
+ * without changing anything's size - called on WM_SIZE with a
+ * recomputed (x, y) so the grid can spread out to fill a larger window.
+ * Every offset here must match add_channel_card()'s creation offsets
+ * exactly - keep the two in sync if either changes. */
+static void position_channel_card(HWND hwnd, int index, int x, int y) {
+    MoveWindow(g_card_panel[index], x, y, CARD_W, CARD_H, TRUE);
+    MoveWindow(g_card_icon[index], x + 8, y + 6, 14, 14, TRUE);
+    MoveWindow(g_card_header[index], x + 26, y + 6, 200, 16, TRUE);
+
+    MoveWindow(GetDlgItem(hwnd, channel_mode_id(index)), x + 8, y + 24, 96, 120, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_set_id(index)), x + 108, y + 24, 46, 20, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_on_id(index)), x + 8, y + 46, 71, 20, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_off_id(index)), x + 83, y + 46, 71, 20, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_status_id(index)), x + 8, y + 68, 146, 16, TRUE);
+
+    MoveWindow(GetDlgItem(hwnd, channel_track_id(index)), x + 164, y + 26, 26, 78, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + 194, y + 26, 44, 16, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + 194, y + 45, 44, 16, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + 194, y + 64, 44, 16, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + 194, y + 83, 44, 16, TRUE);
+
+    MoveWindow(g_card_bandwidth_lbl[index], x + 8, y + 108, 96, 16, TRUE);
+    MoveWindow(GetDlgItem(hwnd, channel_temp_id(index)), x + 104, y + 108, 134, 16, TRUE);
+}
+
+/* Recomputes the whole layout for a new client size: header bar and
+ * sidebar stretch to fill (their contents' positions stay fixed - only
+ * the header's width and the sidebar's/log's height change), and the
+ * 16 cards spread out to fill the rest by growing the gaps BETWEEN
+ * them - each card stays its designed CARD_W x CARD_H size rather than
+ * being stretched itself, so nothing inside a card needs rescaling. */
+static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
+    int avail_w, avail_h, gap_x, gap_y, sidebar_h, extra_log_h, i;
+    HWND listbox;
+
+    if (!g_layout_ready) {
+        return;
+    }
+
+    avail_w = client_w - GRID_LEFT - SIDEBAR_X;
+    avail_h = client_h - CONTENT_TOP - 12;
+
+    gap_x = (GRID_COLS > 1) ? (avail_w - GRID_COLS * CARD_W) / (GRID_COLS - 1) : CARD_GAP;
+    if (gap_x < CARD_GAP) gap_x = CARD_GAP;
+    gap_y = (GRID_ROWS > 1) ? (avail_h - GRID_ROWS * CARD_H) / (GRID_ROWS - 1) : CARD_GAP;
+    if (gap_y < CARD_GAP) gap_y = CARD_GAP;
+
+    MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, TRUE);
+    MoveWindow(g_title_ctrl, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, TRUE);
+
+    sidebar_h = GRID_ROWS * CARD_H + (GRID_ROWS - 1) * gap_y;
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, TRUE);
+
+    extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
+    listbox = GetDlgItem(hwnd, IDC_LOG_LISTBOX);
+    if (listbox) {
+        MoveWindow(listbox, 22, 416, 281, 176 + extra_log_h, TRUE);
+    }
+
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        int col = i % GRID_COLS;
+        int row = i / GRID_COLS;
+        int card_x = GRID_LEFT + col * (CARD_W + gap_x);
+        int card_y = CONTENT_TOP + row * (CARD_H + gap_y);
+        position_channel_card(hwnd, i, card_x, card_y);
+    }
 }
 
 /* ---- WndProc ---- */
@@ -1419,6 +1503,29 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ui_refresh_sensor_mode();
             return 0;
         }
+
+        case WM_GETMINMAXINFO: {
+            /* Never let the window shrink below its designed layout size -
+             * relayout_for_size() only ever grows gaps to fill extra space,
+             * never shrinks cards, so a smaller client area would start
+             * overlapping them. */
+            MINMAXINFO *mmi = (MINMAXINFO *)lParam;
+            RECT rect;
+            rect.left = 0;
+            rect.top = 0;
+            rect.right = CLIENT_WIDTH;
+            rect.bottom = CLIENT_HEIGHT;
+            AdjustWindowRectEx(&rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME, FALSE, 0);
+            mmi->ptMinTrackSize.x = rect.right - rect.left;
+            mmi->ptMinTrackSize.y = rect.bottom - rect.top;
+            return 0;
+        }
+
+        case WM_SIZE:
+            if (wParam != SIZE_MINIMIZED) {
+                relayout_for_size(hwnd, LOWORD(lParam), HIWORD(lParam));
+            }
+            return 0;
 
         case WM_TIMER:
             if (wParam == ID_POLL_TIMER) {
