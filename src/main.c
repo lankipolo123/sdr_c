@@ -53,9 +53,9 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 /* Modbus slave address each unit's own temperature sensor is wired to,
  * used in per-unit mode only (scan mode always polls SENSOR_SLAVE_ADDR).
  * Defaults to the unit number, 1-indexed - edit this table once the real
- * per-unit wiring is known, since it's very likely not sequential. Shown
- * read-only on each card (channel_addr_id()) and pushed into the sensor
- * at WM_CREATE via sensor_set_unit_address(). */
+ * per-unit wiring is known, since it's very likely not sequential. Not
+ * shown in the UI (see the card's Temp readout instead) - pushed into
+ * the sensor at WM_CREATE via sensor_set_unit_address(). */
 static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
 };
@@ -833,7 +833,6 @@ static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 static int channel_temp_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_TEMP_LBL_OFFSET; }
-static int channel_addr_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_ADDR_LBL_OFFSET; }
 
 /* Maps a control ID back to its channel index, for any control that
  * belongs to a channel card. Returns false for IDs outside that range. */
@@ -1008,16 +1007,10 @@ static void add_channel_card(HWND hwnd, int index) {
     add_panel(hwnd, x, y, CARD_W, CARD_H);
     add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
-    add_header(hwnd, header, x + 26, y + 6, 100, 16);
-
-    /* Right-aligned in the header row: this unit's own temperature (mode
-     * 2) or the shared scan reading (mode 1) - see IDC_CH_TEMP_LBL_OFFSET
-     * in resource.h for why it's also the per-unit kill-switch reset. */
-    add_ctrl(hwnd, "STATIC", "-", SS_RIGHT | SS_NOPREFIX | SS_NOTIFY,
-             x + 132, y + 7, 106, 16, channel_temp_id(index));
+    add_header(hwnd, header, x + 26, y + 6, 200, 16);
 
     /* Left column - compressed a bit (was y+26/52/78 with 22px-tall
-     * buttons) to make clean room for the address label below it,
+     * buttons) to make clean room for the Bandwidth/Temp row below it,
      * rather than just relying on the slack the taller gauge column
      * already left underneath. */
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
@@ -1040,25 +1033,38 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
              x + 8, y + 68, 146, 16, channel_status_id(index));
 
-    /* This unit's own temperature sensor's Modbus slave address (per-unit
-     * mode - see UNIT_TEMP_ADDR up top). Read-only display, not user-
-     * editable - defaults to the unit number until real per-unit wiring
-     * is known. */
-    {
-        char addr_text[24];
-        wsprintfA(addr_text, "Addr: %d", UNIT_TEMP_ADDR[index]);
-        add_ctrl(hwnd, "STATIC", addr_text, SS_LEFT | SS_NOPREFIX,
-                 x + 8, y + 90, 100, 16, channel_addr_id(index));
-    }
-
+    /* Bottom row: this channel's (currently fixed/blind, not per-channel
+     * configurable - see CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h)
+     * bandwidth, and this unit's own temperature - its own sensor
+     * reading (mode 2 / per-unit) or the shared scan reading (mode 1) -
+     * see IDC_CH_TEMP_LBL_OFFSET in resource.h for why it's also the
+     * per-unit kill-switch reset. */
     /* Right column: custom gradient level gauge (Off at bottom, High at
-     * top, like a volume slider) + tick labels. */
-    add_channel_gauge(hwnd, x + 164, y + 26, 26, 88, channel_track_id(index));
+     * top, like a volume slider) + tick labels. Trimmed from 88 to 78
+     * tall (and labels re-spaced to match) to leave room below it for
+     * the full-width Bandwidth/Temp row - it needs the whole card width,
+     * so it has to sit below where this column ends, not beside it. */
+    add_channel_gauge(hwnd, x + 164, y + 26, 26, 78, channel_track_id(index));
 
     add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 194, y + 26, 44, 16, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 194, y + 48, 44, 16, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 194, y + 70, 44, 16, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 194, y + 92, 44, 16, channel_lbl_off_id(index));
+    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 194, y + 45, 44, 16, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 194, y + 64, 44, 16, channel_lbl_low_id(index));
+    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 194, y + 83, 44, 16, channel_lbl_off_id(index));
+
+    /* Bottom row, full card width, below both columns: this channel's
+     * (currently fixed/blind, not per-channel configurable - see
+     * CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h) bandwidth, and this
+     * unit's own temperature - its own sensor reading (mode 2 / per-unit)
+     * or the shared scan reading (mode 1) - see IDC_CH_TEMP_LBL_OFFSET in
+     * resource.h for why it's also the per-unit kill-switch reset. */
+    {
+        char bw_text[24];
+        wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
+        add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
+                 x + 8, y + 108, 96, 16, 0);
+    }
+    add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
+             x + 104, y + 108, 134, 16, channel_temp_id(index));
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -1126,11 +1132,11 @@ static void ui_refresh_channel(int index) {
     InvalidateRect(track, NULL, FALSE);
 
     if (tripped) {
-        lstrcpynA(text, "TRIPPED - reset?", (int)sizeof(text));
+        lstrcpynA(text, "Temp: TRIPPED - reset?", (int)sizeof(text));
     } else if (st->has_reading) {
-        wsprintfA(text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
+        wsprintfA(text, "Temp: %d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
     } else {
-        lstrcpynA(text, "-", (int)sizeof(text));
+        lstrcpynA(text, "Temp: -", (int)sizeof(text));
     }
     SetWindowTextA(temp_ctl, text);
     InvalidateRect(temp_ctl, NULL, FALSE);

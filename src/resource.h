@@ -36,7 +36,7 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             12
+#define IDC_CH_STRIDE             11
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
@@ -47,16 +47,11 @@
 #define IDC_CH_LBL_MEDIUM_OFFSET  7
 #define IDC_CH_LBL_LOW_OFFSET     8
 #define IDC_CH_LBL_OFF_OFFSET     9
-/* Per-unit temperature readout in the card header - shows that unit's
- * own sensor reading (mode 2 / per-unit) or the shared scan reading
- * (mode 1 / scan), colored by band. Doubles as that unit's kill-switch
- * reset control: click it while tripped (shown in red) to reset just
- * this one unit, independent of the others - the whole point of moving
- * to per-unit sensors instead of one shared reading. */
+/* Bottom row, next to the "Bandwidth: N" static: this unit's own
+ * temperature readout - its own sensor reading (mode 2 / per-unit) or
+ * the shared scan reading (mode 1 / scan), colored by band. Doubles as
+ * that unit's kill-switch reset control: click it while tripped (shown
+ * in red) to reset just this one unit, independent of the others - the
+ * whole point of moving to per-unit sensors instead of one shared
+ * reading. */
 #define IDC_CH_TEMP_LBL_OFFSET    10
-/* Read-only display of the Modbus slave address this unit's own
- * temperature sensor is wired to (per-unit mode only - scan mode always
- * uses SENSOR_SLAVE_ADDR). Defaults to unit number (1-16); real per-unit
- * wiring may not be sequential, set via sensor_set_unit_address() (not
- * user-editable in the UI). */
-#define IDC_CH_ADDR_LBL_OFFSET    11
