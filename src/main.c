@@ -961,13 +961,13 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
          * bar chart) with a round handle riding on it, instead of a
          * wide gradient block with a marker line/pill on top of it. */
         {
-            int track_w = w / 3;
+            int track_w = w / 4;
             int track_cx = rc.left + w / 2;
             RECT track;
             HRGN clip;
             int band, center_y, handle_d, handle_r;
             HBRUSH bg_brush, handle_brush, shadow_brush;
-            HPEN track_pen, handle_pen, old_pen;
+            HPEN track_pen, old_pen;
             HBRUSH old_brush;
 
             if (track_w < 6) track_w = 6;
@@ -1014,27 +1014,29 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
                 return 0;
             }
             center_y = rc.top + (2 * band + 1) * h / 8;
-            handle_d = w - 2;
-            if (handle_d < track_w + 8) handle_d = track_w + 8;
+            /* Small, proportionate to the track (not almost the full
+             * card width) - a big handle on a thin track read as
+             * heavy/clunky rather than clean. */
+            handle_d = track_w + 10;
             handle_r = handle_d / 2;
 
-            shadow_brush = CreateSolidBrush(RGB(0, 0, 0));
+            /* One soft 1px shadow, not a heavy offset black blob. */
+            shadow_brush = CreateSolidBrush(COLOR_APP_DOT);
             old_brush = (HBRUSH)SelectObject(hdc, shadow_brush);
             SelectObject(hdc, GetStockObject(NULL_PEN));
-            Ellipse(hdc, track_cx - handle_r + 1, center_y - handle_r + 2,
-                    track_cx + handle_r + 1, center_y + handle_r + 2);
+            Ellipse(hdc, track_cx - handle_r, center_y - handle_r + 1, track_cx + handle_r, center_y + handle_r + 1);
             SelectObject(hdc, old_brush);
             DeleteObject(shadow_brush);
 
+            /* Flat white fill, no border - crisper than an outlined
+             * circle at this size. */
             handle_brush = CreateSolidBrush(COLOR_APP_TEXT);
-            handle_pen = CreatePen(PS_SOLID, 1, RGB(20, 20, 22));
             old_brush = (HBRUSH)SelectObject(hdc, handle_brush);
-            old_pen = (HPEN)SelectObject(hdc, handle_pen);
+            old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
             Ellipse(hdc, track_cx - handle_r, center_y - handle_r, track_cx + handle_r, center_y + handle_r);
             SelectObject(hdc, old_brush);
             SelectObject(hdc, old_pen);
             DeleteObject(handle_brush);
-            DeleteObject(handle_pen);
         }
 
         EndPaint(hwnd, &ps);
