@@ -19,7 +19,7 @@
 #include "channels.h"
 #include "sensor.h"
 
-#define CLIENT_WIDTH  1373
+#define CLIENT_WIDTH  1343
 #define CLIENT_HEIGHT 588
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
@@ -75,11 +75,11 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 #define CARD_W 246
 #define CARD_H 130
 #define CARD_GAP 8
-#define GRID_LEFT 355
+#define GRID_LEFT 325
 #define GRID_TOP 6
 
 #define SIDEBAR_X 10
-#define SIDEBAR_W 335
+#define SIDEBAR_W 305
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
@@ -1211,7 +1211,7 @@ static void build_controls(HWND hwnd) {
 
     add_panel(hwnd, SIDEBAR_X, 6, SIDEBAR_W, 156);
     add_header_icon(hwnd, 22, 14, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 40, 14, 300, 18);
+    add_header(hwnd, "Connection && Settings", 40, 14, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 36, 32, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 34, 112, 160, IDC_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 34, 56, 22, IDC_REFRESH_BTN);
@@ -1243,11 +1243,11 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Scan", BS_OWNERDRAW | WS_TABSTOP, 62, 220, 66, 22, IDC_SENSOR_MODE_SCAN_BTN);
     add_ctrl(hwnd, "BUTTON", "Per-Unit", BS_OWNERDRAW | WS_TABSTOP, 132, 220, 74, 22, IDC_SENSOR_MODE_UNIT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 250, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 272, 230, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 258, 272, 60, 20, IDC_SENSOR_TEMP_LBL);
+    add_gauge(hwnd, 22, 272, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 272, 72, 20, IDC_SENSOR_TEMP_LBL);
     add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 296, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
     add_ctrl(hwnd, "STATIC", "Per-unit mode: each unit's own reading shows on its own card above.",
-             SS_LEFT, 22, 250, 290, 40, IDC_SENSOR_MODE_NOTE_LBL);
+             SS_LEFT, 22, 250, 270, 44, IDC_SENSOR_MODE_NOTE_LBL);
     add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 320, 190, 16, IDC_KILL_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 318, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
@@ -1257,9 +1257,9 @@ static void build_controls(HWND hwnd) {
     add_panel(hwnd, SIDEBAR_X, 360, SIDEBAR_W, 216);
     add_header_icon(hwnd, 22, 368, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, 368, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 277, 366, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 366, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 390, 311, 176, IDC_LOG_LISTBOX);
+             22, 390, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
