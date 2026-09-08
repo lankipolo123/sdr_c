@@ -947,74 +947,94 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         RECT rc;
         int idx;
         int h;
+        int w;
         int i;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
         h = rc.bottom - rc.top;
+        w = rc.right - rc.left;
 
-        for (i = 0; i < 3; i++) {
-            RECT seg = rc;
-            seg.top = rc.top + h * i / 3;
-            seg.bottom = rc.top + h * (i + 1) / 3;
-            /* RECT.top is the smaller y (visually higher), so i=0 is
-             * the TOP third on screen - paint it from stop(3)=HIGH/red
-             * downward, matching the High/Medium/Low/Off labels'
-             * top-to-bottom order (and ch_gauge_level_from_y()'s
-             * banding). Stop colors indexed 0=OFF..3=HIGH. */
-            gradient_fill_rect(hdc, seg, ch_gauge_stop_color(3 - i), ch_gauge_stop_color(2 - i), true);
-        }
-
-        /* Modern slider thumb: a rounded pill overhanging both edges,
-         * centered on the selected level's quarter-band - not a plain
-         * line drawn on top of the gradient (too easy to lose against
-         * the track's own dark stops) and not divider lines chopping
-         * the gradient into blocks (looked blocky/cheap once the gauge
-         * got bigger). A soft offset shadow behind it for depth, like a
-         * real slider handle. */
-        if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
-            const ChannelState *ch = channels_get(idx);
-            int band = 3 - ch->level; /* 0=top/HIGH .. 3=bottom/OFF */
-            int center_y = rc.top + (2 * band + 1) * h / 8;
-            int thumb_h = (h / 8 < 4) ? 4 : h / 8;
-            int overhang = 3;
-            RECT thumb;
-            HBRUSH shadow_brush, fill_brush;
-            HPEN border_pen, old_pen;
+        /* Real volume-slider look: a narrow rounded track down the
+         * middle (not the full control width - a full-width bar with a
+         * thumb stuck on top never reads as "a slider", it reads as a
+         * bar chart) with a round handle riding on it, instead of a
+         * wide gradient block with a marker line/pill on top of it. */
+        {
+            int track_w = w / 3;
+            int track_cx = rc.left + w / 2;
+            RECT track;
+            HRGN clip;
+            int band, center_y, handle_d, handle_r;
+            HBRUSH bg_brush, handle_brush, shadow_brush;
+            HPEN track_pen, handle_pen, old_pen;
             HBRUSH old_brush;
 
-            thumb.left = rc.left - overhang;
-            thumb.right = rc.right + overhang;
-            thumb.top = center_y - thumb_h / 2;
-            thumb.bottom = thumb.top + thumb_h;
+            if (track_w < 6) track_w = 6;
+            track.left = track_cx - track_w / 2;
+            track.right = track.left + track_w;
+            track.top = rc.top;
+            track.bottom = rc.bottom;
+
+            bg_brush = CreateSolidBrush(COLOR_APP_PANEL_BG);
+            FillRect(hdc, &rc, bg_brush);
+            DeleteObject(bg_brush);
+
+            /* Clip the gradient to the rounded track shape so its
+             * corners aren't square. */
+            clip = CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1,
+                                       track_w, track_w);
+            SelectClipRgn(hdc, clip);
+            for (i = 0; i < 3; i++) {
+                RECT seg = track;
+                seg.top = track.top + h * i / 3;
+                seg.bottom = track.top + h * (i + 1) / 3;
+                /* RECT.top is the smaller y (visually higher), so i=0
+                 * is the TOP third on screen - paint it from
+                 * stop(3)=HIGH/red downward, matching the labels'
+                 * top-to-bottom order. Stop colors indexed 0=OFF..3=HIGH. */
+                gradient_fill_rect(hdc, seg, ch_gauge_stop_color(3 - i), ch_gauge_stop_color(2 - i), true);
+            }
+            SelectClipRgn(hdc, NULL);
+            DeleteObject(clip);
+
+            track_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            old_pen = (HPEN)SelectObject(hdc, track_pen);
+            SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            RoundRect(hdc, track.left, track.top, track.right, track.bottom, track_w, track_w);
+            SelectObject(hdc, old_pen);
+            DeleteObject(track_pen);
+
+            band = -1; /* nothing selected -> handle stays hidden */
+            if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
+                band = 3 - channels_get(idx)->level; /* 0=top/HIGH .. 3=bottom/OFF */
+            }
+            if (band < 0) {
+                EndPaint(hwnd, &ps);
+                return 0;
+            }
+            center_y = rc.top + (2 * band + 1) * h / 8;
+            handle_d = w - 2;
+            if (handle_d < track_w + 8) handle_d = track_w + 8;
+            handle_r = handle_d / 2;
 
             shadow_brush = CreateSolidBrush(RGB(0, 0, 0));
             old_brush = (HBRUSH)SelectObject(hdc, shadow_brush);
             SelectObject(hdc, GetStockObject(NULL_PEN));
-            RoundRect(hdc, thumb.left + 1, thumb.top + 2, thumb.right + 1, thumb.bottom + 2,
-                      thumb_h, thumb_h);
+            Ellipse(hdc, track_cx - handle_r + 1, center_y - handle_r + 2,
+                    track_cx + handle_r + 1, center_y + handle_r + 2);
             SelectObject(hdc, old_brush);
             DeleteObject(shadow_brush);
 
-            fill_brush = CreateSolidBrush(COLOR_APP_TEXT);
-            border_pen = CreatePen(PS_SOLID, 1, RGB(20, 20, 22));
-            old_brush = (HBRUSH)SelectObject(hdc, fill_brush);
-            old_pen = (HPEN)SelectObject(hdc, border_pen);
-            RoundRect(hdc, thumb.left, thumb.top, thumb.right, thumb.bottom, thumb_h, thumb_h);
+            handle_brush = CreateSolidBrush(COLOR_APP_TEXT);
+            handle_pen = CreatePen(PS_SOLID, 1, RGB(20, 20, 22));
+            old_brush = (HBRUSH)SelectObject(hdc, handle_brush);
+            old_pen = (HPEN)SelectObject(hdc, handle_pen);
+            Ellipse(hdc, track_cx - handle_r, center_y - handle_r, track_cx + handle_r, center_y + handle_r);
             SelectObject(hdc, old_brush);
             SelectObject(hdc, old_pen);
-            DeleteObject(fill_brush);
-            DeleteObject(border_pen);
-        }
-
-        {
-            HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-            HPEN old_pen = (HPEN)SelectObject(hdc, pen);
-            HBRUSH old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
-            SelectObject(hdc, old_brush);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
+            DeleteObject(handle_brush);
+            DeleteObject(handle_pen);
         }
 
         EndPaint(hwnd, &ps);
