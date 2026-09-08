@@ -32,7 +32,7 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             11
+#define IDC_CH_STRIDE             12
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
@@ -43,11 +43,15 @@
 #define IDC_CH_LBL_MEDIUM_OFFSET  7
 #define IDC_CH_LBL_LOW_OFFSET     8
 #define IDC_CH_LBL_OFF_OFFSET     9
-/* Bottom row, next to the "Bandwidth: N" static: this unit's own
- * temperature readout - its own sensor reading (mode 2 / per-unit) or
- * the shared scan reading (mode 1 / scan), colored by band. Doubles as
- * that unit's kill-switch reset control: click it while tripped (shown
- * in red) to reset just this one unit, independent of the others - the
- * whole point of moving to per-unit sensors instead of one shared
- * reading. */
+/* Bottom-left stat, next to the "Bandwidth: N" static: this unit's own
+ * temperature readout - its own sensor's reading, colored by band.
+ * Doubles as that unit's kill-switch reset control: click it while
+ * tripped (shown in red) to reset just this one unit, independent of
+ * the others - the whole point of per-unit sensors instead of one
+ * shared reading. */
 #define IDC_CH_TEMP_LBL_OFFSET    10
+/* Bottom-right stat, next to the temp readout: this unit's own
+ * humidity reading from the same sensor poll (see sensor.c - one
+ * request returns both registers together). Plain readout, no
+ * click/reset behavior. */
+#define IDC_CH_HUMIDITY_OFFSET    11

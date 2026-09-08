@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 608
+#define CLIENT_HEIGHT 728
 
 /* App-title header bar across the top, above the sidebar/grid content.
  * HEADER_H is the bar's own height; CONTENT_TOP is where the sidebar
@@ -90,8 +90,12 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 /* --- grid layout for the 16 channel cards --- */
 #define GRID_COLS 4
 #define GRID_ROWS 4
-#define CARD_W 200
-#define CARD_H 102
+/* Grown a little from the previous 200x102 - that was packed tight
+ * enough that the bottom-row Bandwidth/Temp statics actually
+ * overlapped (see add_channel_card()), and there was no room left for
+ * the per-unit Address/Humidity statics added alongside them. */
+#define CARD_W 224
+#define CARD_H 132
 #define CARD_GAP 8
 #define GRID_LEFT 325
 #define GRID_TOP CONTENT_TOP
@@ -818,6 +822,7 @@ static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 static int channel_temp_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_TEMP_LBL_OFFSET; }
+static int channel_humidity_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_HUMIDITY_OFFSET; }
 
 /* Maps a control ID back to its channel index, for any control that
  * belongs to a channel card. Returns false for IDs outside that range. */
@@ -1030,8 +1035,10 @@ static HWND add_channel_gauge(HWND parent, int x, int y, int w, int h, int id) {
 }
 
 /* Card layout: a left column (Mode combo + Set button, ON/OFF power
- * buttons, status line), then a full-width horizontal level trackbar
- * with Off/Low/Medium/High labels underneath it. */
+ * buttons, status line), a right column with the level gauge + tick
+ * labels, then a 2x2 block of small stats at the bottom - left column
+ * is this unit's fixed config (bandwidth, wired sensor address), right
+ * column is its live sensor reading (temperature, humidity). */
 static void add_channel_card(HWND hwnd, int index) {
     int col = index % GRID_COLS;
     int row = index / GRID_COLS;
@@ -1044,12 +1051,10 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_panel[index] = add_panel(hwnd, x, y, CARD_W, CARD_H);
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
-    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 160, 16);
+    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 170, 16);
 
-    /* Left column - narrower than before (CARD_W shrunk 220->200) to
-     * leave room for the gauge column without the two overlapping. */
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 20, 76, 100, channel_mode_id(index));
+                           x + 8, y + 24, 82, 100, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
         SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -1058,39 +1063,52 @@ static void add_channel_card(HWND hwnd, int index) {
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 86, y + 20, 36, 16, channel_set_id(index));
+             x + 94, y + 24, 40, 18, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-             x + 8, y + 38, 54, 16, channel_on_id(index));
+             x + 8, y + 44, 60, 18, channel_on_id(index));
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-             x + 64, y + 38, 54, 16, channel_off_id(index));
+             x + 72, y + 44, 60, 18, channel_off_id(index));
 
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
-             x + 8, y + 56, 112, 13, channel_status_id(index));
+             x + 8, y + 64, 130, 14, channel_status_id(index));
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
-    add_channel_gauge(hwnd, x + 128, y + 22, 22, 62, channel_track_id(index));
+    add_channel_gauge(hwnd, x + 148, y + 24, 22, 72, channel_track_id(index));
 
-    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 154, y + 22, 40, 13, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 154, y + 38, 40, 13, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 154, y + 54, 40, 13, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 154, y + 70, 40, 13, channel_lbl_off_id(index));
+    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 174, y + 24, 44, 14, channel_lbl_high_id(index));
+    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 174, y + 42, 44, 14, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 174, y + 60, 44, 14, channel_lbl_low_id(index));
+    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 174, y + 78, 44, 14, channel_lbl_off_id(index));
 
-    /* Bottom row, full card width, below both columns: this channel's
-     * (currently fixed/blind, not per-channel configurable - see
-     * CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h) bandwidth, and this
-     * unit's own temperature - its own sensor's reading - see
-     * IDC_CH_TEMP_LBL_OFFSET in resource.h for why it's also the
-     * per-unit kill-switch reset. */
+    /* Bottom 2x2 stat block. Left column is fixed config (never
+     * changes after creation, so no control ID needed to look it back
+     * up): bandwidth (currently fixed/blind, not per-channel
+     * configurable - see CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h)
+     * and this unit's wired sensor address (UNIT_TEMP_ADDR - read
+     * straight from that table, not sensor_get_unit_address(), since
+     * add_channel_card() runs before sensor_init()/
+     * sensor_set_unit_address() have populated the live Sensor
+     * struct). Right column is this unit's live sensor reading - see
+     * IDC_CH_TEMP_LBL_OFFSET in resource.h for why the temperature one
+     * is also the per-unit kill-switch reset. */
     {
         char bw_text[24];
         wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
         g_card_bandwidth_lbl[index] = add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
-                                                x + 8, y + 86, 88, 13, 0);
+                                                x + 8, y + 100, 96, 14, 0);
+    }
+    {
+        char addr_text[16];
+        wsprintfA(addr_text, "Addr: %d", UNIT_TEMP_ADDR[index]);
+        add_ctrl(hwnd, "STATIC", addr_text, SS_LEFT | SS_NOPREFIX,
+                 x + 112, y + 100, 96, 14, 0);
     }
     add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 84, y + 86, 112, 13, channel_temp_id(index));
+             x + 8, y + 116, 96, 14, channel_temp_id(index));
+    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX,
+             x + 112, y + 116, 100, 14, channel_humidity_id(index));
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -1107,6 +1125,7 @@ typedef struct {
     int level;
     bool has_reading;
     float temperature_c;
+    float humidity_pct;
     bool tripped;
 } ChannelUiCache;
 
@@ -1119,13 +1138,14 @@ static void ui_refresh_channel(int index) {
     HWND status_ctl;
     HWND track;
     HWND temp_ctl;
+    HWND humidity_ctl;
     char text[32];
     bool tripped = g_kill_switch_tripped[index];
 
     if (cache->valid && cache->busy == ch->busy &&
         cache->output_on == ch->output_on && cache->level == ch->level &&
         cache->has_reading == st->has_reading && cache->temperature_c == st->temperature_c &&
-        cache->tripped == tripped) {
+        cache->humidity_pct == st->humidity_pct && cache->tripped == tripped) {
         return; /* nothing this channel's card shows has changed */
     }
 
@@ -1142,6 +1162,7 @@ static void ui_refresh_channel(int index) {
     status_ctl = GetDlgItem(g_hwnd, channel_status_id(index));
     track = GetDlgItem(g_hwnd, channel_track_id(index));
     temp_ctl = GetDlgItem(g_hwnd, channel_temp_id(index));
+    humidity_ctl = GetDlgItem(g_hwnd, channel_humidity_id(index));
 
     /* Matches sdr_react's ChannelCard status text exactly:
      * busy -> SENDING..., on -> the level name, off -> STANDBY. */
@@ -1167,6 +1188,14 @@ static void ui_refresh_channel(int index) {
     SetWindowTextA(temp_ctl, text);
     InvalidateRect(temp_ctl, NULL, FALSE);
 
+    if (st->has_reading) {
+        wsprintfA(text, "Humidity: %d.%d%%", (int)st->humidity_pct, (int)(st->humidity_pct * 10) % 10);
+    } else {
+        lstrcpynA(text, "Humidity: -", (int)sizeof(text));
+    }
+    SetWindowTextA(humidity_ctl, text);
+    InvalidateRect(humidity_ctl, NULL, FALSE);
+
     InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_high_id(index)), NULL, FALSE);
@@ -1180,6 +1209,7 @@ static void ui_refresh_channel(int index) {
     cache->level = ch->level;
     cache->has_reading = st->has_reading;
     cache->temperature_c = st->temperature_c;
+    cache->humidity_pct = st->humidity_pct;
     cache->tripped = tripped;
 }
 
@@ -1369,22 +1399,27 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 
     PLACE(g_card_panel[index], x, y, card_w, card_h);
     PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
-    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(160), SY(16));
+    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(170), SY(16));
 
-    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(20), SX(76), 100);
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(86), y + SY(20), SX(36), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(38), SX(54), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(64), y + SY(38), SX(54), SY(16));
-    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(56), SX(112), SY(13));
+    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(82), 100);
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(60), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(44), SX(60), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
 
-    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(128), y + SY(22), SX(22), SY(62));
-    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(154), y + SY(22), SX(40), SY(13));
-    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(154), y + SY(38), SX(40), SY(13));
-    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(154), y + SY(54), SX(40), SY(13));
-    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(154), y + SY(70), SX(40), SY(13));
+    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
+    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(174), y + SY(42), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(174), y + SY(60), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(174), y + SY(78), SX(44), SY(14));
 
-    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(86), SX(88), SY(13));
-    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(84), y + SY(86), SX(112), SY(13));
+    /* Address static has no stored handle (see add_channel_card()) -
+     * harmless to skip here since cards never actually resize anymore
+     * (relayout_for_size() always passes CARD_W x CARD_H), so its
+     * position never needs to change after creation. */
+    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(100), SX(96), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(8), y + SY(116), SX(96), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_humidity_id(index)), x + SX(112), y + SY(116), SX(100), SY(14));
 
 #undef SX
 #undef SY
