@@ -20,7 +20,15 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 588
+#define CLIENT_HEIGHT 644
+
+/* App-title header bar across the top, above the sidebar/grid content -
+ * empty except for a title for now, room left for whatever gets added
+ * to it later. HEADER_H is the bar's own height; CONTENT_TOP is where
+ * the sidebar panels and channel grid start beneath it (same 6px top
+ * margin and 8px panel-to-panel gap used everywhere else). */
+#define HEADER_H     48
+#define CONTENT_TOP  62
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -86,7 +94,7 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 #define CARD_H 130
 #define CARD_GAP 8
 #define GRID_LEFT 325
-#define GRID_TOP 6
+#define GRID_TOP CONTENT_TOP
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 305
@@ -95,6 +103,7 @@ static HINSTANCE g_hinst;
 static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
+static HFONT g_title_font; /* app-title header bar only - bigger than g_header_font's panel-title size */
 static WNDPROC g_panel_orig_proc;
 static HBRUSH g_brush_panel;
 static HBRUSH g_brush_page;
@@ -217,6 +226,16 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
     HWND ctrl = add_ctrl(parent, "STATIC", text, SS_LEFT, x, y, w, h, 0);
     if (ctrl && g_header_font) {
         SendMessageA(ctrl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
+    }
+    return ctrl;
+}
+
+/* App-title header bar's title text - same idea as add_header() but with
+ * the larger g_title_font. */
+static HWND add_title(HWND parent, LPCSTR text, int x, int y, int w, int h) {
+    HWND ctrl = add_ctrl(parent, "STATIC", text, SS_LEFT, x, y, w, h, 0);
+    if (ctrl && g_title_font) {
+        SendMessageA(ctrl, WM_SETFONT, (WPARAM)g_title_font, (LPARAM)TRUE);
     }
     return ctrl;
 }
@@ -1240,57 +1259,63 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    add_panel(hwnd, SIDEBAR_X, 6, SIDEBAR_W, 156);
-    add_header_icon(hwnd, 22, 14, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 40, 14, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 36, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 34, 112, 160, IDC_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 34, 56, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 34, 66, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 60, 290, 16, IDC_CONN_STATUS_LBL);
+    /* App-title header bar - empty except for the title for now, more
+     * gets added here later. Full width, same 6px top margin and 8px
+     * gap-before-content as every other panel-to-panel spacing below. */
+    add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
+    add_title(hwnd, "Digital Noise Configuration - Multi", 22, 16, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 28);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 84, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 82, 90, 140, IDC_BAUD_COMBO);
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 108, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 106, 45, 100, IDC_DATABITS_COMBO);
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 108, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 106, 70, 100, IDC_PARITY_COMBO);
+    add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, 156);
+    add_header_icon(hwnd, 22, 70, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 40, 70, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 92, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 90, 112, 160, IDC_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 90, 56, 22, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 90, 66, 22, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 116, 290, 16, IDC_CONN_STATUS_LBL);
+
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 140, 34, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 138, 90, 140, IDC_BAUD_COMBO);
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 164, 60, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 162, 45, 100, IDC_DATABITS_COMBO);
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 164, 40, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 162, 70, 100, IDC_PARITY_COMBO);
 
     /* Sidebar: Connection & Settings (above), Temp/Humidity Sensor, then
      * Activity Log, all stacked in one left-hand column - main content
      * (the channel grid) is to the right, matching the app's request for
      * a sidebar + main-content split instead of 3 panels across the top. */
-    add_panel(hwnd, SIDEBAR_X, 170, SIDEBAR_W, 182);
-    add_header_icon(hwnd, 22, 178, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 40, 178, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 200, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 198, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 198, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 198, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_panel(hwnd, SIDEBAR_X, 226, SIDEBAR_W, 182);
+    add_header_icon(hwnd, 22, 234, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 40, 234, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 256, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 254, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 254, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 254, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* Scan: one sensor for the whole rack (address 1), mirrored to every
      * unit's card. Per-Unit: one sensor per unit, address == unit number -
      * each card shows and protects only its own reading. */
-    add_ctrl(hwnd, "STATIC", "Mode:", SS_LEFT, 22, 224, 38, 16, 0);
-    add_ctrl(hwnd, "BUTTON", "Scan", BS_OWNERDRAW | WS_TABSTOP, 62, 220, 66, 22, IDC_SENSOR_MODE_SCAN_BTN);
-    add_ctrl(hwnd, "BUTTON", "Per-Unit", BS_OWNERDRAW | WS_TABSTOP, 132, 220, 74, 22, IDC_SENSOR_MODE_UNIT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 250, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 272, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 272, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 296, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
+    add_ctrl(hwnd, "STATIC", "Mode:", SS_LEFT, 22, 280, 38, 16, 0);
+    add_ctrl(hwnd, "BUTTON", "Scan", BS_OWNERDRAW | WS_TABSTOP, 62, 276, 66, 22, IDC_SENSOR_MODE_SCAN_BTN);
+    add_ctrl(hwnd, "BUTTON", "Per-Unit", BS_OWNERDRAW | WS_TABSTOP, 132, 276, 74, 22, IDC_SENSOR_MODE_UNIT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 306, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 328, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 328, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX, 22, 352, 270, 16, IDC_SENSOR_HUMIDITY_LBL);
     add_ctrl(hwnd, "STATIC", "Per-unit mode: each unit's own reading shows on its own card above.",
-             SS_LEFT, 22, 250, 270, 44, IDC_SENSOR_MODE_NOTE_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 320, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 318, 80, 22, IDC_KILL_RESET_BTN);
+             SS_LEFT, 22, 306, 270, 44, IDC_SENSOR_MODE_NOTE_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 376, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 374, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_SENSOR_MODE_NOTE_LBL), SW_HIDE); /* default mode is Scan */
 
-    add_panel(hwnd, SIDEBAR_X, 360, SIDEBAR_W, 216);
-    add_header_icon(hwnd, 22, 368, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 368, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 366, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_panel(hwnd, SIDEBAR_X, 416, SIDEBAR_W, 216);
+    add_header_icon(hwnd, 22, 424, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 424, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 422, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 390, 281, 176, IDC_LOG_LISTBOX);
+             22, 446, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1332,6 +1357,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                          DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
             if (!g_header_font) {
                 g_header_font = g_font;
+            }
+
+            g_title_font = CreateFontA(-24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                        ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                        DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            if (!g_title_font) {
+                g_title_font = g_header_font;
             }
 
             build_controls(hwnd);
@@ -1516,10 +1548,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return (LRESULT)g_brush_panel;
                 }
             }
-            if ((HFONT)SendMessageA(ctl, WM_GETFONT, 0, 0) == g_header_font) {
-                SetTextColor(hdc, COLOR_APP_HEADER);
-            } else {
-                SetTextColor(hdc, COLOR_APP_MUTED);
+            {
+                HFONT ctl_font = (HFONT)SendMessageA(ctl, WM_GETFONT, 0, 0);
+                if (ctl_font == g_header_font || ctl_font == g_title_font) {
+                    SetTextColor(hdc, COLOR_APP_HEADER);
+                } else {
+                    SetTextColor(hdc, COLOR_APP_MUTED);
+                }
             }
             SetBkMode(hdc, TRANSPARENT);
             return (LRESULT)g_brush_panel;
@@ -1639,6 +1674,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
             if (g_brush_silver) DeleteObject(g_brush_silver);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
+            if (g_title_font && g_title_font != g_header_font) DeleteObject(g_title_font);
             PostQuitMessage(0);
             return 0;
     }
