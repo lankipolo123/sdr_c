@@ -1419,41 +1419,43 @@ static void build_controls(HWND hwnd) {
  * scales. Every offset here must match add_channel_card()'s creation
  * offsets exactly - keep the two in sync if either changes.
  *
- * Takes part in the caller's single DeferWindowPos batch (*hdwp) rather
- * than moving each control with its own MoveWindow call - 16 cards x 15
- * controls is 240+ windows; individually repainting each one on every
- * WM_SIZE (including the flood of them Windows sends during a live
- * resize drag) is what made resizing feel laggy/unresponsive. */
-static void position_channel_card(HDWP *hdwp, HWND hwnd, int index, int x, int y, int card_w, int card_h) {
+ * Plain MoveWindow with bRepaint=FALSE - relayout_for_size() does one
+ * InvalidateRect over the whole window after moving everything, so
+ * Windows coalesces it into a single WM_PAINT pass instead of each
+ * control repainting itself individually. (A DeferWindowPos batch was
+ * tried here for the same reason - don't: on real hardware it silently
+ * failed to reposition/repaint every custom-drawn control, subclassed
+ * panel, and owner-draw button, leaving only stock controls like the
+ * mode combo boxes visible. Plain MoveWindow is what actually works.) */
+static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w, int card_h) {
     double sx = (double)card_w / CARD_W;
     double sy = (double)card_h / CARD_H;
 #define SX(v) ((int)((v) * sx + 0.5))
 #define SY(v) ((int)((v) * sy + 0.5))
-#define DEFER(win, dx, dy, dw, dh) \
-    (*hdwp = DeferWindowPos(*hdwp, (win), NULL, (dx), (dy), (dw), (dh), SWP_NOZORDER | SWP_NOACTIVATE))
+#define PLACE(win, dx, dy, dw, dh) MoveWindow((win), (dx), (dy), (dw), (dh), FALSE)
 
-    DEFER(g_card_panel[index], x, y, card_w, card_h);
-    DEFER(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
-    DEFER(g_card_header[index], x + SX(26), y + SY(6), SX(200), SY(16));
+    PLACE(g_card_panel[index], x, y, card_w, card_h);
+    PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
+    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(200), SY(16));
 
-    DEFER(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(96), 120);
-    DEFER(GetDlgItem(hwnd, channel_set_id(index)), x + SX(108), y + SY(24), SX(46), SY(20));
-    DEFER(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(46), SX(71), SY(20));
-    DEFER(GetDlgItem(hwnd, channel_off_id(index)), x + SX(83), y + SY(46), SX(71), SY(20));
-    DEFER(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(68), SX(146), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(96), 120);
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(108), y + SY(24), SX(46), SY(20));
+    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(46), SX(71), SY(20));
+    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(83), y + SY(46), SX(71), SY(20));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(68), SX(146), SY(16));
 
-    DEFER(GetDlgItem(hwnd, channel_track_id(index)), x + SX(164), y + SY(26), SX(26), SY(78));
-    DEFER(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(26), SX(44), SY(16));
-    DEFER(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(45), SX(44), SY(16));
-    DEFER(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(64), SX(44), SY(16));
-    DEFER(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(83), SX(44), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(164), y + SY(26), SX(26), SY(78));
+    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(26), SX(44), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(45), SX(44), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(64), SX(44), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(83), SX(44), SY(16));
 
-    DEFER(g_card_bandwidth_lbl[index], x + SX(8), y + SY(108), SX(96), SY(16));
-    DEFER(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(104), y + SY(108), SX(134), SY(16));
+    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(108), SX(96), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(104), y + SY(108), SX(134), SY(16));
 
 #undef SX
 #undef SY
-#undef DEFER
+#undef PLACE
 }
 
 /* Recomputes the whole layout for a new client size: header bar and
@@ -1466,7 +1468,6 @@ static void position_channel_card(HDWP *hdwp, HWND hwnd, int index, int x, int y
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int avail_w, avail_h, card_w, card_h, sidebar_h, extra_log_h, i;
     HWND listbox;
-    HDWP hdwp;
 
     if (!g_layout_ready) {
         return;
@@ -1480,39 +1481,35 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     card_h = (avail_h - (GRID_ROWS - 1) * CARD_GAP) / GRID_ROWS;
     if (card_h < CARD_H) card_h = CARD_H;
 
-    /* One DeferWindowPos batch for every control being moved (~240 of
-     * them across all 16 cards, plus the header/sidebar/log) - applies
-     * them all in a single pass with one repaint instead of 240+
-     * individual synchronous ones. The count passed to
-     * BeginDeferWindowPos is just a sizing hint, not a hard cap. */
-    hdwp = BeginDeferWindowPos(4 + MAX_CHANNELS * 15);
-    if (!hdwp) {
-        return;
-    }
-
-    hdwp = DeferWindowPos(hdwp, g_header_panel, NULL, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, SWP_NOZORDER | SWP_NOACTIVATE);
-    hdwp = DeferWindowPos(hdwp, g_title_ctrl, NULL, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, SWP_NOZORDER | SWP_NOACTIVATE);
+    MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
+    MoveWindow(g_title_ctrl, 22, 16, client_w - 2 * SIDEBAR_X - 32, 28, FALSE);
 
     sidebar_h = GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
-    hdwp = DeferWindowPos(hdwp, g_sidebar_panel, NULL, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, SWP_NOZORDER | SWP_NOACTIVATE);
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, FALSE);
 
     extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
     listbox = GetDlgItem(hwnd, IDC_LOG_LISTBOX);
     if (listbox) {
-        hdwp = DeferWindowPos(hdwp, listbox, NULL, 22, 416, 281, 176 + extra_log_h, SWP_NOZORDER | SWP_NOACTIVATE);
+        MoveWindow(listbox, 22, 416, 281, 176 + extra_log_h, FALSE);
     }
 
-    for (i = 0; i < MAX_CHANNELS && hdwp; i++) {
+    for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
         int card_x = GRID_LEFT + col * (card_w + CARD_GAP);
         int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
-        position_channel_card(&hdwp, hwnd, i, card_x, card_y, card_w, card_h);
+        position_channel_card(hwnd, i, card_x, card_y, card_w, card_h);
     }
 
-    if (hdwp) {
-        EndDeferWindowPos(hdwp);
-    }
+    /* One coalesced repaint for the whole window AND every child control
+     * in it, instead of each of the ~240 moved controls repainting
+     * itself individually (that's what made resizing feel unresponsive
+     * originally). RDW_ALLCHILDREN is the important part here - plain
+     * InvalidateRect(hwnd, ...) only invalidates hwnd's own client area,
+     * NOT its children's, so combo boxes and other child controls could
+     * end up not repainting at all (stayed blank until they happened to
+     * get focus) despite having been correctly moved. */
+    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
 /* ---- WndProc ---- */
