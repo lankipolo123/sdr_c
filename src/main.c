@@ -20,17 +20,17 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 586
+#define CLIENT_HEIGHT 562
 
 /* App-title header bar across the top, above the sidebar/grid content -
  * empty except for a title for now, room left for whatever gets added
  * to it later. HEADER_H is the bar's own height; CONTENT_TOP is where
  * the sidebar panels and channel grid start beneath it (same 6px top
- * margin and 8px panel-to-panel gap used everywhere else). Grown from
- * 48 to 72 - freed up by shrinking the cards (see CARD_W/CARD_H) and
- * compressing the sidebar (removed the sensor mode toggle). */
-#define HEADER_H     72
-#define CONTENT_TOP  86
+ * margin and 8px panel-to-panel gap used everywhere else). Grown twice
+ * now (48 -> 72 -> 104), each time freed up by shrinking the cards
+ * further (see CARD_W/CARD_H). */
+#define HEADER_H     104
+#define CONTENT_TOP  118
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -56,8 +56,6 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
  * silently cycle on/off right at the boundary, defeating the point of a
  * safety cutoff. */
 #define KILL_SWITCH_THRESHOLD_C 60.0f
-
-#define LOG_MAX_ENTRIES 200
 
 /* Modbus slave address each unit's own temperature sensor is wired to.
  * Defaults to the unit number, 1-indexed - edit this table once the real
@@ -90,8 +88,8 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 /* --- grid layout for the 16 channel cards --- */
 #define GRID_COLS 4
 #define GRID_ROWS 4
-#define CARD_W 220
-#define CARD_H 116
+#define CARD_W 200
+#define CARD_H 102
 #define CARD_GAP 8
 #define GRID_LEFT 325
 #define GRID_TOP CONTENT_TOP
@@ -526,10 +524,6 @@ static void log_add(const char *message) {
     SendMessageA(list, LB_ADDSTRING, 0, (LPARAM)line);
 
     count = (int)SendMessageA(list, LB_GETCOUNT, 0, 0);
-    while (count > LOG_MAX_ENTRIES) {
-        SendMessageA(list, LB_DELETESTRING, 0, 0);
-        count--;
-    }
     SendMessageA(list, LB_SETTOPINDEX, (WPARAM)(count > 0 ? count - 1 : 0), 0);
 }
 
@@ -1060,12 +1054,12 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_panel[index] = add_panel(hwnd, x, y, CARD_W, CARD_H);
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
-    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 180, 16);
+    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 160, 16);
 
-    /* Left column - narrower than before (CARD_W shrunk 246->220) to
+    /* Left column - narrower than before (CARD_W shrunk 220->200) to
      * leave room for the gauge column without the two overlapping. */
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 22, 84, 110, channel_mode_id(index));
+                           x + 8, y + 20, 76, 100, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
         SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -1074,24 +1068,24 @@ static void add_channel_card(HWND hwnd, int index) {
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 96, y + 22, 40, 18, channel_set_id(index));
+             x + 86, y + 20, 36, 16, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-             x + 8, y + 42, 58, 18, channel_on_id(index));
+             x + 8, y + 38, 54, 16, channel_on_id(index));
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-             x + 70, y + 42, 58, 18, channel_off_id(index));
+             x + 64, y + 38, 54, 16, channel_off_id(index));
 
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
-             x + 8, y + 62, 120, 14, channel_status_id(index));
+             x + 8, y + 56, 112, 13, channel_status_id(index));
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
-    add_channel_gauge(hwnd, x + 138, y + 24, 24, 70, channel_track_id(index));
+    add_channel_gauge(hwnd, x + 128, y + 22, 22, 62, channel_track_id(index));
 
-    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 166, y + 24, 44, 14, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 166, y + 42, 44, 14, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 166, y + 60, 44, 14, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 166, y + 78, 44, 14, channel_lbl_off_id(index));
+    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 154, y + 22, 40, 13, channel_lbl_high_id(index));
+    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 154, y + 38, 40, 13, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 154, y + 54, 40, 13, channel_lbl_low_id(index));
+    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 154, y + 70, 40, 13, channel_lbl_off_id(index));
 
     /* Bottom row, full card width, below both columns: this channel's
      * (currently fixed/blind, not per-channel configurable - see
@@ -1103,10 +1097,10 @@ static void add_channel_card(HWND hwnd, int index) {
         char bw_text[24];
         wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
         g_card_bandwidth_lbl[index] = add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
-                                                x + 8, y + 96, 96, 14, 0);
+                                                x + 8, y + 86, 88, 13, 0);
     }
     add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 96, y + 96, 116, 14, channel_temp_id(index));
+             x + 84, y + 86, 112, 13, channel_temp_id(index));
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -1286,7 +1280,7 @@ static void build_controls(HWND hwnd) {
      * gets added here later. Full width, same 6px top margin and 8px
      * gap-before-content as every other panel-to-panel spacing below. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
-    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 22, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 40);
+    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 28, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 60);
 
     /* Sidebar: one tall box spanning the channel grid's full height,
      * Connection & Settings / Amplifier Temperature / Activity Log
@@ -1294,43 +1288,43 @@ static void build_controls(HWND hwnd) {
      * between them) instead of 3 separately-bordered panels. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
 
-    add_header_icon(hwnd, 22, 70, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 40, 70, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 92, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 90, 112, 160, IDC_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 90, 56, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 90, 66, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 116, 290, 16, IDC_CONN_STATUS_LBL);
+    add_header_icon(hwnd, 22, 126, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 40, 126, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 148, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 146, 112, 160, IDC_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 146, 56, 22, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 146, 66, 22, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 172, 290, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 140, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 138, 90, 140, IDC_BAUD_COMBO);
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 164, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 162, 45, 100, IDC_DATABITS_COMBO);
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 164, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 162, 70, 100, IDC_PARITY_COMBO);
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 196, 34, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 194, 90, 140, IDC_BAUD_COMBO);
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 220, 60, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 218, 45, 100, IDC_DATABITS_COMBO);
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 220, 40, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 218, 70, 100, IDC_PARITY_COMBO);
 
-    add_header_icon(hwnd, 22, 204, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 40, 204, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 226, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 224, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 224, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 224, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_header_icon(hwnd, 22, 260, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 40, 260, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 282, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 280, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 280, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 280, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
      * no mode toggle needed anymore. This status/gauge shows the rack-
      * wide average; each card shows its own individual reading. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 250, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 272, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 272, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 296, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 294, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 306, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 328, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 328, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 352, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 350, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_header_icon(hwnd, 22, 346, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 346, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 344, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_header_icon(hwnd, 22, 402, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 402, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 400, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 368, 281, 176, IDC_LOG_LISTBOX);
+             22, 424, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1387,22 +1381,22 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 
     PLACE(g_card_panel[index], x, y, card_w, card_h);
     PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
-    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(180), SY(16));
+    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(160), SY(16));
 
-    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(22), SX(84), 110);
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(96), y + SY(22), SX(40), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(42), SX(58), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(70), y + SY(42), SX(58), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(62), SX(120), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(20), SX(76), 100);
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(86), y + SY(20), SX(36), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(38), SX(54), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(64), y + SY(38), SX(54), SY(16));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(56), SX(112), SY(13));
 
-    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(138), y + SY(24), SX(24), SY(70));
-    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(166), y + SY(24), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(166), y + SY(42), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(166), y + SY(60), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(166), y + SY(78), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(128), y + SY(22), SX(22), SY(62));
+    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(154), y + SY(22), SX(40), SY(13));
+    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(154), y + SY(38), SX(40), SY(13));
+    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(154), y + SY(54), SX(40), SY(13));
+    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(154), y + SY(70), SX(40), SY(13));
 
-    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(96), SX(96), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(96), y + SY(96), SX(116), SY(14));
+    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(86), SX(88), SY(13));
+    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(84), y + SY(86), SX(112), SY(13));
 
 #undef SX
 #undef SY
@@ -1433,7 +1427,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     if (card_h < CARD_H) card_h = CARD_H;
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_title_ctrl, 22, 22, client_w - 2 * SIDEBAR_X - 32, 40, FALSE);
+    MoveWindow(g_title_ctrl, 22, 28, client_w - 2 * SIDEBAR_X - 32, 60, FALSE);
 
     sidebar_h = GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, FALSE);
@@ -1441,7 +1435,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
     listbox = GetDlgItem(hwnd, IDC_LOG_LISTBOX);
     if (listbox) {
-        MoveWindow(listbox, 22, 368, 281, 176 + extra_log_h, FALSE);
+        MoveWindow(listbox, 22, 424, 281, 176 + extra_log_h, FALSE);
     }
 
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -1480,7 +1474,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_header_font = g_font;
             }
 
-            g_title_font = CreateFontA(-32, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            g_title_font = CreateFontA(-44, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                         ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                         DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
             if (!g_title_font) {
