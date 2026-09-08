@@ -10,10 +10,14 @@ static void sensor_reset_units(Sensor *s) {
 }
 
 void sensor_init(Sensor *s) {
+    int i;
     memset(s, 0, sizeof(*s));
     s->port.handle = INVALID_HANDLE_VALUE;
     s->poll_state = SENSOR_POLL_IDLE;
     s->mode = SENSOR_MODE_SCAN;
+    for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+        s->unit_addr[i] = (uint8_t)(i + 1);
+    }
 }
 
 bool sensor_connect(Sensor *s, const char *port_name, DWORD baud, char parity, uint8_t data_bits) {
@@ -79,7 +83,21 @@ void sensor_set_mode(Sensor *s, SensorMode mode) {
 }
 
 static int sensor_current_slave_addr(const Sensor *s) {
-    return (s->mode == SENSOR_MODE_PER_UNIT) ? (s->current_unit + 1) : SENSOR_SLAVE_ADDR;
+    return (s->mode == SENSOR_MODE_PER_UNIT) ? s->unit_addr[s->current_unit] : SENSOR_SLAVE_ADDR;
+}
+
+void sensor_set_unit_address(Sensor *s, int unit_index, uint8_t addr) {
+    if (unit_index < 0 || unit_index >= SENSOR_MAX_UNITS || addr < 1) {
+        return;
+    }
+    s->unit_addr[unit_index] = addr;
+}
+
+uint8_t sensor_get_unit_address(const Sensor *s, int unit_index) {
+    if (unit_index < 0 || unit_index >= SENSOR_MAX_UNITS) {
+        unit_index = 0;
+    }
+    return s->unit_addr[unit_index];
 }
 
 static void sensor_send_request(Sensor *s) {

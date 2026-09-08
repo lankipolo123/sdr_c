@@ -50,6 +50,16 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 
 #define LOG_MAX_ENTRIES 200
 
+/* Modbus slave address each unit's own temperature sensor is wired to,
+ * used in per-unit mode only (scan mode always polls SENSOR_SLAVE_ADDR).
+ * Defaults to the unit number, 1-indexed - edit this table once the real
+ * per-unit wiring is known, since it's very likely not sequential. Shown
+ * read-only on each card (channel_addr_id()) and pushed into the sensor
+ * at WM_CREATE via sensor_set_unit_address(). */
+static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+};
+
 /* MILITRONIX Dark palette - same as the single-channel app. */
 #define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
 #define COLOR_APP_PANEL_BG  RGB(43, 45, 49)
@@ -823,6 +833,7 @@ static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 static int channel_temp_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_TEMP_LBL_OFFSET; }
+static int channel_addr_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_ADDR_LBL_OFFSET; }
 
 /* Maps a control ID back to its channel index, for any control that
  * belongs to a channel card. Returns false for IDs outside that range. */
@@ -1005,9 +1016,12 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "-", SS_RIGHT | SS_NOPREFIX | SS_NOTIFY,
              x + 132, y + 7, 106, 16, channel_temp_id(index));
 
-    /* Left column */
+    /* Left column - compressed a bit (was y+26/52/78 with 22px-tall
+     * buttons) to make clean room for the address label below it,
+     * rather than just relying on the slack the taller gauge column
+     * already left underneath. */
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 26, 96, 120, channel_mode_id(index));
+                           x + 8, y + 24, 96, 120, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
         SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -1016,15 +1030,26 @@ static void add_channel_card(HWND hwnd, int index) {
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 108, y + 26, 46, 22, channel_set_id(index));
+             x + 108, y + 24, 46, 20, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-             x + 8, y + 52, 71, 22, channel_on_id(index));
+             x + 8, y + 46, 71, 20, channel_on_id(index));
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-             x + 83, y + 52, 71, 22, channel_off_id(index));
+             x + 83, y + 46, 71, 20, channel_off_id(index));
 
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
-             x + 8, y + 78, 146, 16, channel_status_id(index));
+             x + 8, y + 68, 146, 16, channel_status_id(index));
+
+    /* This unit's own temperature sensor's Modbus slave address (per-unit
+     * mode - see UNIT_TEMP_ADDR up top). Read-only display, not user-
+     * editable - defaults to the unit number until real per-unit wiring
+     * is known. */
+    {
+        char addr_text[24];
+        wsprintfA(addr_text, "Addr: %d", UNIT_TEMP_ADDR[index]);
+        add_ctrl(hwnd, "STATIC", addr_text, SS_LEFT | SS_NOPREFIX,
+                 x + 8, y + 90, 100, 16, channel_addr_id(index));
+    }
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
@@ -1315,6 +1340,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             conn_init(&g_conn, ccb);
             channels_init(&g_conn);
             sensor_init(&g_sensor);
+            {
+                int addr_i;
+                for (addr_i = 0; addr_i < MAX_CHANNELS; addr_i++) {
+                    sensor_set_unit_address(&g_sensor, addr_i, UNIT_TEMP_ADDR[addr_i]);
+                }
+            }
 
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
             ui_refresh_all_channels();

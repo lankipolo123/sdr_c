@@ -7,10 +7,12 @@
  *     SENSOR_SLAVE_ADDR. Its reading is mirrored into every unit's slot
  *     below, so callers never need to branch on mode to read a unit's
  *     temperature - they just always ask for their own index.
- *   - SENSOR_MODE_PER_UNIT: one sensor per unit, address == unit number
- *     (1-16, matching MAX_CHANNELS) - each unit's slot holds only its
- *     own reading, polled round-robin instead of the fixed 3s interval
- *     scan mode uses (16 addresses to get through, not 1).
+ *   - SENSOR_MODE_PER_UNIT: one sensor per unit, address configurable
+ *     per unit (defaults to unit number 1-16, matching MAX_CHANNELS,
+ *     but real wiring may not be sequential - see sensor_set_unit_address())
+ *     - each unit's slot holds only its own reading, polled round-robin
+ *     instead of the fixed 3s interval scan mode uses (16 addresses to
+ *     get through, not 1).
  *
  * Unlike channels.c's blind send (fire once, apply optimistically), a
  * register read genuinely needs the reply - there's no value to show
@@ -33,7 +35,8 @@
                               * as its own constant so this header doesn't
                               * need to depend on channels.h */
 #define SENSOR_SLAVE_ADDR      1 /* scan mode's one address; per-unit mode
-                                   * uses unit_index + 1 instead (1-16) */
+                                   * uses each unit's own configured address
+                                   * instead (see sensor_set_unit_address()) */
 /* QModMaster's status bar showed "Base Addr: 1" throughout - its Start
  * Address field is very likely 1-based display over a 0-based wire
  * address, meaning its "Start Address: 2" (which worked) actually put
@@ -99,6 +102,14 @@ SensorMode sensor_get_mode(const Sensor *s);
  * per-unit reading until that unit's own next poll comes around. */
 void sensor_set_mode(Sensor *s, SensorMode mode);
 
+/* Per-unit mode only - which Modbus slave address unit_index's own
+ * temperature sensor is wired to. Defaults to unit_index + 1
+ * (sensor_init()); editable per card in the UI (see IDC_CH_ADDR_EDIT_OFFSET)
+ * since real wiring may not be sequential. Takes effect on that unit's
+ * next poll - doesn't interrupt one already in flight. */
+void sensor_set_unit_address(Sensor *s, int unit_index, uint8_t addr);
+uint8_t sensor_get_unit_address(const Sensor *s, int unit_index);
+
 /* Non-blocking: call every timer tick. Advances the send/wait state
  * machine and applies a completed reading (or marks offline on
  * timeout/error) - never blocks waiting on the port. */
@@ -121,5 +132,8 @@ struct Sensor {
     uint8_t rx_buf[64];
     uint16_t rx_len;
 
+    uint8_t unit_addr[SENSOR_MAX_UNITS]; /* per-unit mode's configured
+                                           * Modbus slave address per unit -
+                                           * defaults to unit_index + 1 */
     SensorState units[SENSOR_MAX_UNITS];
 };
