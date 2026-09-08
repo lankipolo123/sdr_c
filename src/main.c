@@ -20,17 +20,19 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 562
+#define CLIENT_HEIGHT 608
 
-/* App-title header bar across the top, above the sidebar/grid content -
- * empty except for a title for now, room left for whatever gets added
- * to it later. HEADER_H is the bar's own height; CONTENT_TOP is where
- * the sidebar panels and channel grid start beneath it (same 6px top
- * margin and 8px panel-to-panel gap used everywhere else). Grown twice
- * now (48 -> 72 -> 104), each time freed up by shrinking the cards
- * further (see CARD_W/CARD_H). */
-#define HEADER_H     104
-#define CONTENT_TOP  118
+/* App-title header bar across the top, above the sidebar/grid content.
+ * HEADER_H is the bar's own height; CONTENT_TOP is where the sidebar
+ * panels and channel grid start beneath it (same 6px top margin and
+ * 8px panel-to-panel gap used everywhere else). Grown three times now
+ * (48 -> 72 -> 104 -> 150) - the first two just to give the title more
+ * room, this last one to also fit the Connection & Settings controls,
+ * which moved up here from the sidebar (see build_controls()) so the
+ * sidebar could shrink down to just Amplifier Temperature + Activity
+ * Log. */
+#define HEADER_H     150
+#define CONTENT_TOP  164
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -1276,55 +1278,54 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    /* App-title header bar - empty except for the title for now, more
-     * gets added here later. Full width, same 6px top margin and 8px
+    /* App-title header bar: title on top, the Connection & Settings
+     * controls (moved up from the sidebar) as a single command row
+     * underneath - full width, same 6px top margin and 8px
      * gap-before-content as every other panel-to-panel spacing below. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
-    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 28, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 60);
+    g_title_ctrl = add_title(hwnd, "Digital Noise Configuration - Multi", 22, 42, CLIENT_WIDTH - 2 * SIDEBAR_X - 32, 42);
 
-    /* Sidebar: one tall box spanning the channel grid's full height,
-     * Connection & Settings / Amplifier Temperature / Activity Log
-     * stacked inside it as sections (headers only, no separate borders
-     * between them) instead of 3 separately-bordered panels. */
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 94, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 92, 112, 160, IDC_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 176, 92, 56, 22, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 240, 92, 66, 22, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 322, 94, 34, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 360, 92, 90, 140, IDC_BAUD_COMBO);
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 466, 94, 60, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 530, 92, 45, 100, IDC_DATABITS_COMBO);
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 591, 94, 40, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 635, 92, 70, 100, IDC_PARITY_COMBO);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 721, 94, 240, 16, IDC_CONN_STATUS_LBL);
+
+    /* Sidebar: now just Amplifier Temperature + Activity Log stacked in
+     * one tall box spanning the channel grid's full height (headers
+     * only, no separate borders between them) - Connection & Settings
+     * moved up into the header above, so there's a lot less here than
+     * there used to be. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
 
-    add_header_icon(hwnd, 22, 126, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 40, 126, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 148, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 146, 112, 160, IDC_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 146, 56, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 146, 66, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 172, 290, 16, IDC_CONN_STATUS_LBL);
-
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 196, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 194, 90, 140, IDC_BAUD_COMBO);
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 220, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 218, 45, 100, IDC_DATABITS_COMBO);
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 220, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 218, 70, 100, IDC_PARITY_COMBO);
-
-    add_header_icon(hwnd, 22, 260, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 40, 260, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 282, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 280, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 280, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 280, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_header_icon(hwnd, 22, 172, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 40, 172, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 194, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 192, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 192, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 192, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
      * no mode toggle needed anymore. This status/gauge shows the rack-
      * wide average; each card shows its own individual reading. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 306, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 328, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 328, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 352, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 350, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 218, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 240, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 240, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 264, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 262, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_header_icon(hwnd, 22, 402, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 402, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 400, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_header_icon(hwnd, 22, 314, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 314, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 312, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 424, 281, 176, IDC_LOG_LISTBOX);
+             22, 336, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1403,47 +1404,38 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 #undef PLACE
 }
 
-/* Recomputes the whole layout for a new client size: header bar and
- * sidebar stretch to fill (the sidebar's own content stays fixed size -
- * only its and the log's height change), and the 16 cards themselves
- * grow to fill the rest of the space (gap between them stays the
- * designed CARD_GAP) - extra window space becomes bigger cards, not
- * empty gaps. Never shrinks below the designed CARD_W x CARD_H (see
- * WM_GETMINMAXINFO, which stops the window itself getting that small). */
+/* Recomputes the whole layout for a new client size: only the header
+ * bar and sidebar panel stretch horizontally to fill the wider client
+ * area - the 16 cards stay fixed at the designed CARD_W x CARD_H no
+ * matter how big the window gets (maximized/fullscreen included).
+ * Extra window space just stays empty background rather than growing
+ * the cards - keeps the grid compact and readable on a large monitor
+ * instead of every card ballooning to fill it. (Cards used to grow to
+ * fill the available space; that's what was making them look oversized
+ * at fullscreen - removed.) Never shrinks below the designed CARD_W x
+ * CARD_H (see WM_GETMINMAXINFO, which stops the window itself getting
+ * that small). */
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
-    int avail_w, avail_h, card_w, card_h, sidebar_h, extra_log_h, i;
-    HWND listbox;
+    int i;
+    (void)client_h; /* cards no longer grow to fill vertical space, so the
+                      * new client height doesn't factor into this layout -
+                      * kept as a parameter since callers still have it and
+                      * WM_SIZE's (w, h) pairing reads naturally at call sites. */
 
     if (!g_layout_ready) {
         return;
     }
 
-    avail_w = client_w - GRID_LEFT - SIDEBAR_X;
-    avail_h = client_h - CONTENT_TOP - 12;
-
-    card_w = (avail_w - (GRID_COLS - 1) * CARD_GAP) / GRID_COLS;
-    if (card_w < CARD_W) card_w = CARD_W;
-    card_h = (avail_h - (GRID_ROWS - 1) * CARD_GAP) / GRID_ROWS;
-    if (card_h < CARD_H) card_h = CARD_H;
-
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_title_ctrl, 22, 28, client_w - 2 * SIDEBAR_X - 32, 60, FALSE);
-
-    sidebar_h = GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
-    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, sidebar_h, FALSE);
-
-    extra_log_h = sidebar_h - (GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
-    listbox = GetDlgItem(hwnd, IDC_LOG_LISTBOX);
-    if (listbox) {
-        MoveWindow(listbox, 22, 424, 281, 176 + extra_log_h, FALSE);
-    }
+    MoveWindow(g_title_ctrl, 22, 42, client_w - 2 * SIDEBAR_X - 32, 42, FALSE);
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
-        int card_x = GRID_LEFT + col * (card_w + CARD_GAP);
-        int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
-        position_channel_card(hwnd, i, card_x, card_y, card_w, card_h);
+        int card_x = GRID_LEFT + col * (CARD_W + CARD_GAP);
+        int card_y = CONTENT_TOP + row * (CARD_H + CARD_GAP);
+        position_channel_card(hwnd, i, card_x, card_y, CARD_W, CARD_H);
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -1474,7 +1466,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_header_font = g_font;
             }
 
-            g_title_font = CreateFontA(-44, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            g_title_font = CreateFontA(-30, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                         ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                         DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
             if (!g_title_font) {
