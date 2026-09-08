@@ -883,15 +883,15 @@ static bool channel_index_from_id(int id, int *out_idx) {
 }
 
 /* ---- per-channel level gradient gauge ----
- * Replaces the native trackbar with 4 stacked solid-color blocks (Off
- * at bottom to High at top, matching the High/Medium/Low/Off labels
- * beside it) with a real gap between them - the selected level's block
- * is shown at full color, the other 3 dimmed, so which of the 4 levels
- * is active is obvious at a glance. (Earlier version used a smooth
- * gradient with thin divider lines cut across it - looked like a
- * blurry, blocky mess once the cards got bigger on a wide window;
- * plain flat blocks read cleanly at any size.) Click/drag anywhere on
- * it to set the level directly instead of dragging a thumb. */
+ * Replaces the native trackbar with a custom-drawn vertical gradient
+ * (muted gray -> green -> orange -> red, Off at bottom to High at top,
+ * matching the High/Medium/Low/Off labels beside it) and a real slider
+ * thumb - a rounded pill overhanging both edges with a soft drop
+ * shadow, not a plain line that disappears into the gradient's own
+ * dark stops, and not divider lines cutting the gradient into blocks
+ * (tried that - looked blocky/cheap once the gauge got bigger). Click/
+ * drag anywhere on it to set the level directly instead of dragging
+ * the thumb by hand. */
 static COLORREF ch_gauge_stop_color(int level) {
     switch (level) {
         case LEVEL_OFF:    return COLOR_APP_MUTED;
@@ -899,16 +899,6 @@ static COLORREF ch_gauge_stop_color(int level) {
         case LEVEL_MEDIUM: return RGB(224, 146, 34);
         default:           return COLOR_APP_DISCONNECTED; /* LEVEL_HIGH */
     }
-}
-
-/* Blends c toward the panel background, for the 3 non-selected blocks -
- * t=0 keeps c as-is, t=1 is fully background-colored. */
-static COLORREF ch_gauge_dim_color(COLORREF c) {
-    const double t = 0.6;
-    int r = (int)(GetRValue(c) * (1.0 - t) + GetRValue(COLOR_APP_PANEL_BG) * t + 0.5);
-    int g = (int)(GetGValue(c) * (1.0 - t) + GetGValue(COLOR_APP_PANEL_BG) * t + 0.5);
-    int b = (int)(GetBValue(c) * (1.0 - t) + GetBValue(COLOR_APP_PANEL_BG) * t + 0.5);
-    return RGB(r, g, b);
 }
 
 /* Maps a Y coordinate inside the gauge to a level (0-3), top=High,
@@ -963,39 +953,58 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         GetClientRect(hwnd, &rc);
         h = rc.bottom - rc.top;
 
-        {
-            int selected_level = -1; /* nothing selected yet -> everything dim */
-            if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
-                selected_level = channels_get(idx)->level;
-            }
+        for (i = 0; i < 3; i++) {
+            RECT seg = rc;
+            seg.top = rc.top + h * i / 3;
+            seg.bottom = rc.top + h * (i + 1) / 3;
+            /* RECT.top is the smaller y (visually higher), so i=0 is
+             * the TOP third on screen - paint it from stop(3)=HIGH/red
+             * downward, matching the High/Medium/Low/Off labels'
+             * top-to-bottom order (and ch_gauge_level_from_y()'s
+             * banding). Stop colors indexed 0=OFF..3=HIGH. */
+            gradient_fill_rect(hdc, seg, ch_gauge_stop_color(3 - i), ch_gauge_stop_color(2 - i), true);
+        }
 
-            /* band 0 = top (HIGH) .. band 3 = bottom (OFF), matching the
-             * High/Medium/Low/Off labels beside it and
-             * ch_gauge_level_from_y()'s click banding exactly. A small
-             * gap between blocks (left as page-background) instead of a
-             * line drawn over a gradient - reads as 4 separate blocks,
-             * not a smooth scale with seams cut into it. */
-            for (i = 0; i < 4; i++) {
-                int level = 3 - i;
-                COLORREF color = ch_gauge_stop_color(level);
-                RECT block;
-                HBRUSH brush;
+        /* Modern slider thumb: a rounded pill overhanging both edges,
+         * centered on the selected level's quarter-band - not a plain
+         * line drawn on top of the gradient (too easy to lose against
+         * the track's own dark stops) and not divider lines chopping
+         * the gradient into blocks (looked blocky/cheap once the gauge
+         * got bigger). A soft offset shadow behind it for depth, like a
+         * real slider handle. */
+        if (channel_index_from_id(GetDlgCtrlID(hwnd), &idx)) {
+            const ChannelState *ch = channels_get(idx);
+            int band = 3 - ch->level; /* 0=top/HIGH .. 3=bottom/OFF */
+            int center_y = rc.top + (2 * band + 1) * h / 8;
+            int thumb_h = (h / 8 < 4) ? 4 : h / 8;
+            int overhang = 3;
+            RECT thumb;
+            HBRUSH shadow_brush, fill_brush;
+            HPEN border_pen, old_pen;
+            HBRUSH old_brush;
 
-                if (level != selected_level) {
-                    color = ch_gauge_dim_color(color);
-                }
+            thumb.left = rc.left - overhang;
+            thumb.right = rc.right + overhang;
+            thumb.top = center_y - thumb_h / 2;
+            thumb.bottom = thumb.top + thumb_h;
 
-                block.left = rc.left;
-                block.right = rc.right;
-                block.top = rc.top + h * i / 4;
-                block.bottom = rc.top + h * (i + 1) / 4;
-                if (i > 0) block.top += 1;   /* 1px gap above, except the very top block */
-                if (i < 3) block.bottom -= 1; /* and below, except the very bottom block */
+            shadow_brush = CreateSolidBrush(RGB(0, 0, 0));
+            old_brush = (HBRUSH)SelectObject(hdc, shadow_brush);
+            SelectObject(hdc, GetStockObject(NULL_PEN));
+            RoundRect(hdc, thumb.left + 1, thumb.top + 2, thumb.right + 1, thumb.bottom + 2,
+                      thumb_h, thumb_h);
+            SelectObject(hdc, old_brush);
+            DeleteObject(shadow_brush);
 
-                brush = CreateSolidBrush(color);
-                FillRect(hdc, &block, brush);
-                DeleteObject(brush);
-            }
+            fill_brush = CreateSolidBrush(COLOR_APP_TEXT);
+            border_pen = CreatePen(PS_SOLID, 1, RGB(20, 20, 22));
+            old_brush = (HBRUSH)SelectObject(hdc, fill_brush);
+            old_pen = (HPEN)SelectObject(hdc, border_pen);
+            RoundRect(hdc, thumb.left, thumb.top, thumb.right, thumb.bottom, thumb_h, thumb_h);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(fill_brush);
+            DeleteObject(border_pen);
         }
 
         {
