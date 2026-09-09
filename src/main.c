@@ -138,6 +138,8 @@ static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
 static WNDPROC g_panel_orig_proc;
+static WNDPROC g_combo_edit_orig_proc;
+static bool g_combo_edit_no_recurse;
 static HBRUSH g_brush_panel;
 static HBRUSH g_brush_page;
 static HBRUSH g_brush_field;
@@ -316,6 +318,28 @@ static void add_combo_edge(HWND parent, int x, int y, int w, int h) {
  * control; reverted, back to the SM_CXVSCROLL + padding approach.) */
 #define ARROW_OVERLAY_PAD_PX 4
 
+/* Picking an item from the list (or the initial CB_SETCURSEL at
+ * creation) makes the combo's edit child select its entire displayed
+ * text internally, same as any EDIT control after SetWindowText+
+ * EM_SETSEL(0,-1) - invisible while unfocused (EDIT hides selection on
+ * WM_KILLFOCUS by default), but the instant the combo has focus (which
+ * it already does the moment you click its arrow to open the list) it
+ * renders as a solid system-blue bar over the text, stomping the dark
+ * theme - confirmed by screenshot, reproduced by opening any combo's
+ * dropdown. Intercepting EM_SETSEL and immediately collapsing it back
+ * to no-selection (guarded against re-entering itself) kills the
+ * highlight before it's ever painted, regardless of whether it came
+ * from the initial value or a later pick. */
+static LRESULT CALLBACK combo_edit_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    LRESULT result = CallWindowProcA(g_combo_edit_orig_proc, hwnd, msg, wParam, lParam);
+    if (msg == EM_SETSEL && !g_combo_edit_no_recurse) {
+        g_combo_edit_no_recurse = true;
+        SendMessageA(hwnd, EM_SETSEL, (WPARAM)-1, 0);
+        g_combo_edit_no_recurse = false;
+    }
+    return result;
+}
+
 static void make_combo_readonly(HWND combo) {
     COMBOBOXINFO cbi;
     RECT rc;
@@ -325,6 +349,10 @@ static void make_combo_readonly(HWND combo) {
     cbi.cbSize = sizeof(cbi);
     if (GetComboBoxInfo(combo, &cbi) && cbi.hwndItem) {
         SendMessageA(cbi.hwndItem, EM_SETREADONLY, TRUE, 0);
+        if (!g_combo_edit_orig_proc) {
+            g_combo_edit_orig_proc = (WNDPROC)GetWindowLongPtrA(cbi.hwndItem, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(cbi.hwndItem, GWLP_WNDPROC, (LONG_PTR)combo_edit_subclass_proc);
     }
 
     parent = GetParent(combo);
@@ -413,9 +441,6 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         RECT rc;
         HBRUSH old_brush;
         HPEN pen, old_pen;
-        int index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-        const ChannelState *ch = channels_get(index);
-        bool on = ch->output_on;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -428,16 +453,16 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
+        /* No outline stroke - just the fill, same "no border" look the
+         * user asked for. NULL_PEN, not a same-color pen, so RoundRect
+         * doesn't draw an edge at all. */
         SelectObject(hdc, g_brush_panel);
-        pen = CreatePen(PS_SOLID, on ? CARD_BORDER_ON_WIDTH : 1,
-                         on ? COLOR_APP_CONNECTED : COLOR_APP_PANEL_BORDER);
-        old_pen = (HPEN)SelectObject(hdc, pen);
+        old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
 
         RoundRect(hdc, rc.left, rc.top, rc.right - CARD_SHADOW_PX, rc.bottom - CARD_SHADOW_PX,
                   CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
 
         SelectObject(hdc, old_pen);
-        DeleteObject(pen);
         SelectObject(hdc, old_brush);
 
         EndPaint(hwnd, &ps);
