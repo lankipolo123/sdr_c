@@ -87,6 +87,7 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define COLOR_APP_DOT       RGB(50, 52, 57)
 #define COLOR_APP_PANEL_BORDER RGB(63, 66, 71)
 #define COLOR_APP_SHADOW    RGB(14, 15, 17)
+#define COLOR_APP_SILVER    RGB(192, 196, 202)
 
 /* "Direction B" from the UI design proposal, applied app-wide: rounded
  * corners everywhere instead of the old chamfer (panel_subclass_proc
@@ -2171,6 +2172,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
                         SelectObject(dis->hDC, old_brush);
                         SelectObject(dis->hDC, old_pen);
+                    }
+                    /* Refresh/Connect specifically - a small silver
+                     * corner-bracket accent at each of the button's 4
+                     * corners, not a full outline, per direct request
+                     * ("silver line corners", not "a silver border"). */
+                    if (dis->CtlID == IDC_REFRESH_BTN || dis->CtlID == IDC_CONNECT_BTN) {
+                        HPEN silver_pen = CreatePen(PS_SOLID, 1, COLOR_APP_SILVER);
+                        HPEN old_pen = (HPEN)SelectObject(dis->hDC, silver_pen);
+                        const int inset = 3;
+                        const int len = 7;
+
+                        MoveToEx(dis->hDC, rc.left + inset, rc.top + inset + len, NULL);
+                        LineTo(dis->hDC, rc.left + inset, rc.top + inset);
+                        LineTo(dis->hDC, rc.left + inset + len, rc.top + inset);
+
+                        MoveToEx(dis->hDC, rc.right - inset - len, rc.top + inset, NULL);
+                        LineTo(dis->hDC, rc.right - inset, rc.top + inset);
+                        LineTo(dis->hDC, rc.right - inset, rc.top + inset + len);
+
+                        MoveToEx(dis->hDC, rc.left + inset, rc.bottom - inset - len, NULL);
+                        LineTo(dis->hDC, rc.left + inset, rc.bottom - inset);
+                        LineTo(dis->hDC, rc.left + inset + len, rc.bottom - inset);
+
+                        MoveToEx(dis->hDC, rc.right - inset - len, rc.bottom - inset, NULL);
+                        LineTo(dis->hDC, rc.right - inset, rc.bottom - inset);
+                        LineTo(dis->hDC, rc.right - inset, rc.bottom - inset - len);
+
+                        SelectObject(dis->hDC, old_pen);
+                        DeleteObject(silver_pen);
                     }
                 }
                 SetTextColor(dis->hDC, RGB(255, 255, 255));
