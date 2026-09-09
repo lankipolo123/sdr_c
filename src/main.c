@@ -88,6 +88,15 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define COLOR_APP_SILVER    RGB(176, 180, 186)
 
 #define PANEL_CHAMFER 8
+
+/* Channel cards only ("Direction B" from the UI design proposal) -
+ * rounded corners instead of the chamfer, plus a brighter/thicker
+ * border while that channel's output is on, standing in for a glow -
+ * GDI has no blurred box-shadow, so a solid highlight border is the
+ * cheap approximation. Every other panel (header, sidebar) keeps the
+ * chamfer via panel_subclass_proc, unchanged. */
+#define CARD_CORNER_DIAMETER 16
+#define CARD_BORDER_ON_WIDTH 2
 #define DOT_GRID_SPACING 8
 #define DOT_GRID_SIZE 2
 
@@ -251,6 +260,56 @@ static HWND add_panel(HWND parent, int x, int y, int w, int h) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
         }
         SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)panel_subclass_proc);
+    }
+    return ctrl;
+}
+
+/* Rounded-corner card panel - channel index stashed in GWLP_USERDATA so
+ * it can read that channel's own on/off state at paint time, same
+ * live-read pattern as sensor_chip_subclass_proc. */
+static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        HBRUSH old_brush;
+        HPEN pen, old_pen;
+        int index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+        const ChannelState *ch = channels_get(index);
+        bool on = ch->output_on;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+
+        old_brush = (HBRUSH)SelectObject(hdc, g_brush_panel);
+        pen = CreatePen(PS_SOLID, on ? CARD_BORDER_ON_WIDTH : 1,
+                         on ? COLOR_APP_CONNECTED : COLOR_APP_PANEL_BORDER);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom,
+                  CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
+
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+        SelectObject(hdc, old_brush);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_card_panel(HWND parent, int x, int y, int w, int h, int index) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, 0);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_USERDATA, (LONG_PTR)index);
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)card_panel_subclass_proc);
     }
     return ctrl;
 }
@@ -1067,7 +1126,7 @@ static void add_channel_card(HWND hwnd, int index) {
     int i;
     HWND mode_combo;
 
-    g_card_panel[index] = add_panel(hwnd, x, y, CARD_W, CARD_H);
+    g_card_panel[index] = add_card_panel(hwnd, x, y, CARD_W, CARD_H, index);
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
     g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 170, 16);
@@ -1174,6 +1233,12 @@ static void ui_refresh_channel(int index) {
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_medium_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_low_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_off_id(index)), NULL, FALSE);
+
+    /* Card border reads output_on too now (rounded + lit border while
+     * on) - only repaint it on the one field it actually depends on. */
+    if (!cache->valid || cache->output_on != ch->output_on) {
+        InvalidateRect(g_card_panel[index], NULL, FALSE);
+    }
 
     cache->valid = true;
     cache->busy = ch->busy;
