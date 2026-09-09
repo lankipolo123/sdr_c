@@ -528,32 +528,6 @@ static void paint_gradient_pill(HDC hdc, RECT rc, COLORREF grad_to, const char *
     SelectObject(hdc, old_font);
 }
 
-static LRESULT CALLBACK sensor_status_pill_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_ERASEBKGND) {
-        return 1;
-    }
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC hdc;
-        RECT rc;
-        char text[32];
-        bool connected = sensor_is_connected(&g_sensor);
-        float avg_c;
-        bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
-        COLORREF state_color = !connected ? COLOR_APP_DISCONNECTED
-                              : has_avg ? COLOR_APP_CONNECTED
-                              : COLOR_APP_ACCENT;
-
-        hdc = BeginPaint(hwnd, &ps);
-        GetClientRect(hwnd, &rc);
-        GetWindowTextA(hwnd, text, sizeof(text));
-        paint_gradient_pill(hdc, rc, state_color, text);
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
-}
-
 static LRESULT CALLBACK sensor_avg_pill_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -1503,7 +1477,12 @@ static void build_controls(HWND hwnd) {
      * reading) are one aligned row of two gradient pills instead of two
      * stacked plain-text lines - width matches the chip grid below (88
      * *3 + 6*2 = 276) so the whole column reads as one aligned block. */
-    add_pill(hwnd, "Disconnected", 1033, 60, 134, 22, IDC_SENSOR_STATUS_LBL, (WNDPROC)sensor_status_pill_subclass_proc);
+    /* Plain text, not a pill - only the temperature reading gets that
+     * treatment. Still on the same row/aligned with the Avg pill next
+     * to it, just left-aligned status text like every other connection
+     * status label in this app (Connection & Settings' own status,
+     * left as-is, is the same style). */
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 66, 130, 16, IDC_SENSOR_STATUS_LBL);
     add_pill(hwnd, "Avg -", 1175, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* One small rounded "mini card" per physical sensor unit (address +
      * live reading), 3 columns x 2 rows instead of a plain text list -
@@ -1844,10 +1823,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
-            /* IDC_SENSOR_STATUS_LBL/IDC_SENSOR_TEMP_LBL no longer reach
-             * here - they're self-painting gradient pills now (see
-             * sensor_status_pill_subclass_proc/sensor_avg_pill_subclass_proc),
-             * which bypasses WM_CTLCOLORSTATIC entirely. */
+            /* Plain text, not a pill (see add_ctrl call site) - only the
+             * Avg reading next to it is a pill
+             * (sensor_avg_pill_subclass_proc, which bypasses
+             * WM_CTLCOLORSTATIC entirely and doesn't need a case here). */
+            if (ctl == GetDlgItem(hwnd, IDC_SENSOR_STATUS_LBL)) {
+                float avg_c;
+                bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+                COLORREF col = !sensor_is_connected(&g_sensor) ? COLOR_APP_DISCONNECTED
+                             : has_avg ? COLOR_APP_CONNECTED
+                             : COLOR_APP_ACCENT;
+                SetTextColor(hdc, col);
+                SetBkMode(hdc, TRANSPARENT);
+                return (LRESULT)g_brush_panel;
+            }
             if (ctl == GetDlgItem(hwnd, IDC_KILL_STATUS_LBL)) {
                 SetTextColor(hdc, COLOR_APP_DISCONNECTED);
                 SetBkMode(hdc, TRANSPARENT);
