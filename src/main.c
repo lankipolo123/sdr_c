@@ -36,8 +36,11 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     200
-#define CONTENT_TOP  214
+#define HEADER_H     180 /* was 200 - both header cards shrunk (smaller
+                            * controls, tighter rows), tallest content
+                            * now bottoms out around y=172 */
+#define CONTENT_TOP  194 /* shifts down by the same 20px HEADER_H lost,
+                            * keeping the usual 8px gap below the panel */
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -414,13 +417,10 @@ static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, in
 #define HEADER_RIGHT_CARD_X0 1023
 #define HEADER_RIGHT_CARD_X1 1313
 #define HEADER_CARD_Y0 6
-#define HEADER_CARD_Y1 176 /* was 194 - the tallest content (the ADDR
-                              * sensor grid) bottoms out around y=170, so
-                              * the bracket box was floating with a big
-                              * empty gap beneath it. Pulled up to fit,
-                              * without touching HEADER_H/CONTENT_TOP -
-                              * just the two bracket "card" zones shrink,
-                              * not the underlying header panel itself. */
+#define HEADER_CARD_Y1 176 /* tallest content (the ADDR sensor grid)
+                              * bottoms out around y=172 with the new,
+                              * tighter row spacing - matches HEADER_H's
+                              * own trim just above. */
 
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
@@ -1695,34 +1695,39 @@ static void build_controls(HWND hwnd) {
     add_header_icon(hwnd, 719, 14, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 737, 14, 260, 18);
 
-    /* Port gets its own full row now, wider than before, with Refresh/
-     * Connect dropped to a row of their own underneath instead of
-     * crammed onto the same line - actually "lengthy, not widy" as
-     * the section comment above always intended, not a single wide
-     * row. Everything below shifts down a row to make space. */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 719, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 753, 34, 160, 160, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 719, 64, 70, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 797, 64, 80, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 719, 92, 290, 16, IDC_CONN_STATUS_LBL);
+    /* Every row below is centered within the card's own bracket zone
+     * (HEADER_LEFT_CARD_X0/X1) instead of flush against its left edge -
+     * each row's total width is computed, then its start x is
+     * (zone_width - row_width) / 2 past the zone's left edge. Buttons
+     * shrunk to 18px tall (was 22) and row gaps tightened throughout,
+     * per direct request to make both the controls and the panel
+     * smaller. */
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 762, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 798, 34, 160, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 788, 60, 64, 18, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 860, 60, 72, 18, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_CENTER | SS_NOPREFIX, 705, 86, 310, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 719, 114, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 755, 112, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 146, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 783, 144, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 852, 146, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 894, 144, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 110, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 108, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 134, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 132, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 134, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 132, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
      * Connection & Settings, just anchored to the header's right edge
-     * instead of sitting bunched up next to it. */
+     * instead of sitting bunched up next to it. Port/Refresh/Connect
+     * stay on one combined row here (unlike Connection & Settings'
+     * split rows) - splitting them would make this the taller of the
+     * two cards, working against making it smaller. */
     add_header_icon(hwnd, 1033, 14, ICON_WAVE);
     add_header(hwnd, "Amplifier Temperature", 1051, 14, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1033, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1067, 34, 90, 160, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 34, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 34, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1029, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1065, 34, 90, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1165, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1235, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
     /* 6 physical sensors scanning the rack area, each at its own
      * address (see UNIT_TEMP_ADDR) - not one per RF channel. Status and
      * the rack-wide average (across whichever of the 6 currently have a
@@ -1733,22 +1738,24 @@ static void build_controls(HWND hwnd) {
      * treatment. Still on the same row/aligned with the Avg pill next
      * to it, just left-aligned status text like every other connection
      * status label in this app (Connection & Settings' own status,
-     * left as-is, is the same style). */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 66, 130, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1175, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+     * left as-is, is the same style). Row centered as a group within
+     * the card zone, not flush left/right against its edges. */
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1041, 64, 100, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1161, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Address + reading per physical sensor unit, 3 columns x 2 rows -
      * plain text (no box), see sensor_chip_subclass_proc(). Chip height
      * 38 (was 34) - the bold reading's box needs real room, not just a
      * few pixels more (see the DT_NOCLIP/decimal-point comment in
      * sensor_chip_subclass_proc); row gap trimmed back to 4 to help
-     * absorb that. */
+     * absorb that. Grid centered within the card zone (start x=1030,
+     * not flush against 1023). */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
             int col = chip % 3;
             int row = chip / 3;
-            int cx = 1033 + col * (88 + 6);
-            int cy = 90 + row * (38 + 4);
+            int cx = 1030 + col * (88 + 6);
+            int cy = 92 + row * (38 + 4);
             g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 38, chip);
         }
     }
