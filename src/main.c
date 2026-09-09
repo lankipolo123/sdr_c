@@ -375,6 +375,48 @@ static void make_combo_readonly(HWND combo) {
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
  * with no per-item on/off state to light the border with. */
+
+/* Short L-shaped silver line at each of a rect's 4 corners - a
+ * decorative accent, not a full outline. Shared by the header panel's
+ * two "card" zones below. */
+static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, int len) {
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HPEN old_pen = (HPEN)SelectObject(hdc, pen);
+
+    MoveToEx(hdc, rc.left + inset, rc.top + inset + len, NULL);
+    LineTo(hdc, rc.left + inset, rc.top + inset);
+    LineTo(hdc, rc.left + inset + len, rc.top + inset);
+
+    MoveToEx(hdc, rc.right - inset - len, rc.top + inset, NULL);
+    LineTo(hdc, rc.right - inset, rc.top + inset);
+    LineTo(hdc, rc.right - inset, rc.top + inset + len);
+
+    MoveToEx(hdc, rc.left + inset, rc.bottom - inset - len, NULL);
+    LineTo(hdc, rc.left + inset, rc.bottom - inset);
+    LineTo(hdc, rc.left + inset + len, rc.bottom - inset);
+
+    MoveToEx(hdc, rc.right - inset - len, rc.bottom - inset, NULL);
+    LineTo(hdc, rc.right - inset, rc.bottom - inset);
+    LineTo(hdc, rc.right - inset, rc.bottom - inset - len);
+
+    SelectObject(hdc, old_pen);
+    DeleteObject(pen);
+}
+
+/* The header panel is one continuous window holding two sections side
+ * by side (Connection & Settings, Amplifier Temperature) - there's no
+ * separate window per section to subclass individually. Read as "2
+ * cards" anyway by drawing corner brackets at each section's own 4
+ * corners, positioned to roughly bound that section's actual controls
+ * (see build_controls() for where each section's content starts/
+ * ends), rather than physically splitting the panel into two windows. */
+#define HEADER_LEFT_CARD_X0  705
+#define HEADER_LEFT_CARD_X1  1015
+#define HEADER_RIGHT_CARD_X0 1023
+#define HEADER_RIGHT_CARD_X1 1313
+#define HEADER_CARD_Y0 6
+#define HEADER_CARD_Y1 194
+
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -412,6 +454,16 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
         SelectObject(hdc, old_brush);
+
+        if (hwnd == g_header_panel) {
+            RECT left_card, right_card;
+            left_card.left = HEADER_LEFT_CARD_X0; left_card.top = HEADER_CARD_Y0;
+            left_card.right = HEADER_LEFT_CARD_X1; left_card.bottom = HEADER_CARD_Y1;
+            right_card.left = HEADER_RIGHT_CARD_X0; right_card.top = HEADER_CARD_Y0;
+            right_card.right = HEADER_RIGHT_CARD_X1; right_card.bottom = HEADER_CARD_Y1;
+            draw_corner_brackets(hdc, left_card, COLOR_APP_SILVER, 0, 10);
+            draw_corner_brackets(hdc, right_card, COLOR_APP_SILVER, 0, 10);
+        }
 
         EndPaint(hwnd, &ps);
         return 0;
