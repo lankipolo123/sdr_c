@@ -36,9 +36,13 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     200 /* was 230 - tightened row spacing below freed
-                            * this up, given to the cards (CARD_H) instead */
-#define CONTENT_TOP  214
+#define HEADER_H     182 /* was 200 - the tallest header content (the
+                            * ADDR sensor grid) bottoms out around y=170,
+                            * leaving ~30px of empty panel below it once
+                            * the corner-bracket accents made that gap
+                            * obvious. Trimmed to a normal ~18px margin. */
+#define CONTENT_TOP  196 /* shifts down by the same 18px HEADER_H lost,
+                            * keeping the usual 8px gap below the panel */
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -415,7 +419,7 @@ static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, in
 #define HEADER_RIGHT_CARD_X0 1023
 #define HEADER_RIGHT_CARD_X1 1313
 #define HEADER_CARD_Y0 6
-#define HEADER_CARD_Y1 194
+#define HEADER_CARD_Y1 176 /* was 194, matches HEADER_H's own trim above */
 
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
