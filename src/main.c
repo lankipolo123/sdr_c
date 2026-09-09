@@ -501,12 +501,21 @@ static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool v
  * horizontal gradient from the dark field color into whatever color
  * the state is, clipped to the pill shape, then a thin matching
  * border and centered text on top. Shared by the sensor status pill
- * and the average-temperature pill below it. */
+ * and the average-temperature pill below it.
+ *
+ * Text color is picked from the blend at the CENTER of the gradient
+ * (roughly where the text itself sits), not hardcoded - temp_band_color()
+ * returns pure white for cold readings, and near-white/light text on
+ * top of that was invisible. Cheap perceptual luminance on the halfway
+ * blend of field-bg and grad_to decides light-text-on-dark vs
+ * dark-text-on-light. */
 static void paint_gradient_pill(HDC hdc, RECT rc, COLORREF grad_to, const char *text) {
     HRGN clip;
     int diameter = rc.bottom - rc.top;
     HPEN pen, old_pen;
     HFONT old_font;
+    COLORREF mid, text_color;
+    int luma;
 
     clip = CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, diameter, diameter);
     SelectClipRgn(hdc, clip);
@@ -521,9 +530,15 @@ static void paint_gradient_pill(HDC hdc, RECT rc, COLORREF grad_to, const char *
     SelectObject(hdc, old_pen);
     DeleteObject(pen);
 
+    mid = RGB((GetRValue(COLOR_APP_FIELD_BG) + GetRValue(grad_to)) / 2,
+              (GetGValue(COLOR_APP_FIELD_BG) + GetGValue(grad_to)) / 2,
+              (GetBValue(COLOR_APP_FIELD_BG) + GetBValue(grad_to)) / 2);
+    luma = (GetRValue(mid) * 299 + GetGValue(mid) * 587 + GetBValue(mid) * 114) / 1000;
+    text_color = (luma > 150) ? RGB(20, 21, 23) : COLOR_APP_TEXT;
+
     SetBkMode(hdc, TRANSPARENT);
     old_font = (HFONT)SelectObject(hdc, g_font);
-    SetTextColor(hdc, COLOR_APP_TEXT);
+    SetTextColor(hdc, text_color);
     DrawTextA(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(hdc, old_font);
 }
