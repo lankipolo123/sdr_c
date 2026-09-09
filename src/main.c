@@ -430,7 +430,7 @@ static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, in
  * floating with empty space again - the exact problem already fixed
  * once for the right card. */
 #define HEADER_LEFT_CARD_Y1  132 /* content bottoms out ~y=127 */
-#define HEADER_RIGHT_CARD_Y1 176 /* content bottoms out ~y=172 (ADDR grid) */
+#define HEADER_RIGHT_CARD_Y1 174 /* content bottoms out ~y=168 (ADDR grid) */
 
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
@@ -1754,22 +1754,26 @@ static void build_controls(HWND hwnd) {
      * status label in this app (Connection & Settings' own status,
      * left as-is, is the same style). Row centered as a group within
      * the card zone, not flush left/right against its edges. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 64, 100, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1149, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60, 100, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Address + reading per physical sensor unit, 3 columns x 2 rows -
      * plain text (no box), see sensor_chip_subclass_proc(). Chip height
      * unchanged at 38 (the bold reading's box needs real room - see the
      * DT_NOCLIP/decimal-point comment in sensor_chip_subclass_proc) but
      * width trimmed 88 -> 84 and the column gap 6 -> 4 so the grid fits
      * inside the card zone's new, narrower right margin. Centered
-     * within the zone (start x=1026, not flush against 1023). */
+     * within the zone (start x=1026, not flush against 1023). This
+     * card has no spare row to merge away like Connection & Settings
+     * did (Port/Refresh/Connect were already combined) - the 2-row,
+     * 38px-tall ADDR grid is what's actually keeping it tall, and
+     * that floor is fixed, so only the gaps above it got tightened. */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
             int col = chip % 3;
             int row = chip / 3;
             int cx = 1026 + col * (84 + 4);
-            int cy = 92 + row * (38 + 4);
+            int cy = 88 + row * (38 + 4);
             g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 84, 38, chip);
         }
     }
