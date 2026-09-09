@@ -1650,10 +1650,10 @@ static void build_controls(HWND hwnd) {
 
     add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 719, 114, 34, 16, 0);
     make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 755, 112, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 136, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 783, 134, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 839, 136, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 881, 134, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 146, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 783, 144, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 852, 146, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 894, 144, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
