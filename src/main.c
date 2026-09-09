@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 666
+#define CLIENT_HEIGHT 594
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -94,15 +94,13 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 /* --- grid layout for the 16 channel cards --- */
 #define GRID_COLS 4
 #define GRID_ROWS 4
-/* Widened a little from the previous 200-wide design - that was
- * packed tight enough that the bottom-row Bandwidth/Temp statics
- * actually overlapped (see add_channel_card()), and there was no room
- * for a Bandwidth/Address bottom row with real margins. CARD_H sizes
- * to fit just that one bottom row now - per-unit temperature/humidity
- * readouts were tried and dropped again (see git history), so there's
- * no second bottom row to fit anymore. */
+/* Widened a little from the previous 200-wide design (see git history
+ * for why). CARD_H sizes to fit the level gauge/tick-label column now
+ * - the bottom-row Bandwidth/Address statics that used to extend it
+ * are gone too, removed at the same time as the temperature/humidity
+ * readouts before them. */
 #define CARD_W 224
-#define CARD_H 120
+#define CARD_H 102
 #define CARD_GAP 8
 #define GRID_LEFT 380
 #define GRID_TOP CONTENT_TOP
@@ -146,7 +144,6 @@ static HWND g_sidebar_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
-static HWND g_card_bandwidth_lbl[MAX_CHANNELS];
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
 static int g_last_client_w = -1; /* last size relayout_for_size() actually
@@ -384,29 +381,6 @@ static void build_dot_pattern_brush(void) {
     g_brush_dot_pattern = CreatePatternBrush(g_dot_pattern_bmp);
 }
 
-/* ---- temperature gauge ----
- * A horizontal gradient scale (not a fill-to-value bar): the full track
- * always shows the whole 0-GAUGE_MAX_C color range, white -> green ->
- * blue -> orange -> red, and a thin marker line shows where the current
- * reading sits on it. Matches the confirmed bands: 0-19 white, 20-39
- * green, 40-55 blue, 56-65 orange, 66+ red - the gradient stops sit at
- * each band's midpoint so the color sweep reads smoothly rather than in
- * hard steps. */
-#define GAUGE_MAX_C 80.0f
-#define GAUGE_STOP_COUNT 5
-
-static const float GAUGE_STOP_TEMPS[GAUGE_STOP_COUNT] = { 0.0f, 20.0f, 48.0f, 61.0f, 80.0f };
-
-static COLORREF gauge_stop_color(int i) {
-    switch (i) {
-        case 0: return RGB(255, 255, 255); /* white - freezing */
-        case 1: return COLOR_APP_CONNECTED; /* green - low */
-        case 2: return RGB(58, 133, 224);   /* blue */
-        case 3: return RGB(224, 146, 34);   /* orange */
-        default: return COLOR_APP_DISCONNECTED; /* red - hot */
-    }
-}
-
 /* Which of the 5 confirmed bands a reading falls in - used to color the
  * position marker and the numeric readout beside the gauge, matching the
  * gradient it sits on. */
@@ -444,79 +418,6 @@ static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool v
     gr.UpperLeft = 0;
     gr.LowerRight = 1;
     GradientFill(hdc, v, 2, &gr, 1, vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
-}
-
-static LRESULT CALLBACK gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_ERASEBKGND) {
-        return 1;
-    }
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC hdc;
-        RECT rc;
-        bool has_avg;
-        float avg_c;
-        int i;
-        int w;
-
-        hdc = BeginPaint(hwnd, &ps);
-        GetClientRect(hwnd, &rc);
-        w = rc.right - rc.left;
-
-        /* Gradient stops mapped from temperature-space to pixel-space,
-         * drawn as GAUGE_STOP_COUNT-1 back-to-back two-color segments -
-         * GradientFill only interpolates between 2 colors per call, so a
-         * multi-color sweep is just several of those in a row. */
-        for (i = 0; i + 1 < GAUGE_STOP_COUNT; i++) {
-            RECT seg = rc;
-            seg.left = rc.left + (int)(GAUGE_STOP_TEMPS[i] / GAUGE_MAX_C * w);
-            seg.right = rc.left + (int)(GAUGE_STOP_TEMPS[i + 1] / GAUGE_MAX_C * w);
-            gradient_fill_rect(hdc, seg, gauge_stop_color(i), gauge_stop_color(i + 1), false);
-        }
-
-        has_avg = sensor_average_temperature(&g_sensor, &avg_c);
-        if (has_avg) {
-            float t = avg_c;
-            int marker_x;
-            HPEN pen, old_pen;
-
-            if (t < 0.0f) t = 0.0f;
-            if (t > GAUGE_MAX_C) t = GAUGE_MAX_C;
-            marker_x = rc.left + (int)(t / GAUGE_MAX_C * w);
-
-            pen = CreatePen(PS_SOLID, 2, RGB(20, 20, 22));
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            MoveToEx(hdc, marker_x, rc.top, NULL);
-            LineTo(hdc, marker_x, rc.bottom);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
-
-        {
-            HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-            HPEN old_pen = (HPEN)SelectObject(hdc, pen);
-            HBRUSH old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
-            SelectObject(hdc, old_brush);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-        }
-
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
-}
-
-static HWND add_gauge(HWND parent, int x, int y, int w, int h, int id) {
-    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, id);
-    if (ctrl) {
-        if (!g_panel_orig_proc) {
-            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
-        }
-        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)gauge_subclass_proc);
-    }
-    return ctrl;
 }
 
 /* ---- activity log ---- */
@@ -715,7 +616,6 @@ static void ui_refresh_sensor(void) {
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
-    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_GAUGE), NULL, FALSE);
 
     g_sensor_ui_valid = true;
     g_sensor_ui_connected = connected;
@@ -1095,28 +995,6 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 174, y + 60, 44, 14, channel_lbl_low_id(index));
     add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 174, y + 78, 44, 14, channel_lbl_off_id(index));
 
-    /* Bottom row: fixed config only now (no live sensor reading shown
-     * on the card - temperature/humidity were tried and dropped again,
-     * see git history). Never changes after creation, so no control ID
-     * needed to look either back up: bandwidth (currently fixed/blind,
-     * not per-channel configurable - see CHANNEL_BLIND_BANDWIDTH_MHZ in
-     * channels.h) and this unit's wired sensor address (UNIT_TEMP_ADDR
-     * - read straight from that table, not sensor_get_unit_address(),
-     * since add_channel_card() runs before sensor_init()/
-     * sensor_set_unit_address() have populated the live Sensor
-     * struct). */
-    {
-        char bw_text[24];
-        wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
-        g_card_bandwidth_lbl[index] = add_ctrl(hwnd, "STATIC", bw_text, SS_LEFT | SS_NOPREFIX,
-                                                x + 8, y + 100, 96, 14, 0);
-    }
-    {
-        char addr_text[16];
-        wsprintfA(addr_text, "Addr: %d", UNIT_TEMP_ADDR[index]);
-        add_ctrl(hwnd, "STATIC", addr_text, SS_LEFT | SS_NOPREFIX,
-                 x + 112, y + 100, 96, 14, 0);
-    }
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -1320,11 +1198,12 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
-     * no mode toggle needed anymore. This status/gauge shows the rack-
-     * wide average; each card shows its own individual reading. */
+     * no mode toggle needed anymore. This status shows the rack-wide
+     * average; each card shows its own individual reading. (The
+     * gradient gauge bar that used to sit here is gone - dropped for
+     * now, something else is going in its place later.) */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 1033, 86, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1239, 86, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 200, 20, IDC_SENSOR_TEMP_LBL);
     add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 110, 190, 16, IDC_KILL_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 108, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
@@ -1411,12 +1290,6 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(174), y + SY(42), SX(44), SY(14));
     PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(174), y + SY(60), SX(44), SY(14));
     PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(174), y + SY(78), SX(44), SY(14));
-
-    /* Address static has no stored handle (see add_channel_card()) -
-     * harmless to skip here since cards never actually resize anymore
-     * (relayout_for_size() always passes CARD_W x CARD_H), so its
-     * position never needs to change after creation. */
-    PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(100), SX(96), SY(14));
 
 #undef SX
 #undef SY
