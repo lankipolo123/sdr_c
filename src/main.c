@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 618
+#define CLIENT_HEIGHT 658
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -36,8 +36,8 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     160
-#define CONTENT_TOP  174
+#define HEADER_H     200
+#define CONTENT_TOP  214
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -625,24 +625,27 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
 
-    /* Which units currently have a reading, by their actual configured
-     * Modbus address (UNIT_TEMP_ADDR / sensor_get_unit_address()) - not
-     * just a 1..N position count, since real wiring may not be
-     * sequential. "Addr 1, Addr 2, Addr 3". */
+    /* Each reporting unit's own address and reading, by actual
+     * configured Modbus address (UNIT_TEMP_ADDR / sensor_get_unit_
+     * address()) - not just a 1..N position count, since real wiring
+     * may not be sequential. 3 per line: "Addr 1: 25.3 C, Addr 2: 26.1
+     * C, Addr 3: 27.0 C". */
     {
-        char units_text[200];
+        char units_text[400];
         int u;
-        bool first = true;
+        int shown = 0;
         units_text[0] = '\0';
         for (u = 0; u < SENSOR_MAX_UNITS; u++) {
-            if (sensor_get_state(&g_sensor, u)->has_reading) {
-                char part[16];
-                if (!first) {
-                    lstrcatA(units_text, ", ");
+            const SensorState *ust = sensor_get_state(&g_sensor, u);
+            if (ust->has_reading) {
+                char part[32];
+                if (shown > 0) {
+                    lstrcatA(units_text, (shown % 3 == 0) ? "\r\n" : ", ");
                 }
-                wsprintfA(part, "Addr %d", sensor_get_unit_address(&g_sensor, u));
+                wsprintfA(part, "Addr %d: %d.%d C", sensor_get_unit_address(&g_sensor, u),
+                          (int)ust->temperature_c, (int)(ust->temperature_c * 10) % 10);
                 lstrcatA(units_text, part);
-                first = false;
+                shown++;
             }
         }
         SetDlgItemTextA(g_hwnd, IDC_SENSOR_UNITS_LBL, units_text);
@@ -1248,11 +1251,12 @@ static void build_controls(HWND hwnd) {
      * later.) */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
     add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 260, 20, IDC_SENSOR_TEMP_LBL);
-    /* Which units currently have a reading, listed out (Unit 1, Unit 2,
-     * ...) rather than a compact range/fraction. */
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 108, 270, 16, IDC_SENSOR_UNITS_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 134, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 132, 80, 22, IDC_KILL_RESET_BTN);
+    /* Each reporting unit's own address and reading, 3 per line
+     * ("Addr 1: 25.3 C, Addr 2: 26.1 C, ...") - not just which
+     * addresses are reporting, the actual temperature each is reading. */
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 108, 300, 48, IDC_SENSOR_UNITS_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 166, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 164, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
