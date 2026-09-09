@@ -625,20 +625,24 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
 
-    /* Which units currently have a reading, spelled out one by one -
-     * "Unit 1, Unit 2, Unit 3" rather than a range or a fraction. */
+    /* Which units currently have a reading, by their actual configured
+     * Modbus address (UNIT_TEMP_ADDR / sensor_get_unit_address()) - not
+     * just a 1..N position count, since real wiring may not be
+     * sequential. "Addr 1, Addr 2, Addr 3". */
     {
         char units_text[200];
+        int u;
+        bool first = true;
         units_text[0] = '\0';
-        if (reading_count > 0) {
-            int u;
-            for (u = 1; u <= reading_count; u++) {
+        for (u = 0; u < SENSOR_MAX_UNITS; u++) {
+            if (sensor_get_state(&g_sensor, u)->has_reading) {
                 char part[16];
-                if (u > 1) {
+                if (!first) {
                     lstrcatA(units_text, ", ");
                 }
-                wsprintfA(part, "Unit %d", u);
+                wsprintfA(part, "Addr %d", sensor_get_unit_address(&g_sensor, u));
                 lstrcatA(units_text, part);
+                first = false;
             }
         }
         SetDlgItemTextA(g_hwnd, IDC_SENSOR_UNITS_LBL, units_text);
@@ -1426,7 +1430,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     sensor_set_unit_address(&g_sensor, addr_i, UNIT_TEMP_ADDR[addr_i]);
                 }
             }
-
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
             ui_refresh_all_channels();
             ui_refresh_sensor();
