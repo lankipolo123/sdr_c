@@ -286,12 +286,13 @@ static LRESULT CALLBACK combo_edge_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         PAINTSTRUCT ps;
         HDC hdc;
         RECT rc;
-        HBRUSH brush;
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
-        brush = CreateSolidBrush(COLOR_APP_PANEL_BORDER);
-        FillRect(hdc, &rc, brush);
-        DeleteObject(brush);
+        /* Same dark field color as the text/arrow area, not a
+         * separate border color - reads as one seamless dark box with
+         * no visible frame, per direct request, instead of a themed
+         * border. Still covers the native sunken bevel underneath. */
+        FillRect(hdc, &rc, g_brush_field);
         EndPaint(hwnd, &ps);
         return 0;
     }
