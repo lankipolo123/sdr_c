@@ -53,25 +53,24 @@ static const char PARITY_CODES[] = { 'N', 'O', 'E', 'M', 'S' };
 
 static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
 
-/* Kill switch: forces a unit off if its sensor reports a dangerously
- * high temperature - its own unit only, not the other 15, since each
- * has its own independent sensor at its own address (see
- * UNIT_TEMP_ADDR). Manual reset only, deliberately, per unit - once
- * tripped, that unit stays off (and new ON/Set/level commands for it
- * are blocked) even if its temperature drops back down, until the user
- * explicitly resets it. Auto-resuming at the threshold would let it
- * silently cycle on/off right at the boundary, defeating the point of a
- * safety cutoff. */
+/* Kill switch: rack-wide, not per-channel - there are only 6 physical
+ * sensors scanning the area, not one per RF channel, so there's no
+ * single channel's "own" reading to check individually anymore. Trips
+ * every one of the 16 channels off at once when the average across all
+ * 6 sensors (sensor_average_temperature()) crosses the threshold.
+ * Manual reset only, deliberately - once tripped, a channel stays off
+ * (and new ON/Set/level commands for it are blocked) even if the
+ * average drops back down, until the user explicitly resets it (either
+ * that one channel, or all of them via the sidebar Reset button).
+ * Auto-resuming at the threshold would let it silently cycle on/off
+ * right at the boundary, defeating the point of a safety cutoff. */
 #define KILL_SWITCH_THRESHOLD_C 60.0f
 
-/* Modbus slave address each unit's own temperature sensor is wired to.
+/* Modbus slave address each of the 6 physical sensors is wired to.
  * Defaults to the unit number, 1-indexed - edit this table once the real
- * per-unit wiring is known, since it's very likely not sequential. Not
- * shown in the UI (see the card's Temp readout instead) - pushed into
+ * wiring is known, since it's very likely not sequential. Pushed into
  * the sensor at WM_CREATE via sensor_set_unit_address(). */
-static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
-};
+static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 
 /* MILITRONIX Dark palette - same as the single-channel app. */
 #define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
@@ -577,11 +576,10 @@ static bool g_sensor_connect_btn_valid;
 static bool g_sensor_connect_btn_connected;
 
 static void ui_refresh_sensor(void) {
-    /* Sidebar shows a rack-wide summary - the average across every unit
-     * that currently has a reading - since each unit now always has its
-     * own sensor at its own address (see UNIT_TEMP_ADDR); each card
-     * still shows its own individual reading. The Connect button has its
-     * own small change-detection gate below, separate from the average. */
+    /* Rack-wide summary - the average across the 6 physical sensors that
+     * currently have a reading (see UNIT_TEMP_ADDR) - not tied to the 16
+     * RF channels. The Connect button has its own small change-detection
+     * gate below, separate from the average. */
     bool connected = sensor_is_connected(&g_sensor);
     bool has_avg;
     float avg_c = 0.0f;
@@ -597,7 +595,7 @@ static void ui_refresh_sensor(void) {
     }
 
     has_avg = sensor_average_temperature(&g_sensor, &avg_c);
-    for (i = 0; i < MAX_CHANNELS; i++) {
+    for (i = 0; i < SENSOR_MAX_UNITS; i++) {
         if (sensor_get_state(&g_sensor, i)->has_reading) {
             reading_count++;
         }
@@ -655,9 +653,9 @@ static void ui_refresh_sensor(void) {
 }
 
 /* ---- kill switch ----
- * One trip flag per unit (see KILL_SWITCH_THRESHOLD_C's comment for
- * why) - each unit has its own sensor, so this loop just checks each
- * one's own reading independently. */
+ * One trip flag per channel, but they all trip together off the same
+ * rack-wide average (see KILL_SWITCH_THRESHOLD_C's comment for why) -
+ * there's no per-channel sensor reading to check individually. */
 
 static bool g_kill_ui_valid;
 static int g_kill_ui_tripped_count;
@@ -699,26 +697,36 @@ static void ui_refresh_kill_switch(void) {
 }
 
 /* Manual reset only, by design - see the KILL_SWITCH_THRESHOLD_C comment
- * up top for why. Call once per timer tick; no-ops per-unit once that
- * unit is already tripped or its temperature is unknown/below threshold. */
+ * up top for why. Call once per timer tick. Rack-wide: trips every
+ * not-yet-tripped channel at once off the same average reading (there's
+ * no per-channel sensor to check individually anymore - see
+ * KILL_SWITCH_THRESHOLD_C). A channel reset individually while the
+ * average is still over threshold will simply retrip on the next tick -
+ * expected, not a bug: the underlying condition hasn't cleared. */
 static void check_kill_switch(void) {
+    bool has_avg;
+    float avg_c;
     int i;
+    int newly_tripped = 0;
+
+    has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+    if (!has_avg || avg_c < KILL_SWITCH_THRESHOLD_C) {
+        return;
+    }
+
     for (i = 0; i < MAX_CHANNELS; i++) {
-        const SensorState *st;
+        if (!g_kill_switch_tripped[i]) {
+            g_kill_switch_tripped[i] = true;
+            channel_turn_output_off(i);
+            newly_tripped++;
+        }
+    }
+
+    if (newly_tripped > 0) {
         char msg[96];
-
-        if (g_kill_switch_tripped[i]) {
-            continue;
-        }
-        st = sensor_get_state(&g_sensor, i);
-        if (!st->has_reading || st->temperature_c < KILL_SWITCH_THRESHOLD_C) {
-            continue;
-        }
-
-        g_kill_switch_tripped[i] = true;
-        channel_turn_output_off(i);
-        wsprintfA(msg, "Unit %d: KILL SWITCH TRIPPED (%d.%d C >= %d C) - forced OFF", i + 1,
-                  (int)st->temperature_c, (int)(st->temperature_c * 10) % 10, (int)KILL_SWITCH_THRESHOLD_C);
+        wsprintfA(msg, "KILL SWITCH TRIPPED (avg %d.%d C >= %d C) - %d channel%s forced OFF",
+                  (int)avg_c, (int)(avg_c * 10) % 10, (int)KILL_SWITCH_THRESHOLD_C,
+                  newly_tripped, newly_tripped == 1 ? "" : "s");
         log_add(msg);
     }
 }
@@ -1228,11 +1236,12 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
-    /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
-     * no mode toggle needed anymore. This status shows the rack-wide
-     * average; each card shows its own individual reading. (The
-     * gradient gauge bar that used to sit here is gone - dropped for
-     * now, something else is going in its place later.) */
+    /* 6 physical sensors scanning the rack area, each at its own
+     * address (see UNIT_TEMP_ADDR) - not one per RF channel. This
+     * status/readout is the average across whichever of the 6 currently
+     * have a reading. (The gradient gauge bar that used to sit here is
+     * gone - dropped for now, something else is going in its place
+     * later.) */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
     add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 260, 20, IDC_SENSOR_TEMP_LBL);
     /* Which units currently have a reading, listed out (Unit 1, Unit 2,
@@ -1413,7 +1422,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             sensor_init(&g_sensor);
             {
                 int addr_i;
-                for (addr_i = 0; addr_i < MAX_CHANNELS; addr_i++) {
+                for (addr_i = 0; addr_i < SENSOR_MAX_UNITS; addr_i++) {
                     sensor_set_unit_address(&g_sensor, addr_i, UNIT_TEMP_ADDR[addr_i]);
                 }
             }

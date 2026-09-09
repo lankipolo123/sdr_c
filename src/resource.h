@@ -39,11 +39,13 @@
 #define IDC_CH_OFF_OFFSET         3
 /* Status line (SENDING.../level name/STANDBY). Also doubles as that
  * unit's kill-switch reset control: while tripped it shows "TRIPPED -
- * reset?" in red - click it to reset just this one unit, independent
- * of the others - the whole point of per-unit sensors instead of one
- * shared reading. (No per-unit temperature/humidity readout on the
- * card itself anymore - tried, dropped again; the rack-wide average
- * still shows in the sidebar.) */
+ * reset?" in red - click it to reset just this one channel. The kill
+ * switch itself is rack-wide (see KILL_SWITCH_THRESHOLD_C in main.c) -
+ * there are only 6 physical sensors scanning the area, not one per
+ * channel - so a channel reset this way will retrip on the next tick
+ * if the rack-wide average is still over threshold. (No per-channel
+ * temperature/humidity readout on the card itself anymore - tried,
+ * dropped again; the rack-wide average still shows in the header.) */
 #define IDC_CH_STATUS_OFFSET      4
 #define IDC_CH_TRACKBAR_OFFSET    5
 #define IDC_CH_LBL_HIGH_OFFSET    6

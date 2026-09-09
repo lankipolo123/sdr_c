@@ -2,13 +2,13 @@
  * COM port completely independent of the RS-422 channel control
  * connection.
  *
- * One sensor per unit, each at its own configured Modbus address
- * (defaults to unit number 1-16, matching MAX_CHANNELS, but real wiring
- * may not be sequential - see sensor_set_unit_address()). Every unit's
- * slot holds only its own reading, polled round-robin. (Earlier builds
- * also had a "Scan" mode - one shared sensor at a fixed address, mirrored
- * to every unit - for a single-sensor rack topology; removed once every
- * unit got its own sensor, so this is per-unit only now.)
+ * NOT one sensor per RF channel - there are 6 physical sensor units
+ * total, scanning the rack area collectively, independent of the 16 RF
+ * channels (SENSOR_MAX_UNITS is deliberately its own constant, not tied
+ * to MAX_CHANNELS). Each of the 6 has its own configured Modbus address
+ * (defaults to unit number 1-6, but real wiring may not be sequential -
+ * see sensor_set_unit_address()). Every unit's slot holds only its own
+ * reading, polled round-robin.
  *
  * Unlike channels.c's blind send (fire once, apply optimistically), a
  * register read genuinely needs the reply - there's no value to show
@@ -19,7 +19,7 @@
  *
  * Settings confirmed against the real hardware via QModMaster (see
  * PLAN_temp_sensor.md) - not guessed: function 0x04, register 1, count
- * 2, both raw/10. The slave address for per-unit mode (1-16) has not
+ * 2, both raw/10. The slave address for per-unit mode (1-6) has not
  * itself been confirmed against real per-unit hardware - only the
  * single-sensor-at-address-1 case has been.
  */
@@ -27,9 +27,9 @@
 #include "serial_port.h"
 #include <stdbool.h>
 
-#define SENSOR_MAX_UNITS 16 /* matches MAX_CHANNELS (channels.h) - kept
-                              * as its own constant so this header doesn't
-                              * need to depend on channels.h */
+#define SENSOR_MAX_UNITS 6 /* 6 physical sensors scanning the rack area -
+                             * independent of MAX_CHANNELS (16 RF
+                             * channels), not one-to-one with them */
 /* QModMaster's status bar showed "Base Addr: 1" throughout - its Start
  * Address field is very likely 1-based display over a 0-based wire
  * address, meaning its "Start Address: 2" (which worked) actually put
@@ -74,8 +74,8 @@ bool sensor_connect(Sensor *s, const char *port_name, DWORD baud, char parity, u
 void sensor_disconnect(Sensor *s);
 bool sensor_is_connected(const Sensor *s);
 
-/* unit_index is 0-based (0..SENSOR_MAX_UNITS-1), matching channel index
- * elsewhere in this app. */
+/* unit_index is 0-based (0..SENSOR_MAX_UNITS-1) - one of the 6 physical
+ * sensor units, not an RF channel index. */
 const SensorState *sensor_get_state(const Sensor *s, int unit_index);
 
 /* Which Modbus slave address unit_index's own temperature sensor is
