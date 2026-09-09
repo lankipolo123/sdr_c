@@ -110,9 +110,10 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
 
-/* Activity Log: its own full-width panel below the sidebar/grid row,
- * not squeezed inside the sidebar - the sidebar is being kept clear
- * for other features. LOG_PANEL_Y follows the same "8px gap below the
+/* Activity Log: its own panel directly below the sidebar, same width
+ * (SIDEBAR_W) as the sidebar above it - not squeezed inside the
+ * sidebar itself, since that's being kept clear for other features.
+ * LOG_PANEL_Y follows the same "8px gap below the
  * row above it" pattern as everything else here. */
 #define LOG_PANEL_H 220
 #define LOG_PANEL_Y (CONTENT_TOP + GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP + CARD_GAP)
@@ -1332,17 +1333,17 @@ static void build_controls(HWND hwnd) {
      * clear on purpose for other features going in here. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
 
-    /* Activity Log: its own full-width panel below the sidebar/grid
-     * row (see LOG_PANEL_Y/LOG_PANEL_H) - not squeezed into the
-     * sidebar, and the listbox fills the panel's full width rather
-     * than leaving space unused down one side. */
-    g_log_panel = add_panel(hwnd, SIDEBAR_X, LOG_PANEL_Y, CLIENT_WIDTH - 2 * SIDEBAR_X, LOG_PANEL_H);
+    /* Activity Log: its own panel directly below the sidebar, same
+     * width as the sidebar (see LOG_PANEL_Y/LOG_PANEL_H) - not squeezed
+     * into the sidebar itself, and the listbox fills that width fully
+     * rather than leaving space unused down one side. */
+    g_log_panel = add_panel(hwnd, SIDEBAR_X, LOG_PANEL_Y, SIDEBAR_W, LOG_PANEL_H);
     add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
     add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-             CLIENT_WIDTH - 2 * SIDEBAR_X - 22 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
+             SIDEBAR_X + SIDEBAR_W - 22 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, LOG_PANEL_Y + 34, CLIENT_WIDTH - 2 * SIDEBAR_X - 44, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
+             22, LOG_PANEL_Y + 34, SIDEBAR_W - 44, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1449,9 +1450,9 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP, FALSE);
 
-    MoveWindow(g_log_panel, SIDEBAR_X, LOG_PANEL_Y, client_w - 2 * SIDEBAR_X, LOG_PANEL_H, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, client_w - 2 * SIDEBAR_X - 44, LOG_PANEL_H - 46, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), client_w - 2 * SIDEBAR_X - 22 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
+    MoveWindow(g_log_panel, SIDEBAR_X, LOG_PANEL_Y, SIDEBAR_W, LOG_PANEL_H, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W - 44, LOG_PANEL_H - 46, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 22 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
