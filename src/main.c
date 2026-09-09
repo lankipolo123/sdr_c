@@ -1217,10 +1217,15 @@ static void build_controls(HWND hwnd) {
 
     add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
+    /* Right edge of both the Clear button and the listbox is pinned to
+     * the same margin (12px in from the panel's own right edge,
+     * matching the 12px left margin: content starts at x=22, panel at
+     * SIDEBAR_X=10) - they used to use different margins, leaving the
+     * listbox 10px short of the button above it. */
     add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-             SIDEBAR_X + SIDEBAR_W - 22 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
+             SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, LOG_PANEL_Y + 34, SIDEBAR_W - 44, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
+             22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1321,8 +1326,8 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W - 44, LOG_PANEL_H - 46, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 22 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
