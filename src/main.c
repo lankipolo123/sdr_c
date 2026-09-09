@@ -102,11 +102,11 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 #define CARD_W 224
 #define CARD_H 120
 #define CARD_GAP 8
-#define GRID_LEFT 325
+#define GRID_LEFT 380
 #define GRID_TOP CONTENT_TOP
 
 #define SIDEBAR_X 10
-#define SIDEBAR_W 305
+#define SIDEBAR_W 360
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
@@ -1323,9 +1323,12 @@ static void build_controls(HWND hwnd) {
 
     add_header_icon(hwnd, 22, 158, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, 158, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 156, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 278, 156, 60, 20, IDC_LOG_CLEAR_BTN);
+    /* Listbox fills the rest of the (now wider) sidebar, width and
+     * height both - the sidebar's only content, so no reason to leave
+     * it a small box sitting in a lot of empty panel. */
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 180, 281, 176, IDC_LOG_LISTBOX);
+             22, 180, 316, 462, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
