@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 594
+#define CLIENT_HEIGHT 618
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -31,12 +31,13 @@
  * from the sidebar, along with Amplifier Temperature, so the sidebar
  * is free for other features (Activity Log moved out too - see
  * LOG_PANEL_Y - so it's not just those two anymore). Sized to fit all
- * of it snugly with real top/bottom padding. HEADER_H is the bar's own
- * height; CONTENT_TOP is
- * where the sidebar panels and channel grid start beneath it (same 6px
- * top margin and 8px panel-to-panel gap used everywhere else). */
-#define HEADER_H     136
-#define CONTENT_TOP  150
+ * of it snugly with real top/bottom padding, plus room for Amplifier
+ * Temperature's Unit list row. HEADER_H is the bar's own height;
+ * CONTENT_TOP is where the sidebar panels and channel grid start
+ * beneath it (same 6px top margin and 8px panel-to-panel gap used
+ * everywhere else). */
+#define HEADER_H     160
+#define CONTENT_TOP  174
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -618,16 +619,33 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
 
-    /* Which units are averaged in right now, shown as a range. */
-    if (has_avg && reading_count > 0) {
-        char range[16];
-        wsprintfA(range, "Unit 1-%d", reading_count);
-        wsprintfA(text, "Avg %d.%d C (%s)", (int)avg_c, (int)(avg_c * 10) % 10, range);
+    if (has_avg) {
+        wsprintfA(text, "Avg %d.%d C", (int)avg_c, (int)(avg_c * 10) % 10);
     } else {
         lstrcpynA(text, "Avg -", (int)sizeof(text));
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
+
+    /* Which units currently have a reading, spelled out one by one -
+     * "Unit 1, Unit 2, Unit 3" rather than a range or a fraction. */
+    {
+        char units_text[200];
+        units_text[0] = '\0';
+        if (reading_count > 0) {
+            int u;
+            for (u = 1; u <= reading_count; u++) {
+                char part[16];
+                if (u > 1) {
+                    lstrcatA(units_text, ", ");
+                }
+                wsprintfA(part, "Unit %d", u);
+                lstrcatA(units_text, part);
+            }
+        }
+        SetDlgItemTextA(g_hwnd, IDC_SENSOR_UNITS_LBL, units_text);
+        InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_UNITS_LBL), NULL, FALSE);
+    }
 
     g_sensor_ui_valid = true;
     g_sensor_ui_connected = connected;
@@ -1217,8 +1235,11 @@ static void build_controls(HWND hwnd) {
      * now, something else is going in its place later.) */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
     add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 260, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 110, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 108, 80, 22, IDC_KILL_RESET_BTN);
+    /* Which units currently have a reading, listed out (Unit 1, Unit 2,
+     * ...) rather than a compact range/fraction. */
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 108, 270, 16, IDC_SENSOR_UNITS_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 134, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 132, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
