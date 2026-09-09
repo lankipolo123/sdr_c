@@ -20,9 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 700 /* +12 over the old 688 - CARD_GAP grew below,
-                            * and the grid (which LOG_PANEL_Y/sidebar
-                            * height stay flush with) needs the room */
+#define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -38,8 +36,9 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     230
-#define CONTENT_TOP  244
+#define HEADER_H     200 /* was 230 - tightened row spacing below freed
+                            * this up, given to the cards (CARD_H) instead */
+#define CONTENT_TOP  214
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -119,7 +118,7 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
  * are gone too, removed at the same time as the temperature/humidity
  * readouts before them. */
 #define CARD_W 224
-#define CARD_H 102
+#define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
 #define GRID_LEFT 380
 #define GRID_TOP CONTENT_TOP
@@ -1370,40 +1369,40 @@ static void build_controls(HWND hwnd) {
      * it (24px gap, matching the tighter spacing used everywhere else
      * here) instead of floating apart with a big gap between them -
      * reads as one grouped pair anchored to the header's right edge. */
-    add_header_icon(hwnd, 719, 16, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 737, 16, 260, 18);
+    add_header_icon(hwnd, 719, 14, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 737, 14, 260, 18);
 
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 719, 40, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 753, 38, 112, 160, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 871, 38, 56, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 931, 38, 66, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 719, 64, 290, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 719, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 753, 34, 112, 160, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 871, 34, 56, 22, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 931, 34, 66, 22, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 719, 60, 290, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 719, 88, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 755, 86, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 112, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 783, 110, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 839, 112, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 881, 110, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 719, 80, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 755, 78, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 102, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 783, 100, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 839, 102, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 881, 100, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
      * Connection & Settings, just anchored to the header's right edge
      * instead of sitting bunched up next to it. */
-    add_header_icon(hwnd, 1033, 16, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 1051, 16, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1033, 40, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_header_icon(hwnd, 1033, 14, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 1051, 14, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1033, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1067, 34, 90, 160, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 34, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 34, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* 6 physical sensors scanning the rack area, each at its own
      * address (see UNIT_TEMP_ADDR) - not one per RF channel. This
      * status/readout is the average across whichever of the 6 currently
      * have a reading. (The gradient gauge bar that used to sit here is
      * gone - dropped for now, something else is going in its place
      * later.) */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 260, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 60, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 80, 260, 20, IDC_SENSOR_TEMP_LBL);
     /* One small rounded "mini card" per physical sensor unit (address +
      * live reading), 3 columns x 2 rows instead of a plain text list -
      * see sensor_chip_subclass_proc(). */
@@ -1413,12 +1412,12 @@ static void build_controls(HWND hwnd) {
             int col = chip % 3;
             int row = chip / 3;
             int cx = 1033 + col * (88 + 6);
-            int cy = 108 + row * (36 + 6);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 36, chip);
+            int cy = 100 + row * (32 + 4);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 32, chip);
         }
     }
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 196, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 194, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 172, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 170, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
