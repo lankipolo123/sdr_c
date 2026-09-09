@@ -502,6 +502,11 @@ static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool v
  * GWLP_USERDATA at creation) rather than being fed text, same pattern
  * as the other self-drawing gauges above. Muted "-" when that unit
  * doesn't have a reading yet. */
+/* No more chip/badge box - just the address and reading as plain text,
+ * with a thin line underneath standing in for an "is this address
+ * actually reporting" indicator: dim/muted (near-invisible against the
+ * panel) until that unit has a real reading, then lit in the same
+ * color as the reading itself. */
 static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -509,52 +514,54 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
     if (msg == WM_PAINT) {
         PAINTSTRUCT ps;
         HDC hdc;
-        RECT rc, addr_rc, val_rc;
+        RECT rc, addr_rc, val_rc, line_rc;
         int unit_index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
         const SensorState *st = sensor_get_state(&g_sensor, unit_index);
         char addr_text[16];
         char val_text[16];
-        HBRUSH bg_brush;
-        HPEN border_pen, old_pen;
-        HGDIOBJ old_brush;
+        HBRUSH line_brush;
         HFONT old_font;
-        COLORREF val_color;
+        COLORREF val_color, line_color;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
-        bg_brush = CreateSolidBrush(COLOR_APP_FIELD_BG);
-        border_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-        old_pen = (HPEN)SelectObject(hdc, border_pen);
-        old_brush = SelectObject(hdc, bg_brush);
-        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
-        SelectObject(hdc, old_brush);
-        SelectObject(hdc, old_pen);
-        DeleteObject(border_pen);
-        DeleteObject(bg_brush);
-
+        /* No fill at all - transparent, the parent panel's own
+         * background shows through (same "erase skipped, let the
+         * parent's already-painted background bleed through" pattern
+         * used for the chamfered/rounded panel corners elsewhere). */
         SetBkMode(hdc, TRANSPARENT);
         old_font = (HFONT)SelectObject(hdc, g_font);
 
         wsprintfA(addr_text, "Addr %d", sensor_get_unit_address(&g_sensor, unit_index));
         addr_rc = rc;
-        addr_rc.top += 4;
+        addr_rc.top += 2;
         addr_rc.bottom = addr_rc.top + 14;
         SetTextColor(hdc, COLOR_APP_MUTED);
         DrawTextA(hdc, addr_text, -1, &addr_rc, DT_CENTER | DT_SINGLELINE);
 
         val_rc = rc;
         val_rc.top = addr_rc.bottom;
-        val_rc.bottom = rc.bottom - 2;
+        val_rc.bottom = rc.bottom - 6;
         if (st->has_reading) {
             wsprintfA(val_text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
             val_color = temp_band_color(st->temperature_c);
+            line_color = val_color;
         } else {
             lstrcpynA(val_text, "-", (int)sizeof(val_text));
             val_color = COLOR_APP_MUTED;
+            line_color = COLOR_APP_PANEL_BORDER; /* "off" - dim, barely there */
         }
         SetTextColor(hdc, val_color);
         DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_SINGLELINE);
+
+        line_rc.left = rc.left + 4;
+        line_rc.right = rc.right - 4;
+        line_rc.bottom = rc.bottom - 2;
+        line_rc.top = line_rc.bottom - 2;
+        line_brush = CreateSolidBrush(line_color);
+        FillRect(hdc, &line_rc, line_brush);
+        DeleteObject(line_brush);
 
         SelectObject(hdc, old_font);
         EndPaint(hwnd, &ps);
