@@ -1129,7 +1129,7 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_mode_lbl[index] = add_ctrl(hwnd, "STATIC", proto_mode_name(PROTO_MODE_WHITE_NOISE),
                                         SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, x + 88, y + 8, 60, 14, 0);
 
-    mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
+    mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
                            x + 8, y + 24, 82, 100, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
@@ -1346,17 +1346,17 @@ static void build_controls(HWND hwnd) {
     add_header(hwnd, "Connection && Settings", 737, 16, 260, 18);
 
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 719, 40, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 753, 38, 112, 160, IDC_PORT_COMBO);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 753, 38, 112, 160, IDC_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 871, 38, 56, 22, IDC_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 931, 38, 66, 22, IDC_CONNECT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 719, 64, 290, 16, IDC_CONN_STATUS_LBL);
 
     add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 719, 88, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 755, 86, 90, 140, IDC_BAUD_COMBO);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 755, 86, 90, 140, IDC_BAUD_COMBO);
     add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 112, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 783, 110, 45, 100, IDC_DATABITS_COMBO);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 783, 110, 45, 100, IDC_DATABITS_COMBO);
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 839, 112, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 881, 110, 70, 100, IDC_PARITY_COMBO);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 881, 110, 70, 100, IDC_PARITY_COMBO);
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
@@ -1365,7 +1365,7 @@ static void build_controls(HWND hwnd) {
     add_header_icon(hwnd, 1033, 16, ICON_WAVE);
     add_header(hwnd, "Amplifier Temperature", 1051, 16, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1033, 40, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* 6 physical sensors scanning the rack area, each at its own
@@ -1787,41 +1787,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return (LRESULT)g_brush_field;
         }
 
-        case WM_MEASUREITEM: {
-            MEASUREITEMSTRUCT *mis = (MEASUREITEMSTRUCT *)lParam;
-            if (mis->CtlType == ODT_COMBOBOX) {
-                mis->itemHeight = 20; /* dropdown list row height */
-                return TRUE;
-            }
-            break;
-        }
-
         case WM_DRAWITEM: {
             DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
-            /* CBS_OWNERDRAWFIXED combo boxes (mode/port/baud/data bits/
-             * parity) - recolors the closed field and dropdown list rows
-             * to match the app's dark theme instead of the OS-default
-             * white/black. The outer frame and dropdown-arrow button are
-             * still OS-drawn (WM_DRAWITEM only covers the text area), so
-             * this isn't full pixel parity with the mockup's flat
-             * fake-select boxes, but it's the field/list colors that
-             * actually made them look out of place. */
-            if (dis->CtlType == ODT_COMBOBOX) {
-                char text[64];
-                RECT rc = dis->rcItem;
-                bool selected = (dis->itemState & ODS_SELECTED) != 0;
-
-                FillRect(dis->hDC, &rc, selected ? g_brush_accent : g_brush_field);
-
-                if ((int)dis->itemID >= 0) {
-                    SendMessageA(dis->hwndItem, CB_GETLBTEXT, dis->itemID, (LPARAM)text);
-                    SetTextColor(dis->hDC, selected ? RGB(255, 255, 255) : COLOR_APP_TEXT);
-                    SetBkMode(dis->hDC, TRANSPARENT);
-                    rc.left += 4;
-                    DrawTextA(dis->hDC, text, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-                }
-                return TRUE;
-            }
             if (dis->CtlType == ODT_BUTTON) {
                 char text[64];
                 bool disabled = (dis->itemState & ODS_DISABLED) != 0;
