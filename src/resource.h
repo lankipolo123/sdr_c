@@ -32,26 +32,21 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             12
+#define IDC_CH_STRIDE             10
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
 #define IDC_CH_OFF_OFFSET         3
+/* Status line (SENDING.../level name/STANDBY). Also doubles as that
+ * unit's kill-switch reset control: while tripped it shows "TRIPPED -
+ * reset?" in red - click it to reset just this one unit, independent
+ * of the others - the whole point of per-unit sensors instead of one
+ * shared reading. (No per-unit temperature/humidity readout on the
+ * card itself anymore - tried, dropped again; the rack-wide average
+ * still shows in the sidebar.) */
 #define IDC_CH_STATUS_OFFSET      4
 #define IDC_CH_TRACKBAR_OFFSET    5
 #define IDC_CH_LBL_HIGH_OFFSET    6
 #define IDC_CH_LBL_MEDIUM_OFFSET  7
 #define IDC_CH_LBL_LOW_OFFSET     8
 #define IDC_CH_LBL_OFF_OFFSET     9
-/* Bottom-left stat, next to the "Bandwidth: N" static: this unit's own
- * temperature readout - its own sensor's reading, colored by band.
- * Doubles as that unit's kill-switch reset control: click it while
- * tripped (shown in red) to reset just this one unit, independent of
- * the others - the whole point of per-unit sensors instead of one
- * shared reading. */
-#define IDC_CH_TEMP_LBL_OFFSET    10
-/* Bottom-right stat, next to the temp readout: this unit's own
- * humidity reading from the same sensor poll (see sensor.c - one
- * request returns both registers together). Plain readout, no
- * click/reset behavior. */
-#define IDC_CH_HUMIDITY_OFFSET    11

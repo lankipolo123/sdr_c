@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 728
+#define CLIENT_HEIGHT 680
 
 /* App-title header bar across the top, above the sidebar/grid content.
  * HEADER_H is the bar's own height; CONTENT_TOP is where the sidebar
@@ -90,12 +90,15 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 /* --- grid layout for the 16 channel cards --- */
 #define GRID_COLS 4
 #define GRID_ROWS 4
-/* Grown a little from the previous 200x102 - that was packed tight
- * enough that the bottom-row Bandwidth/Temp statics actually
- * overlapped (see add_channel_card()), and there was no room left for
- * the per-unit Address/Humidity statics added alongside them. */
+/* Widened a little from the previous 200-wide design - that was
+ * packed tight enough that the bottom-row Bandwidth/Temp statics
+ * actually overlapped (see add_channel_card()), and there was no room
+ * for a Bandwidth/Address bottom row with real margins. CARD_H sizes
+ * to fit just that one bottom row now - per-unit temperature/humidity
+ * readouts were tried and dropped again (see git history), so there's
+ * no second bottom row to fit anymore. */
 #define CARD_W 224
-#define CARD_H 132
+#define CARD_H 120
 #define CARD_GAP 8
 #define GRID_LEFT 325
 #define GRID_TOP CONTENT_TOP
@@ -797,8 +800,8 @@ static void on_kill_reset_clicked(void) {
 }
 
 /* Per-unit reset - resets just this one unit, independent of the others.
- * Wired to a click on that unit's card temperature readout while it's
- * tripped (see IDC_CH_TEMP_LBL_OFFSET's comment in resource.h). */
+ * Wired to a click on that unit's card status line while it's tripped
+ * (see IDC_CH_STATUS_OFFSET's comment in resource.h). */
 static void on_unit_kill_reset(int idx) {
     char msg[32];
     if (!g_kill_switch_tripped[idx]) {
@@ -821,8 +824,6 @@ static int channel_lbl_high_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_MEDIUM_OFFSET; }
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
-static int channel_temp_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_TEMP_LBL_OFFSET; }
-static int channel_humidity_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_HUMIDITY_OFFSET; }
 
 /* Maps a control ID back to its channel index, for any control that
  * belongs to a channel card. Returns false for IDs outside that range. */
@@ -1036,9 +1037,8 @@ static HWND add_channel_gauge(HWND parent, int x, int y, int w, int h, int id) {
 
 /* Card layout: a left column (Mode combo + Set button, ON/OFF power
  * buttons, status line), a right column with the level gauge + tick
- * labels, then a 2x2 block of small stats at the bottom - left column
- * is this unit's fixed config (bandwidth, wired sensor address), right
- * column is its live sensor reading (temperature, humidity). */
+ * labels, then a bottom row of this unit's fixed config (bandwidth,
+ * wired sensor address). */
 static void add_channel_card(HWND hwnd, int index) {
     int col = index % GRID_COLS;
     int row = index / GRID_COLS;
@@ -1070,7 +1070,9 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
              x + 72, y + 44, 60, 18, channel_off_id(index));
 
-    add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX,
+    /* SS_NOTIFY: this label doubles as the per-unit kill-switch reset -
+     * see IDC_CH_STATUS_OFFSET's comment in resource.h. */
+    add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
              x + 8, y + 64, 130, 14, channel_status_id(index));
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
@@ -1082,17 +1084,16 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 174, y + 60, 44, 14, channel_lbl_low_id(index));
     add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 174, y + 78, 44, 14, channel_lbl_off_id(index));
 
-    /* Bottom 2x2 stat block. Left column is fixed config (never
-     * changes after creation, so no control ID needed to look it back
-     * up): bandwidth (currently fixed/blind, not per-channel
-     * configurable - see CHANNEL_BLIND_BANDWIDTH_MHZ in channels.h)
-     * and this unit's wired sensor address (UNIT_TEMP_ADDR - read
-     * straight from that table, not sensor_get_unit_address(), since
-     * add_channel_card() runs before sensor_init()/
+    /* Bottom row: fixed config only now (no live sensor reading shown
+     * on the card - temperature/humidity were tried and dropped again,
+     * see git history). Never changes after creation, so no control ID
+     * needed to look either back up: bandwidth (currently fixed/blind,
+     * not per-channel configurable - see CHANNEL_BLIND_BANDWIDTH_MHZ in
+     * channels.h) and this unit's wired sensor address (UNIT_TEMP_ADDR
+     * - read straight from that table, not sensor_get_unit_address(),
+     * since add_channel_card() runs before sensor_init()/
      * sensor_set_unit_address() have populated the live Sensor
-     * struct). Right column is this unit's live sensor reading - see
-     * IDC_CH_TEMP_LBL_OFFSET in resource.h for why the temperature one
-     * is also the per-unit kill-switch reset. */
+     * struct). */
     {
         char bw_text[24];
         wsprintfA(bw_text, "Bandwidth: %d", CHANNEL_BLIND_BANDWIDTH_MHZ);
@@ -1105,10 +1106,6 @@ static void add_channel_card(HWND hwnd, int index) {
         add_ctrl(hwnd, "STATIC", addr_text, SS_LEFT | SS_NOPREFIX,
                  x + 112, y + 100, 96, 14, 0);
     }
-    add_ctrl(hwnd, "STATIC", "Temp: -", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 8, y + 116, 96, 14, channel_temp_id(index));
-    add_ctrl(hwnd, "STATIC", "Humidity: -", SS_LEFT | SS_NOPREFIX,
-             x + 112, y + 116, 100, 14, channel_humidity_id(index));
 }
 
 /* What was last actually painted for each channel card - lets the 10Hz
@@ -1123,9 +1120,6 @@ typedef struct {
     bool busy;
     bool output_on;
     int level;
-    bool has_reading;
-    float temperature_c;
-    float humidity_pct;
     bool tripped;
 } ChannelUiCache;
 
@@ -1133,19 +1127,15 @@ static ChannelUiCache g_ui_cache[MAX_CHANNELS];
 
 static void ui_refresh_channel(int index) {
     const ChannelState *ch = channels_get(index);
-    const SensorState *st = sensor_get_state(&g_sensor, index);
     ChannelUiCache *cache = &g_ui_cache[index];
     HWND status_ctl;
     HWND track;
-    HWND temp_ctl;
-    HWND humidity_ctl;
     char text[32];
     bool tripped = g_kill_switch_tripped[index];
 
     if (cache->valid && cache->busy == ch->busy &&
         cache->output_on == ch->output_on && cache->level == ch->level &&
-        cache->has_reading == st->has_reading && cache->temperature_c == st->temperature_c &&
-        cache->humidity_pct == st->humidity_pct && cache->tripped == tripped) {
+        cache->tripped == tripped) {
         return; /* nothing this channel's card shows has changed */
     }
 
@@ -1161,12 +1151,15 @@ static void ui_refresh_channel(int index) {
 
     status_ctl = GetDlgItem(g_hwnd, channel_status_id(index));
     track = GetDlgItem(g_hwnd, channel_track_id(index));
-    temp_ctl = GetDlgItem(g_hwnd, channel_temp_id(index));
-    humidity_ctl = GetDlgItem(g_hwnd, channel_humidity_id(index));
 
-    /* Matches sdr_react's ChannelCard status text exactly:
-     * busy -> SENDING..., on -> the level name, off -> STANDBY. */
-    if (ch->busy) {
+    /* Matches sdr_react's ChannelCard status text exactly: busy ->
+     * SENDING..., on -> the level name, off -> STANDBY - except while
+     * tripped, which takes over the same line (see
+     * IDC_CH_STATUS_OFFSET's comment in resource.h for why it's also
+     * the per-unit kill-switch reset). */
+    if (tripped) {
+        lstrcpynA(text, "TRIPPED - reset?", (int)sizeof(text));
+    } else if (ch->busy) {
         lstrcpynA(text, "SENDING...", (int)sizeof(text));
     } else if (ch->output_on) {
         lstrcpynA(text, LEVEL_LABELS[ch->level], (int)sizeof(text));
@@ -1177,24 +1170,6 @@ static void ui_refresh_channel(int index) {
     SetWindowTextA(status_ctl, text);
     InvalidateRect(status_ctl, NULL, FALSE);
     InvalidateRect(track, NULL, FALSE);
-
-    if (tripped) {
-        lstrcpynA(text, "Temp: TRIPPED - reset?", (int)sizeof(text));
-    } else if (st->has_reading) {
-        wsprintfA(text, "Temp: %d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
-    } else {
-        lstrcpynA(text, "Temp: -", (int)sizeof(text));
-    }
-    SetWindowTextA(temp_ctl, text);
-    InvalidateRect(temp_ctl, NULL, FALSE);
-
-    if (st->has_reading) {
-        wsprintfA(text, "Humidity: %d.%d%%", (int)st->humidity_pct, (int)(st->humidity_pct * 10) % 10);
-    } else {
-        lstrcpynA(text, "Humidity: -", (int)sizeof(text));
-    }
-    SetWindowTextA(humidity_ctl, text);
-    InvalidateRect(humidity_ctl, NULL, FALSE);
 
     InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
@@ -1207,9 +1182,6 @@ static void ui_refresh_channel(int index) {
     cache->busy = ch->busy;
     cache->output_on = ch->output_on;
     cache->level = ch->level;
-    cache->has_reading = st->has_reading;
-    cache->temperature_c = st->temperature_c;
-    cache->humidity_pct = st->humidity_pct;
     cache->tripped = tripped;
 }
 
@@ -1418,8 +1390,6 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
      * (relayout_for_size() always passes CARD_W x CARD_H), so its
      * position never needs to change after creation. */
     PLACE(g_card_bandwidth_lbl[index], x + SX(8), y + SY(100), SX(96), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_temp_id(index)), x + SX(8), y + SY(116), SX(96), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_humidity_id(index)), x + SX(112), y + SY(116), SX(100), SY(14));
 
 #undef SX
 #undef SY
@@ -1622,7 +1592,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         }
                     } else if (offset == IDC_CH_OFF_OFFSET && code == BN_CLICKED) {
                         channel_turn_output_off(idx);
-                    } else if (offset == IDC_CH_TEMP_LBL_OFFSET && code == STN_CLICKED) {
+                    } else if (offset == IDC_CH_STATUS_OFFSET && code == STN_CLICKED) {
                         on_unit_kill_reset(idx);
                     }
                     return 0;
@@ -1667,8 +1637,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 int offset = (ctl_id - IDC_CH_BASE) % IDC_CH_STRIDE;
                 const ChannelState *ch = channels_get(idx);
                 if (offset == IDC_CH_STATUS_OFFSET) {
-                    COLORREF col = ch->busy ? COLOR_APP_ACCENT
-                                   : (ch->output_on ? COLOR_APP_CONNECTED : COLOR_APP_MUTED);
+                    COLORREF col = g_kill_switch_tripped[idx] ? COLOR_APP_DISCONNECTED /* red - click to reset */
+                                  : ch->busy ? COLOR_APP_ACCENT
+                                  : (ch->output_on ? COLOR_APP_CONNECTED : COLOR_APP_MUTED);
                     SetTextColor(hdc, col);
                     SetBkMode(hdc, TRANSPARENT);
                     return (LRESULT)g_brush_panel;
@@ -1680,18 +1651,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                        : (offset == IDC_CH_LBL_LOW_OFFSET)    ? LEVEL_LOW
                                                                                : LEVEL_OFF;
                     SetTextColor(hdc, (ch->level == lvl_for_label) ? COLOR_APP_HEADER : COLOR_APP_MUTED);
-                    SetBkMode(hdc, TRANSPARENT);
-                    return (LRESULT)g_brush_panel;
-                }
-                if (offset == IDC_CH_TEMP_LBL_OFFSET) {
-                    COLORREF col;
-                    if (g_kill_switch_tripped[idx]) {
-                        col = COLOR_APP_DISCONNECTED; /* red - click to reset */
-                    } else {
-                        const SensorState *st = sensor_get_state(&g_sensor, idx);
-                        col = st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED;
-                    }
-                    SetTextColor(hdc, col);
                     SetBkMode(hdc, TRANSPARENT);
                     return (LRESULT)g_brush_panel;
                 }
