@@ -195,11 +195,19 @@ static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, i
  * draw, which turned out to be a known-flaky corner of Win32 (see git
  * history - first-click-doesn't-open, repaint gaps after the popup
  * closes). CBS_DROPDOWN backs the closed display with a real EDIT
- * control, which already gets dark-themed for free by the existing
- * WM_CTLCOLOREDIT handler below (same one the Activity Log listbox's
- * WM_CTLCOLORLISTBOX already goes through) - all native painting, no
+ * control, which gets dark-themed for free - but via WM_CTLCOLORSTATIC,
+ * not WM_CTLCOLOREDIT: an edit control switches to sending
+ * WM_CTLCOLORSTATIC once it's read-only, confirmed by testing (the
+ * WM_CTLCOLOREDIT case here never fired at all; WM_CTLCOLORSTATIC's
+ * combo-edit-child check does). All native painting either way, no
  * owner-draw. EM_SETREADONLY blocks typing into it while leaving
- * click-to-open and list selection working normally. */
+ * click-to-open and list selection working normally.
+ *
+ * (Tried going further and replacing the sunken 3D bevel with a flat
+ * colored border, on the combo box itself first, then - once that
+ * proved to be the wrong window - on its internal EDIT child. Neither
+ * produced any visible change in testing, and both are gone: don't
+ * ship a visual change that can't be confirmed to do anything.) */
 static void make_combo_readonly(HWND combo) {
     COMBOBOXINFO cbi;
     cbi.cbSize = sizeof(cbi);
@@ -1779,6 +1787,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return (LRESULT)g_brush_panel;
                 }
             }
+            /* A read-only combo box's internal edit child (the closed
+             * field every dropdown shows) sends WM_CTLCOLORSTATIC, not
+             * WM_CTLCOLOREDIT - that's specific to ES_READONLY-style
+             * edit controls, confirmed by testing (WM_CTLCOLOREDIT
+             * handling here never took effect; this does). Give it the
+             * same dark field look as everything else in FIELD_BG,
+             * with accent-colored text so it still reads as
+             * interactive/clickable, distinct from plain labels. */
+            {
+                HWND parent = GetParent(ctl);
+                char cls[16];
+                if (parent && GetClassNameA(parent, cls, sizeof(cls)) && lstrcmpiA(cls, "ComboBox") == 0) {
+                    SetTextColor(hdc, COLOR_APP_HEADER);
+                    SetBkColor(hdc, COLOR_APP_FIELD_BG);
+                    SetBkMode(hdc, OPAQUE);
+                    return (LRESULT)g_brush_field;
+                }
+            }
             {
                 HFONT ctl_font = (HFONT)SendMessageA(ctl, WM_GETFONT, 0, 0);
                 if (ctl_font == g_header_font) {
@@ -1798,7 +1824,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return (LRESULT)g_brush_panel;
         }
 
-        case WM_CTLCOLOREDIT:
+        /* No plain (non-combo) edit control exists in this app, and a
+         * read-only combo edit's closed field is colored above under
+         * WM_CTLCOLORSTATIC instead (see why there) - WM_CTLCOLOREDIT
+         * never actually fires here, so there's nothing to handle. */
+
         case WM_CTLCOLORLISTBOX: {
             HDC hdc = (HDC)wParam;
             SetTextColor(hdc, COLOR_APP_TEXT);
