@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 666
+#define CLIENT_HEIGHT 894
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -28,9 +28,11 @@
  * status, and Baud/Data Bits/Parity stacked as separate rows beneath
  * it (same multi-row shape it had in the sidebar - a single wide row
  * read oddly stretched across the full header width) - moved up here
- * from the sidebar so the sidebar could shrink down to just Amplifier
- * Temperature + Activity Log. Sized to fit all of it snugly with real
- * top/bottom padding. HEADER_H is the bar's own height; CONTENT_TOP is
+ * from the sidebar, along with Amplifier Temperature, so the sidebar
+ * is free for other features (Activity Log moved out too - see
+ * LOG_PANEL_Y - so it's not just those two anymore). Sized to fit all
+ * of it snugly with real top/bottom padding. HEADER_H is the bar's own
+ * height; CONTENT_TOP is
  * where the sidebar panels and channel grid start beneath it (same 6px
  * top margin and 8px panel-to-panel gap used everywhere else). */
 #define HEADER_H     136
@@ -108,6 +110,13 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
 
+/* Activity Log: its own full-width panel below the sidebar/grid row,
+ * not squeezed inside the sidebar - the sidebar is being kept clear
+ * for other features. LOG_PANEL_Y follows the same "8px gap below the
+ * row above it" pattern as everything else here. */
+#define LOG_PANEL_H 220
+#define LOG_PANEL_Y (CONTENT_TOP + GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP + CARD_GAP)
+
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
 static HFONT g_font;
@@ -134,6 +143,7 @@ static bool g_kill_switch_tripped[MAX_CHANNELS];
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
+static HWND g_log_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -1316,16 +1326,23 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    /* Sidebar: just Activity Log now - Connection & Settings and
-     * Amplifier Temperature both moved up into the header above, so
-     * there's a lot less here than there used to be. */
+    /* Sidebar: empty for now - Connection & Settings, Amplifier
+     * Temperature, and Activity Log have all moved out of it (up into
+     * the header, and below into its own panel respectively), kept
+     * clear on purpose for other features going in here. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
 
-    add_header_icon(hwnd, 22, 158, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 158, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 156, 60, 20, IDC_LOG_CLEAR_BTN);
+    /* Activity Log: its own full-width panel below the sidebar/grid
+     * row (see LOG_PANEL_Y/LOG_PANEL_H) - not squeezed into the
+     * sidebar, and the listbox fills the panel's full width rather
+     * than leaving space unused down one side. */
+    g_log_panel = add_panel(hwnd, SIDEBAR_X, LOG_PANEL_Y, CLIENT_WIDTH - 2 * SIDEBAR_X, LOG_PANEL_H);
+    add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
+             CLIENT_WIDTH - 2 * SIDEBAR_X - 22 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 180, 281, 176, IDC_LOG_LISTBOX);
+             22, LOG_PANEL_Y + 34, CLIENT_WIDTH - 2 * SIDEBAR_X - 44, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -1431,6 +1448,10 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP, FALSE);
+
+    MoveWindow(g_log_panel, SIDEBAR_X, LOG_PANEL_Y, client_w - 2 * SIDEBAR_X, LOG_PANEL_H, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, client_w - 2 * SIDEBAR_X - 44, LOG_PANEL_H - 46, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), client_w - 2 * SIDEBAR_X - 22 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
