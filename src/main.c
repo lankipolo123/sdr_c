@@ -497,6 +497,97 @@ static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool v
     GradientFill(hdc, v, 2, &gr, 1, vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
 }
 
+/* A full pill (corner diameter = control height) filled with a
+ * horizontal gradient from the dark field color into whatever color
+ * the state is, clipped to the pill shape, then a thin matching
+ * border and centered text on top. Shared by the sensor status pill
+ * and the average-temperature pill below it. */
+static void paint_gradient_pill(HDC hdc, RECT rc, COLORREF grad_to, const char *text) {
+    HRGN clip;
+    int diameter = rc.bottom - rc.top;
+    HPEN pen, old_pen;
+    HFONT old_font;
+
+    clip = CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, diameter, diameter);
+    SelectClipRgn(hdc, clip);
+    gradient_fill_rect(hdc, rc, COLOR_APP_FIELD_BG, grad_to, false);
+    SelectClipRgn(hdc, NULL);
+    DeleteObject(clip);
+
+    pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+    old_pen = (HPEN)SelectObject(hdc, pen);
+    SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, diameter, diameter);
+    SelectObject(hdc, old_pen);
+    DeleteObject(pen);
+
+    SetBkMode(hdc, TRANSPARENT);
+    old_font = (HFONT)SelectObject(hdc, g_font);
+    SetTextColor(hdc, COLOR_APP_TEXT);
+    DrawTextA(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(hdc, old_font);
+}
+
+static LRESULT CALLBACK sensor_status_pill_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        char text[32];
+        bool connected = sensor_is_connected(&g_sensor);
+        float avg_c;
+        bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+        COLORREF state_color = !connected ? COLOR_APP_DISCONNECTED
+                              : has_avg ? COLOR_APP_CONNECTED
+                              : COLOR_APP_ACCENT;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        GetWindowTextA(hwnd, text, sizeof(text));
+        paint_gradient_pill(hdc, rc, state_color, text);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static LRESULT CALLBACK sensor_avg_pill_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        char text[32];
+        float avg_c;
+        bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+        COLORREF band = has_avg ? temp_band_color(avg_c) : COLOR_APP_MUTED;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        GetWindowTextA(hwnd, text, sizeof(text));
+        paint_gradient_pill(hdc, rc, band, text);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_pill(HWND parent, LPCSTR text, int x, int y, int w, int h, int id, WNDPROC pill_proc) {
+    HWND ctrl = add_ctrl(parent, "STATIC", text, SS_LEFT | SS_NOPREFIX, x, y, w, h, id);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)pill_proc);
+    }
+    return ctrl;
+}
+
 /* Small rounded "mini card" for one sensor unit's address + reading -
  * reads live off g_sensor each paint (unit_index stashed in
  * GWLP_USERDATA at creation) rather than being fed text, same pattern
@@ -555,10 +646,14 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
         SetTextColor(hdc, val_color);
         DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_SINGLELINE);
 
-        line_rc.left = rc.left + 4;
-        line_rc.right = rc.right - 4;
-        line_rc.bottom = rc.bottom - 2;
-        line_rc.top = line_rc.bottom - 2;
+        {
+            int inset = (rc.right - rc.left) / 3; /* short, centered - not
+                                                     * edge-to-edge */
+            line_rc.left = rc.left + inset;
+            line_rc.right = rc.right - inset;
+            line_rc.bottom = rc.bottom - 2;
+            line_rc.top = line_rc.bottom - 1;
+        }
         line_brush = CreateSolidBrush(line_color);
         FillRect(hdc, &line_rc, line_brush);
         DeleteObject(line_brush);
@@ -1403,13 +1498,13 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 34, 56, 22, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 34, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* 6 physical sensors scanning the rack area, each at its own
-     * address (see UNIT_TEMP_ADDR) - not one per RF channel. This
-     * status/readout is the average across whichever of the 6 currently
-     * have a reading. (The gradient gauge bar that used to sit here is
-     * gone - dropped for now, something else is going in its place
-     * later.) */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 60, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 80, 260, 20, IDC_SENSOR_TEMP_LBL);
+     * address (see UNIT_TEMP_ADDR) - not one per RF channel. Status and
+     * the rack-wide average (across whichever of the 6 currently have a
+     * reading) are one aligned row of two gradient pills instead of two
+     * stacked plain-text lines - width matches the chip grid below (88
+     * *3 + 6*2 = 276) so the whole column reads as one aligned block. */
+    add_pill(hwnd, "Disconnected", 1033, 60, 134, 22, IDC_SENSOR_STATUS_LBL, (WNDPROC)sensor_status_pill_subclass_proc);
+    add_pill(hwnd, "Avg -", 1175, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* One small rounded "mini card" per physical sensor unit (address +
      * live reading), 3 columns x 2 rows instead of a plain text list -
      * see sensor_chip_subclass_proc(). */
@@ -1419,12 +1514,12 @@ static void build_controls(HWND hwnd) {
             int col = chip % 3;
             int row = chip / 3;
             int cx = 1033 + col * (88 + 6);
-            int cy = 100 + row * (32 + 4);
+            int cy = 90 + row * (32 + 4);
             g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 32, chip);
         }
     }
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 172, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 170, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 162, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 160, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
@@ -1749,23 +1844,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
-            if (ctl == GetDlgItem(hwnd, IDC_SENSOR_STATUS_LBL)) {
-                float avg_c;
-                bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
-                COLORREF col = !sensor_is_connected(&g_sensor) ? COLOR_APP_DISCONNECTED
-                             : has_avg ? COLOR_APP_CONNECTED
-                             : COLOR_APP_ACCENT;
-                SetTextColor(hdc, col);
-                SetBkMode(hdc, TRANSPARENT);
-                return (LRESULT)g_brush_panel;
-            }
-            if (ctl == GetDlgItem(hwnd, IDC_SENSOR_TEMP_LBL)) {
-                float avg_c;
-                bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
-                SetTextColor(hdc, has_avg ? temp_band_color(avg_c) : COLOR_APP_MUTED);
-                SetBkMode(hdc, TRANSPARENT);
-                return (LRESULT)g_brush_panel;
-            }
+            /* IDC_SENSOR_STATUS_LBL/IDC_SENSOR_TEMP_LBL no longer reach
+             * here - they're self-painting gradient pills now (see
+             * sensor_status_pill_subclass_proc/sensor_avg_pill_subclass_proc),
+             * which bypasses WM_CTLCOLORSTATIC entirely. */
             if (ctl == GetDlgItem(hwnd, IDC_KILL_STATUS_LBL)) {
                 SetTextColor(hdc, COLOR_APP_DISCONNECTED);
                 SetBkMode(hdc, TRANSPARENT);
@@ -1884,13 +1966,26 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 /* Rounded to match the rest of "Direction B" (panels,
                  * cards) instead of the old hard-cornered FillRect - a
                  * borderless RoundRect via NULL_PEN keeps the same flat
-                 * look, just with soft corners. */
+                 * look, just with soft corners. The Connect/Disconnect
+                 * toggle buttons (they swap their own text between the
+                 * two - see ui_refresh_sensor()/the connection callback)
+                 * get green/red instead of the generic accent color, so
+                 * which action a click will take is visible without
+                 * reading the label - same green-ON/red-OFF distinction
+                 * the channel cards' power buttons already use. */
                 {
-                    HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
-                    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, disabled ? g_brush_accent_dis : g_brush_accent);
-                    RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
-                    SelectObject(dis->hDC, old_brush);
-                    SelectObject(dis->hDC, old_pen);
+                    HBRUSH fill = g_brush_accent;
+                    if (dis->CtlID == IDC_CONNECT_BTN || dis->CtlID == IDC_SENSOR_CONNECT_BTN) {
+                        GetWindowTextA(dis->hwndItem, text, sizeof(text));
+                        fill = (lstrcmpiA(text, "Disconnect") == 0) ? g_brush_disconnected : g_brush_connected;
+                    }
+                    {
+                        HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
+                        HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, disabled ? g_brush_accent_dis : fill);
+                        RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
+                        SelectObject(dis->hDC, old_brush);
+                        SelectObject(dis->hDC, old_pen);
+                    }
                 }
                 SetTextColor(dis->hDC, RGB(255, 255, 255));
                 SetBkMode(dis->hDC, TRANSPARENT);
