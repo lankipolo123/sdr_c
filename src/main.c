@@ -99,8 +99,12 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
  * rather than bleeding outside them (no layout changes needed). */
 #define PANEL_CORNER_DIAMETER 24 /* header bar, sidebar */
 #define CARD_CORNER_DIAMETER 16  /* the smaller 16 channel cards */
-#define BTN_CORNER_DIAMETER 8    /* every owner-draw button (Set, ON/OFF,
-                                   * Connect, Refresh, Clear, Reset) */
+#define BTN_CORNER_DIAMETER 16   /* every owner-draw button (Set, ON/OFF,
+                                   * Connect, Refresh, Clear, Reset) - big
+                                   * enough to actually read as rounded on
+                                   * an 18-24px-tall button, not just a
+                                   * couple of softened pixels at the tips */
+#define BADGE_CORNER_DIAMETER 12 /* per-channel status badge */
 #define CARD_BORDER_ON_WIDTH 2
 #define PANEL_SHADOW_PX 5
 #define CARD_SHADOW_PX 3
@@ -282,6 +286,83 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         return 0;
     }
     return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+/* The per-channel status line ("STANDBY"/"SENDING..."/level name/
+ * "TRIPPED - reset?", also the click target for the per-unit kill-
+ * switch reset - see IDC_CH_STATUS_OFFSET's comment in resource.h) as
+ * a small rounded badge instead of bare text, matching the mini
+ * cards/buttons around it. Reads channel state live at paint time,
+ * same pattern as sensor_chip_subclass_proc/card_panel_subclass_proc -
+ * ui_refresh_channel() still calls SetWindowTextA on this control for
+ * anything that reads its text via GetWindowTextA, but painting no
+ * longer depends on that stored text. */
+static LRESULT CALLBACK status_badge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        HBRUSH old_brush;
+        HPEN pen, old_pen;
+        HFONT old_font;
+        int index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+        const ChannelState *ch = channels_get(index);
+        bool tripped = g_kill_switch_tripped[index];
+        const char *text;
+        COLORREF col;
+
+        if (tripped) {
+            text = "TRIPPED - reset?";
+            col = COLOR_APP_DISCONNECTED;
+        } else if (ch->busy) {
+            text = "SENDING...";
+            col = COLOR_APP_ACCENT;
+        } else if (ch->output_on) {
+            text = LEVEL_LABELS[ch->level];
+            col = COLOR_APP_CONNECTED;
+        } else {
+            text = "STANDBY";
+            col = COLOR_APP_MUTED;
+        }
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+
+        old_brush = (HBRUSH)SelectObject(hdc, g_brush_field);
+        pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, BADGE_CORNER_DIAMETER, BADGE_CORNER_DIAMETER);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+        SelectObject(hdc, old_brush);
+
+        old_font = (HFONT)SelectObject(hdc, g_font);
+        SetTextColor(hdc, col);
+        SetBkMode(hdc, TRANSPARENT);
+        rc.left += 8;
+        rc.right -= 4;
+        DrawTextA(hdc, text, -1, &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        SelectObject(hdc, old_font);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_status_badge(HWND parent, int x, int y, int w, int h, int id, int index) {
+    HWND ctrl = add_ctrl(parent, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX | SS_NOTIFY, x, y, w, h, id);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_USERDATA, (LONG_PTR)index);
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)status_badge_subclass_proc);
+    }
+    return ctrl;
 }
 
 static HWND add_card_panel(HWND parent, int x, int y, int w, int h, int index) {
@@ -1130,10 +1211,9 @@ static void add_channel_card(HWND hwnd, int index) {
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
              x + 72, y + 44, 60, 18, channel_off_id(index));
 
-    /* SS_NOTIFY: this label doubles as the per-unit kill-switch reset -
-     * see IDC_CH_STATUS_OFFSET's comment in resource.h. */
-    add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 8, y + 64, 130, 14, channel_status_id(index));
+    /* Rounded badge, not bare text - doubles as the per-unit kill-switch
+     * reset (see IDC_CH_STATUS_OFFSET's comment in resource.h). */
+    add_status_badge(hwnd, x + 8, y + 64, 130, 18, channel_status_id(index), index);
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
@@ -1457,7 +1537,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(18));
     PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(60), SY(18));
     PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(44), SX(60), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(18));
 
     PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
     PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
