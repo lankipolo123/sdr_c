@@ -1289,21 +1289,25 @@ static void build_controls(HWND hwnd) {
      * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
-    add_header_icon(hwnd, 22, 16, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 40, 16, 260, 18);
+    /* Right-aligned like Amplifier Temperature, positioned just to its
+     * left (same 86px gap the two blocks originally had) - left side
+     * of the header is empty now, matching the sidebar's "leave room
+     * for other features" pattern. */
+    add_header_icon(hwnd, 657, 16, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 675, 16, 260, 18);
 
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 40, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 38, 112, 160, IDC_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 38, 56, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 38, 66, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 64, 290, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 657, 40, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 691, 38, 112, 160, IDC_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 809, 38, 56, 22, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 869, 38, 66, 22, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 657, 64, 290, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 88, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 86, 90, 140, IDC_BAUD_COMBO);
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 112, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 110, 45, 100, IDC_DATABITS_COMBO);
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 112, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 110, 70, 100, IDC_PARITY_COMBO);
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 657, 88, 34, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 693, 86, 90, 140, IDC_BAUD_COMBO);
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 657, 112, 60, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 721, 110, 45, 100, IDC_DATABITS_COMBO);
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 777, 112, 40, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 819, 110, 70, 100, IDC_PARITY_COMBO);
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
