@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 658
+#define CLIENT_HEIGHT 688
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -36,8 +36,8 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     200
-#define CONTENT_TOP  214
+#define HEADER_H     230
+#define CONTENT_TOP  244
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -144,6 +144,7 @@ static HWND g_sidebar_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
+static HWND g_sensor_chip[SENSOR_MAX_UNITS];
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
 static int g_last_client_w = -1; /* last size relayout_for_size() actually
@@ -420,6 +421,84 @@ static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool v
     GradientFill(hdc, v, 2, &gr, 1, vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
 }
 
+/* Small rounded "mini card" for one sensor unit's address + reading -
+ * reads live off g_sensor each paint (unit_index stashed in
+ * GWLP_USERDATA at creation) rather than being fed text, same pattern
+ * as the other self-drawing gauges above. Muted "-" when that unit
+ * doesn't have a reading yet. */
+static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc, addr_rc, val_rc;
+        int unit_index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+        const SensorState *st = sensor_get_state(&g_sensor, unit_index);
+        char addr_text[16];
+        char val_text[16];
+        HBRUSH bg_brush;
+        HPEN border_pen, old_pen;
+        HGDIOBJ old_brush;
+        HFONT old_font;
+        COLORREF val_color;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+
+        bg_brush = CreateSolidBrush(COLOR_APP_FIELD_BG);
+        border_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+        old_pen = (HPEN)SelectObject(hdc, border_pen);
+        old_brush = SelectObject(hdc, bg_brush);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        DeleteObject(border_pen);
+        DeleteObject(bg_brush);
+
+        SetBkMode(hdc, TRANSPARENT);
+        old_font = (HFONT)SelectObject(hdc, g_font);
+
+        wsprintfA(addr_text, "Addr %d", sensor_get_unit_address(&g_sensor, unit_index));
+        addr_rc = rc;
+        addr_rc.top += 4;
+        addr_rc.bottom = addr_rc.top + 14;
+        SetTextColor(hdc, COLOR_APP_MUTED);
+        DrawTextA(hdc, addr_text, -1, &addr_rc, DT_CENTER | DT_SINGLELINE);
+
+        val_rc = rc;
+        val_rc.top = addr_rc.bottom;
+        val_rc.bottom = rc.bottom - 2;
+        if (st->has_reading) {
+            wsprintfA(val_text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
+            val_color = temp_band_color(st->temperature_c);
+        } else {
+            lstrcpynA(val_text, "-", (int)sizeof(val_text));
+            val_color = COLOR_APP_MUTED;
+        }
+        SetTextColor(hdc, val_color);
+        DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_SINGLELINE);
+
+        SelectObject(hdc, old_font);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_sensor_chip(HWND parent, int x, int y, int w, int h, int unit_index) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, 0);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_USERDATA, (LONG_PTR)unit_index);
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)sensor_chip_subclass_proc);
+    }
+    return ctrl;
+}
+
 /* ---- activity log ---- */
 
 static void log_add(const char *message) {
@@ -625,31 +704,14 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
 
-    /* Each reporting unit's own address and reading, by actual
-     * configured Modbus address (UNIT_TEMP_ADDR / sensor_get_unit_
-     * address()) - not just a 1..N position count, since real wiring
-     * may not be sequential. 3 per line: "Addr 1: 25.3 C, Addr 2: 26.1
-     * C, Addr 3: 27.0 C". */
+    /* Each unit's mini card reads live off g_sensor when it paints (see
+     * sensor_chip_subclass_proc()) - just needs a repaint kicked off
+     * here, not text pushed into it. */
     {
-        char units_text[400];
         int u;
-        int shown = 0;
-        units_text[0] = '\0';
         for (u = 0; u < SENSOR_MAX_UNITS; u++) {
-            const SensorState *ust = sensor_get_state(&g_sensor, u);
-            if (ust->has_reading) {
-                char part[32];
-                if (shown > 0) {
-                    lstrcatA(units_text, (shown % 3 == 0) ? "\r\n" : ", ");
-                }
-                wsprintfA(part, "Addr %d: %d.%d C", sensor_get_unit_address(&g_sensor, u),
-                          (int)ust->temperature_c, (int)(ust->temperature_c * 10) % 10);
-                lstrcatA(units_text, part);
-                shown++;
-            }
+            InvalidateRect(g_sensor_chip[u], NULL, FALSE);
         }
-        SetDlgItemTextA(g_hwnd, IDC_SENSOR_UNITS_LBL, units_text);
-        InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_UNITS_LBL), NULL, FALSE);
     }
 
     g_sensor_ui_valid = true;
@@ -1251,12 +1313,21 @@ static void build_controls(HWND hwnd) {
      * later.) */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
     add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 260, 20, IDC_SENSOR_TEMP_LBL);
-    /* Each reporting unit's own address and reading, 3 per line
-     * ("Addr 1: 25.3 C, Addr 2: 26.1 C, ...") - not just which
-     * addresses are reporting, the actual temperature each is reading. */
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 108, 300, 48, IDC_SENSOR_UNITS_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 166, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 164, 80, 22, IDC_KILL_RESET_BTN);
+    /* One small rounded "mini card" per physical sensor unit (address +
+     * live reading), 3 columns x 2 rows instead of a plain text list -
+     * see sensor_chip_subclass_proc(). */
+    {
+        int chip;
+        for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
+            int col = chip % 3;
+            int row = chip / 3;
+            int cx = 1033 + col * (88 + 6);
+            int cy = 108 + row * (36 + 6);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 36, chip);
+        }
+    }
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 196, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 194, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
