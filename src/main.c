@@ -20,7 +20,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 894
+#define CLIENT_HEIGHT 666
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -110,8 +110,12 @@ static const uint8_t UNIT_TEMP_ADDR[MAX_CHANNELS] = {
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
 
+/* Flush against the bottom of the sidebar box (itself pinned to the
+ * grid's height) rather than added below it - keeps the sidebar's
+ * bottom edge exactly at the grid's bottom edge, no leftover empty
+ * strip past it. */
 #define LOG_PANEL_H 220
-#define LOG_PANEL_Y (CONTENT_TOP + GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP + CARD_GAP)
+#define LOG_PANEL_Y (CONTENT_TOP + GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H)
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
