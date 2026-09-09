@@ -570,6 +570,7 @@ static bool g_sensor_ui_valid;
 static bool g_sensor_ui_connected;
 static bool g_sensor_ui_has_reading;
 static float g_sensor_ui_temp;
+static int g_sensor_ui_count;
 
 static bool g_sensor_connect_btn_valid;
 static bool g_sensor_connect_btn_connected;
@@ -583,6 +584,8 @@ static void ui_refresh_sensor(void) {
     bool connected = sensor_is_connected(&g_sensor);
     bool has_avg;
     float avg_c = 0.0f;
+    int reading_count = 0;
+    int i;
     char text[64];
 
     if (!g_sensor_connect_btn_valid || g_sensor_connect_btn_connected != connected) {
@@ -593,9 +596,15 @@ static void ui_refresh_sensor(void) {
     }
 
     has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (sensor_get_state(&g_sensor, i)->has_reading) {
+            reading_count++;
+        }
+    }
 
     if (g_sensor_ui_valid && g_sensor_ui_connected == connected &&
-        g_sensor_ui_has_reading == has_avg && g_sensor_ui_temp == avg_c) {
+        g_sensor_ui_has_reading == has_avg && g_sensor_ui_temp == avg_c &&
+        g_sensor_ui_count == reading_count) {
         return; /* nothing shown by this panel has changed */
     }
 
@@ -609,10 +618,13 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
 
+    /* Units reporting in, out of MAX_CHANNELS - "how many are averaged
+     * in right now" alongside the average itself. */
     if (has_avg) {
-        wsprintfA(text, "Avg %d.%d C", (int)avg_c, (int)(avg_c * 10) % 10);
+        wsprintfA(text, "Avg %d.%d C (Units %d/%d)", (int)avg_c, (int)(avg_c * 10) % 10,
+                  reading_count, MAX_CHANNELS);
     } else {
-        lstrcpynA(text, "Avg -", (int)sizeof(text));
+        wsprintfA(text, "Avg - (Units %d/%d)", reading_count, MAX_CHANNELS);
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
@@ -621,6 +633,7 @@ static void ui_refresh_sensor(void) {
     g_sensor_ui_connected = connected;
     g_sensor_ui_has_reading = has_avg;
     g_sensor_ui_temp = avg_c;
+    g_sensor_ui_count = reading_count;
 }
 
 /* ---- kill switch ----
@@ -1203,7 +1216,7 @@ static void build_controls(HWND hwnd) {
      * gradient gauge bar that used to sit here is gone - dropped for
      * now, something else is going in its place later.) */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 200, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1033, 86, 260, 20, IDC_SENSOR_TEMP_LBL);
     add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 110, 190, 16, IDC_KILL_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 108, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
