@@ -20,19 +20,21 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 600
+#define CLIENT_HEIGHT 666
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
- * back when this lived in the sidebar, then the Port/Refresh/Connect/
- * Baud/Data Bits/Parity/status command row beneath it - moved up here
+ * back when this lived in the sidebar, then Port/Refresh/Connect,
+ * status, and Baud/Data Bits/Parity stacked as separate rows beneath
+ * it (same multi-row shape it had in the sidebar - a single wide row
+ * read oddly stretched across the full header width) - moved up here
  * from the sidebar so the sidebar could shrink down to just Amplifier
- * Temperature + Activity Log. Sized to fit both snugly with real top/
- * bottom padding. HEADER_H is the bar's own height; CONTENT_TOP is
+ * Temperature + Activity Log. Sized to fit all of it snugly with real
+ * top/bottom padding. HEADER_H is the bar's own height; CONTENT_TOP is
  * where the sidebar panels and channel grid start beneath it (same 6px
  * top margin and 8px panel-to-panel gap used everywhere else). */
-#define HEADER_H     70
-#define CONTENT_TOP  84
+#define HEADER_H     136
+#define CONTENT_TOP  150
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -1269,10 +1271,13 @@ static void build_controls(HWND hwnd) {
     int idx;
 
     /* App header bar: "Connection & Settings" heading (icon + title,
-     * same as it had back when this section lived in the sidebar), the
-     * command row underneath it - full width, same 6px top margin and
-     * 8px gap-before-content as every other panel-to-panel spacing
-     * below. */
+     * same as it had back when this section lived in the sidebar), then
+     * its controls stacked as separate rows the same way they were in
+     * the sidebar - lengthy, not widy, rather than one row spread thin
+     * across the full header width. Panel itself still spans the full
+     * width (same 6px top margin and 8px gap-before-content as every
+     * other panel-to-panel spacing below) - the content just doesn't
+     * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
     add_header_icon(hwnd, 22, 16, ICON_PLUG);
@@ -1280,15 +1285,16 @@ static void build_controls(HWND hwnd) {
 
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 40, 32, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 38, 112, 160, IDC_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 176, 38, 56, 22, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 240, 38, 66, 22, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 322, 40, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 360, 38, 90, 140, IDC_BAUD_COMBO);
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 466, 40, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 530, 38, 45, 100, IDC_DATABITS_COMBO);
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 591, 40, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 635, 38, 70, 100, IDC_PARITY_COMBO);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 721, 40, 240, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 174, 38, 56, 22, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 234, 38, 66, 22, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 64, 290, 16, IDC_CONN_STATUS_LBL);
+
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 22, 88, 34, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 58, 86, 90, 140, IDC_BAUD_COMBO);
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 22, 112, 60, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 86, 110, 45, 100, IDC_DATABITS_COMBO);
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 112, 40, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 110, 70, 100, IDC_PARITY_COMBO);
 
     /* Sidebar: now just Amplifier Temperature + Activity Log stacked in
      * one tall box spanning the channel grid's full height (headers
@@ -1297,28 +1303,28 @@ static void build_controls(HWND hwnd) {
      * there used to be. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
 
-    add_header_icon(hwnd, 22, 92, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 40, 92, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 114, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 112, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 112, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 112, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    add_header_icon(hwnd, 22, 158, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 40, 158, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 180, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 178, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 178, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 178, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
      * no mode toggle needed anymore. This status/gauge shows the rack-
      * wide average; each card shows its own individual reading. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 138, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 160, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 160, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 184, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 182, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 204, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 22, 226, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 226, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 250, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 248, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_header_icon(hwnd, 22, 234, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 234, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 232, 60, 20, IDC_LOG_CLEAR_BTN);
+    add_header_icon(hwnd, 22, 300, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 300, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 298, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 256, 281, 176, IDC_LOG_LISTBOX);
+             22, 322, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
