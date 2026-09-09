@@ -572,6 +572,11 @@ static HWND add_pill(HWND parent, LPCSTR text, int x, int y, int w, int h, int i
  * actually reporting" indicator: dim/muted (near-invisible against the
  * panel) until that unit has a real reading, then lit in the same
  * color as the reading itself. */
+/* Real hierarchy instead of two same-weight lines: the address is a
+ * small muted label (secondary - it's fixed wiring, rarely what you're
+ * scanning for), the reading is the bold, bigger, primary number - the
+ * thing actually worth looking at. Same transparent/no-box, line-lights-
+ * when-read approach as before, just with weight put where it belongs. */
 static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -596,18 +601,19 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
          * parent's already-painted background bleed through" pattern
          * used for the chamfered/rounded panel corners elsewhere). */
         SetBkMode(hdc, TRANSPARENT);
-        old_font = (HFONT)SelectObject(hdc, g_font);
 
-        wsprintfA(addr_text, "Addr %d", sensor_get_unit_address(&g_sensor, unit_index));
+        wsprintfA(addr_text, "ADDR %d", sensor_get_unit_address(&g_sensor, unit_index));
         addr_rc = rc;
-        addr_rc.top += 2;
-        addr_rc.bottom = addr_rc.top + 14;
+        addr_rc.top += 3;
+        addr_rc.bottom = addr_rc.top + 12;
+        old_font = (HFONT)SelectObject(hdc, g_font);
         SetTextColor(hdc, COLOR_APP_MUTED);
         DrawTextA(hdc, addr_text, -1, &addr_rc, DT_CENTER | DT_SINGLELINE);
+        SelectObject(hdc, old_font);
 
         val_rc = rc;
-        val_rc.top = addr_rc.bottom;
-        val_rc.bottom = rc.bottom - 6;
+        val_rc.top = addr_rc.bottom + 1;
+        val_rc.bottom = rc.bottom - 8;
         if (st->has_reading) {
             wsprintfA(val_text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
             val_color = temp_band_color(st->temperature_c);
@@ -617,22 +623,26 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
             val_color = COLOR_APP_MUTED;
             line_color = COLOR_APP_PANEL_BORDER; /* "off" - dim, barely there */
         }
+        old_font = (HFONT)SelectObject(hdc, g_header_font); /* bold, a size up */
         SetTextColor(hdc, val_color);
         DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_SINGLELINE);
+        SelectObject(hdc, old_font);
 
         {
-            int inset = (rc.right - rc.left) / 3; /* short, centered - not
-                                                     * edge-to-edge */
+            int inset = (rc.right - rc.left) / 4; /* short, centered - not
+                                                     * edge-to-edge, but
+                                                     * wider than a bare
+                                                     * accent tick */
             line_rc.left = rc.left + inset;
             line_rc.right = rc.right - inset;
-            line_rc.bottom = rc.bottom - 2;
-            line_rc.top = line_rc.bottom - 1;
+            line_rc.bottom = rc.bottom - 3;
+            line_rc.top = line_rc.bottom - 2; /* 2px lit, reads as a real
+                                                 * indicator, not a hairline */
         }
         line_brush = CreateSolidBrush(line_color);
         FillRect(hdc, &line_rc, line_brush);
         DeleteObject(line_brush);
 
-        SelectObject(hdc, old_font);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -1484,21 +1494,22 @@ static void build_controls(HWND hwnd) {
      * left as-is, is the same style). */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 66, 130, 16, IDC_SENSOR_STATUS_LBL);
     add_pill(hwnd, "Avg -", 1175, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
-    /* One small rounded "mini card" per physical sensor unit (address +
-     * live reading), 3 columns x 2 rows instead of a plain text list -
-     * see sensor_chip_subclass_proc(). */
+    /* Address + reading per physical sensor unit, 3 columns x 2 rows -
+     * plain text (no box), see sensor_chip_subclass_proc(). Row gap
+     * widened from 4 to 6 now that the bold reading needs a bit more
+     * room than the old same-weight two-line layout did. */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
             int col = chip % 3;
             int row = chip / 3;
             int cx = 1033 + col * (88 + 6);
-            int cy = 90 + row * (32 + 4);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 32, chip);
+            int cy = 90 + row * (34 + 6);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 34, chip);
         }
     }
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 162, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 160, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 172, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 170, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
