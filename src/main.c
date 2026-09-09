@@ -415,7 +415,13 @@ static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, in
 #define HEADER_LEFT_CARD_X0  705
 #define HEADER_LEFT_CARD_X1  1015
 #define HEADER_RIGHT_CARD_X0 1023
-#define HEADER_RIGHT_CARD_X1 1313
+#define HEADER_RIGHT_CARD_X1 1289 /* was 1313 - that was the exact same
+                                     * x as the panel's own visible right
+                                     * edge (confirmed by pixel-sampling
+                                     * a screenshot), so the bracket
+                                     * looked fused to the panel border
+                                     * instead of a separate accent. Now
+                                     * a real ~24px margin. */
 #define HEADER_CARD_Y0 6
 #define HEADER_CARD_Y1 176 /* tallest content (the ADDR sensor grid)
                               * bottoms out around y=172 with the new,
@@ -1724,10 +1730,10 @@ static void build_controls(HWND hwnd) {
      * two cards, working against making it smaller. */
     add_header_icon(hwnd, 1033, 14, ICON_WAVE);
     add_header(hwnd, "Amplifier Temperature", 1051, 14, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1029, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1065, 34, 90, 140, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1165, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1235, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
     /* 6 physical sensors scanning the rack area, each at its own
      * address (see UNIT_TEMP_ADDR) - not one per RF channel. Status and
      * the rack-wide average (across whichever of the 6 currently have a
@@ -1740,23 +1746,23 @@ static void build_controls(HWND hwnd) {
      * status label in this app (Connection & Settings' own status,
      * left as-is, is the same style). Row centered as a group within
      * the card zone, not flush left/right against its edges. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1041, 64, 100, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1161, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 64, 100, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1149, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Address + reading per physical sensor unit, 3 columns x 2 rows -
      * plain text (no box), see sensor_chip_subclass_proc(). Chip height
-     * 38 (was 34) - the bold reading's box needs real room, not just a
-     * few pixels more (see the DT_NOCLIP/decimal-point comment in
-     * sensor_chip_subclass_proc); row gap trimmed back to 4 to help
-     * absorb that. Grid centered within the card zone (start x=1030,
-     * not flush against 1023). */
+     * unchanged at 38 (the bold reading's box needs real room - see the
+     * DT_NOCLIP/decimal-point comment in sensor_chip_subclass_proc) but
+     * width trimmed 88 -> 84 and the column gap 6 -> 4 so the grid fits
+     * inside the card zone's new, narrower right margin. Centered
+     * within the zone (start x=1026, not flush against 1023). */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
             int col = chip % 3;
             int row = chip / 3;
-            int cx = 1030 + col * (88 + 6);
+            int cx = 1026 + col * (84 + 4);
             int cy = 92 + row * (38 + 4);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 38, chip);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 84, 38, chip);
         }
     }
     add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 174, 190, 16, IDC_KILL_STATUS_LBL);
