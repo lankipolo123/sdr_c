@@ -307,6 +307,15 @@ static void add_combo_edge(HWND parent, int x, int y, int w, int h) {
     SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)combo_edge_subclass_proc);
 }
 
+/* Extra px of arrow-overlay width beyond SM_CXVSCROLL, to also cover a
+ * native separator/bevel between the edit field and the dropdown button
+ * that SM_CXVSCROLL alone doesn't account for - left a ~3px white sliver
+ * uncovered, confirmed by pixel-sampling a screenshot. (Tried using
+ * GetComboBoxInfo's cbi.rcButton instead of guessing - its rect came back
+ * wrong under Wine and blew up several overlays to cover the whole
+ * control; reverted, back to the SM_CXVSCROLL + padding approach.) */
+#define ARROW_OVERLAY_PAD_PX 4
+
 static void make_combo_readonly(HWND combo) {
     COMBOBOXINFO cbi;
     RECT rc;
@@ -324,7 +333,7 @@ static void make_combo_readonly(HWND combo) {
     w = rc.right - rc.left;
     h = rc.bottom - rc.top;
 
-    arrow_w = GetSystemMetrics(SM_CXVSCROLL);
+    arrow_w = GetSystemMetrics(SM_CXVSCROLL) + ARROW_OVERLAY_PAD_PX;
     add_combo_arrow(parent, rc.right - arrow_w, rc.top, arrow_w, h);
 
     add_combo_edge(parent, rc.left, rc.top, w, COMBO_BORDER_PX);                  /* top */
