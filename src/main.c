@@ -20,7 +20,9 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 688
+#define CLIENT_HEIGHT 700 /* +12 over the old 688 - CARD_GAP grew below,
+                            * and the grid (which LOG_PANEL_Y/sidebar
+                            * height stay flush with) needs the room */
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -85,15 +87,21 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define COLOR_APP_DISCONNECTED RGB(224, 90, 90)
 #define COLOR_APP_DOT       RGB(50, 52, 57)
 #define COLOR_APP_PANEL_BORDER RGB(63, 66, 71)
+#define COLOR_APP_SHADOW    RGB(14, 15, 17)
 
 /* "Direction B" from the UI design proposal, applied app-wide: rounded
  * corners everywhere instead of the old chamfer (panel_subclass_proc
  * below), plus a brighter/thicker border on a channel card while that
  * channel's output is on, standing in for a glow - GDI has no blurred
- * box-shadow, so a solid highlight border is the cheap approximation. */
+ * box-shadow, so a solid highlight border is the cheap approximation.
+ * Same reasoning for PANEL/CARD_SHADOW_PX: a sliver of dark shadow
+ * shown along the bottom-right, inset from the control's own bounds
+ * rather than bleeding outside them (no layout changes needed). */
 #define PANEL_CORNER_DIAMETER 24 /* header bar, sidebar */
 #define CARD_CORNER_DIAMETER 16  /* the smaller 16 channel cards */
 #define CARD_BORDER_ON_WIDTH 2
+#define PANEL_SHADOW_PX 5
+#define CARD_SHADOW_PX 3
 #define DOT_GRID_SPACING 8
 #define DOT_GRID_SIZE 2
 
@@ -107,7 +115,7 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
  * readouts before them. */
 #define CARD_W 224
 #define CARD_H 102
-#define CARD_GAP 8
+#define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
 #define GRID_LEFT 380
 #define GRID_TOP CONTENT_TOP
 
@@ -134,6 +142,8 @@ static HBRUSH g_brush_accent_dis;
 static HBRUSH g_brush_dot;
 static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
+static HBRUSH g_brush_shadow;
+static const COLORREF g_shadow_color = COLOR_APP_SHADOW;
 static HBRUSH g_brush_dot_pattern; /* tiled DOT_GRID_SPACING x DOT_GRID_SPACING bitmap brush */
 static HBITMAP g_dot_pattern_bmp;
 
@@ -185,11 +195,24 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
-        old_brush = (HBRUSH)SelectObject(hdc, g_brush_panel);
+        /* Faked elevation: a dark shadow shape filling the whole rect,
+         * then the real panel body drawn shrunk into its top-left,
+         * leaving a few px of shadow showing along the bottom-right -
+         * same "no true blur in GDI" approximation as the card glow,
+         * but doesn't need any layout/window-size changes since it
+         * stays entirely within the control's existing bounds. */
+        old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
+        pen = CreatePen(PS_SOLID, 1, g_shadow_color);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom,
+                  PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+
+        SelectObject(hdc, g_brush_panel);
         pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
-
-        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom,
+        RoundRect(hdc, rc.left, rc.top, rc.right - PANEL_SHADOW_PX, rc.bottom - PANEL_SHADOW_PX,
                   PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
 
         SelectObject(hdc, old_pen);
@@ -233,12 +256,20 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
-        old_brush = (HBRUSH)SelectObject(hdc, g_brush_panel);
+        old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
+        pen = CreatePen(PS_SOLID, 1, g_shadow_color);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom,
+                  CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+
+        SelectObject(hdc, g_brush_panel);
         pen = CreatePen(PS_SOLID, on ? CARD_BORDER_ON_WIDTH : 1,
                          on ? COLOR_APP_CONNECTED : COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
 
-        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom,
+        RoundRect(hdc, rc.left, rc.top, rc.right - CARD_SHADOW_PX, rc.bottom - CARD_SHADOW_PX,
                   CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
 
         SelectObject(hdc, old_pen);
@@ -1492,7 +1523,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ConnectionCallbacks ccb;
 
             g_hwnd = hwnd;
-            g_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+            /* Segoe UI instead of the stock ~8pt system font - "Direction
+             * B" from the UI design proposal calls for noticeably bigger,
+             * more modern type than the cramped default; -12 is a modest
+             * enough bump that it still fits the existing fixed-size
+             * control heights without clipping. */
+            g_font = CreateFontA(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                  ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                  DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            if (!g_font) {
+                g_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+            }
 
             g_header_font = CreateFontA(-13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                          ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -1796,9 +1837,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_dot) DeleteObject(g_brush_dot);
             if (g_brush_connected) DeleteObject(g_brush_connected);
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
+            if (g_brush_shadow) DeleteObject(g_brush_shadow);
             if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
+            /* Only delete g_font if it's the CreateFontA() result, not
+             * the GetStockObject() fallback - stock objects must never
+             * be passed to DeleteObject(). */
+            if (g_font && g_font != (HFONT)GetStockObject(DEFAULT_GUI_FONT)) DeleteObject(g_font);
             PostQuitMessage(0);
             return 0;
     }
@@ -1825,6 +1871,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_dot = CreateSolidBrush(COLOR_APP_DOT);
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
+    g_brush_shadow = CreateSolidBrush(COLOR_APP_SHADOW);
     build_dot_pattern_brush();
 
     /* NOT CS_HREDRAW | CS_VREDRAW - that forces the ENTIRE window to
