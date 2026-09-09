@@ -85,17 +85,14 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define COLOR_APP_DISCONNECTED RGB(224, 90, 90)
 #define COLOR_APP_DOT       RGB(50, 52, 57)
 #define COLOR_APP_PANEL_BORDER RGB(63, 66, 71)
-#define COLOR_APP_SILVER    RGB(176, 180, 186)
 
-#define PANEL_CHAMFER 8
-
-/* Channel cards only ("Direction B" from the UI design proposal) -
- * rounded corners instead of the chamfer, plus a brighter/thicker
- * border while that channel's output is on, standing in for a glow -
- * GDI has no blurred box-shadow, so a solid highlight border is the
- * cheap approximation. Every other panel (header, sidebar) keeps the
- * chamfer via panel_subclass_proc, unchanged. */
-#define CARD_CORNER_DIAMETER 16
+/* "Direction B" from the UI design proposal, applied app-wide: rounded
+ * corners everywhere instead of the old chamfer (panel_subclass_proc
+ * below), plus a brighter/thicker border on a channel card while that
+ * channel's output is on, standing in for a glow - GDI has no blurred
+ * box-shadow, so a solid highlight border is the cheap approximation. */
+#define PANEL_CORNER_DIAMETER 24 /* header bar, sidebar */
+#define CARD_CORNER_DIAMETER 16  /* the smaller 16 channel cards */
 #define CARD_BORDER_ON_WIDTH 2
 #define DOT_GRID_SPACING 8
 #define DOT_GRID_SIZE 2
@@ -137,7 +134,6 @@ static HBRUSH g_brush_accent_dis;
 static HBRUSH g_brush_dot;
 static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
-static HBRUSH g_brush_silver;
 static HBRUSH g_brush_dot_pattern; /* tiled DOT_GRID_SPACING x DOT_GRID_SPACING bitmap brush */
 static HBITMAP g_dot_pattern_bmp;
 
@@ -172,9 +168,9 @@ static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, i
     return ctrl;
 }
 
-/* Chamfered-corner panel painting - same subclass pattern as the
- * single-channel app's panels, smaller chamfer to suit the compact
- * channel cards. */
+/* Rounded-corner panel painting (header bar, sidebar) - same subclass
+ * pattern as the channel cards' card_panel_subclass_proc below, just
+ * with no per-item on/off state to light the border with. */
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -183,68 +179,21 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         PAINTSTRUCT ps;
         HDC hdc;
         RECT rc;
-        POINT pts[8];
-        POINT tri[3];
         HBRUSH old_brush;
-        HPEN pen, old_pen, silver_pen, old_silver_pen;
-        int c = PANEL_CHAMFER;
+        HPEN pen, old_pen;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
-
-        pts[0].x = rc.left;              pts[0].y = rc.top + c;
-        pts[1].x = rc.left + c;          pts[1].y = rc.top;
-        pts[2].x = rc.right - 1 - c;     pts[2].y = rc.top;
-        pts[3].x = rc.right - 1;         pts[3].y = rc.top + c;
-        pts[4].x = rc.right - 1;         pts[4].y = rc.bottom - 1 - c;
-        pts[5].x = rc.right - 1 - c;     pts[5].y = rc.bottom - 1;
-        pts[6].x = rc.left + c;          pts[6].y = rc.bottom - 1;
-        pts[7].x = rc.left;              pts[7].y = rc.bottom - 1 - c;
 
         old_brush = (HBRUSH)SelectObject(hdc, g_brush_panel);
         pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
 
-        Polygon(hdc, pts, 8);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom,
+                  PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
 
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
-
-        /* A small silver triangle floating near each corner, inset from
-         * the panel's chamfer edge - same accent as the single-channel
-         * app's panels. */
-        {
-            int t = c - 2; /* smaller than the chamfer cut itself */
-            if (t < 2) t = 2;
-
-            silver_pen = CreatePen(PS_SOLID, 1, COLOR_APP_SILVER);
-            old_silver_pen = (HPEN)SelectObject(hdc, silver_pen);
-            SelectObject(hdc, g_brush_silver);
-
-            tri[0].x = rc.left;       tri[0].y = rc.top;
-            tri[1].x = rc.left + t;   tri[1].y = rc.top;
-            tri[2].x = rc.left;       tri[2].y = rc.top + t;
-            Polygon(hdc, tri, 3);
-
-            tri[0].x = rc.right - 1;      tri[0].y = rc.top;
-            tri[1].x = rc.right - 1 - t;  tri[1].y = rc.top;
-            tri[2].x = rc.right - 1;      tri[2].y = rc.top + t;
-            Polygon(hdc, tri, 3);
-
-            tri[0].x = rc.right - 1;      tri[0].y = rc.bottom - 1;
-            tri[1].x = rc.right - 1 - t;  tri[1].y = rc.bottom - 1;
-            tri[2].x = rc.right - 1;      tri[2].y = rc.bottom - 1 - t;
-            Polygon(hdc, tri, 3);
-
-            tri[0].x = rc.left;       tri[0].y = rc.bottom - 1;
-            tri[1].x = rc.left + t;   tri[1].y = rc.bottom - 1;
-            tri[2].x = rc.left;       tri[2].y = rc.bottom - 1 - t;
-            Polygon(hdc, tri, 3);
-
-            SelectObject(hdc, old_silver_pen);
-            DeleteObject(silver_pen);
-        }
-
         SelectObject(hdc, old_brush);
 
         EndPaint(hwnd, &ps);
@@ -1847,7 +1796,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_dot) DeleteObject(g_brush_dot);
             if (g_brush_connected) DeleteObject(g_brush_connected);
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
-            if (g_brush_silver) DeleteObject(g_brush_silver);
             if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
@@ -1877,7 +1825,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_dot = CreateSolidBrush(COLOR_APP_DOT);
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
-    g_brush_silver = CreateSolidBrush(COLOR_APP_SILVER);
     build_dot_pattern_brush();
 
     /* NOT CS_HREDRAW | CS_VREDRAW - that forces the ENTIRE window to
