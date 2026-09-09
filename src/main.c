@@ -203,10 +203,14 @@ static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, i
  * click-to-open and list selection working normally.
  *
  * (Tried going further and replacing the sunken 3D bevel with a flat
- * colored border, on the combo box itself first, then - once that
- * proved to be the wrong window - on its internal EDIT child. Neither
- * produced any visible change in testing, and both are gone: don't
- * ship a visual change that can't be confirmed to do anything.) */
+ * colored border three separate times - on the combo box itself, on
+ * its internal EDIT child, and as a ring-shaped SetWindowRgn overlay
+ * sibling. None of them produced the intended result in testing (the
+ * first two did nothing visible, the third filled the whole control
+ * solid blue instead of just a ring - the region wasn't actually
+ * restricting the paint the way it should have). All three are gone:
+ * don't ship a visual change that doesn't demonstrably work. The
+ * native sunken frame and dropdown-arrow button stay as-is.) */
 static void make_combo_readonly(HWND combo) {
     COMBOBOXINFO cbi;
     cbi.cbSize = sizeof(cbi);
@@ -645,7 +649,11 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
             val_color = COLOR_APP_MUTED;
             line_color = COLOR_APP_PANEL_BORDER; /* "off" - dim, barely there */
         }
-        old_font = (HFONT)SelectObject(hdc, g_header_font); /* bold, a size up */
+        /* Regular weight, not g_header_font (bold) - looked cramped/
+         * smudgy on real hardware ClearType at this size, even though
+         * it looked fine in Wine testing. Hierarchy still comes from
+         * color + the line indicator, doesn't need the bold too. */
+        old_font = (HFONT)SelectObject(hdc, g_font);
         SetTextColor(hdc, val_color);
         DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
         SelectObject(hdc, old_font);
