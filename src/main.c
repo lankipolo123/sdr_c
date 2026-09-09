@@ -423,10 +423,14 @@ static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, in
                                      * instead of a separate accent. Now
                                      * a real ~24px margin. */
 #define HEADER_CARD_Y0 6
-#define HEADER_CARD_Y1 176 /* tallest content (the ADDR sensor grid)
-                              * bottoms out around y=172 with the new,
-                              * tighter row spacing - matches HEADER_H's
-                              * own trim just above. */
+/* Separate bottom bound per card now - Connection & Settings merged
+ * Port/Refresh/Connect back onto one row (like Amplifier Temperature
+ * already had), so it's noticeably shorter than the ADDR-grid-bearing
+ * right card. Sharing one Y1 would leave the shorter card's bracket
+ * floating with empty space again - the exact problem already fixed
+ * once for the right card. */
+#define HEADER_LEFT_CARD_Y1  132 /* content bottoms out ~y=127 */
+#define HEADER_RIGHT_CARD_Y1 176 /* content bottoms out ~y=172 (ADDR grid) */
 
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
@@ -469,9 +473,9 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         if (hwnd == g_header_panel) {
             RECT left_card, right_card;
             left_card.left = HEADER_LEFT_CARD_X0; left_card.top = HEADER_CARD_Y0;
-            left_card.right = HEADER_LEFT_CARD_X1; left_card.bottom = HEADER_CARD_Y1;
+            left_card.right = HEADER_LEFT_CARD_X1; left_card.bottom = HEADER_LEFT_CARD_Y1;
             right_card.left = HEADER_RIGHT_CARD_X0; right_card.top = HEADER_CARD_Y0;
-            right_card.right = HEADER_RIGHT_CARD_X1; right_card.bottom = HEADER_CARD_Y1;
+            right_card.right = HEADER_RIGHT_CARD_X1; right_card.bottom = HEADER_RIGHT_CARD_Y1;
             draw_corner_brackets(hdc, left_card, COLOR_APP_SILVER, 0, 10);
             draw_corner_brackets(hdc, right_card, COLOR_APP_SILVER, 0, 10);
         }
@@ -1704,22 +1708,26 @@ static void build_controls(HWND hwnd) {
     /* Every row below is centered within the card's own bracket zone
      * (HEADER_LEFT_CARD_X0/X1) instead of flush against its left edge -
      * each row's total width is computed, then its start x is
-     * (zone_width - row_width) / 2 past the zone's left edge. Buttons
-     * shrunk to 18px tall (was 22) and row gaps tightened throughout,
-     * per direct request to make both the controls and the panel
-     * smaller. */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 762, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 798, 34, 160, 140, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 788, 60, 64, 18, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 860, 60, 72, 18, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_CENTER | SS_NOPREFIX, 705, 86, 310, 16, IDC_CONN_STATUS_LBL);
+     * (zone_width - row_width) / 2 past the zone's left edge. Port/
+     * Refresh/Connect merged back onto one row (matching Amplifier
+     * Temperature's already-compact shape) instead of Port alone with
+     * Refresh/Connect below - splitting them earlier made this card
+     * taller than it needed to be; one row is a bigger, more visible
+     * size cut than trimming gaps further would have been. Combo
+     * narrowed 160 -> 110 to make room for the buttons on the same
+     * row. */
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 713, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 749, 34, 110, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 867, 35, 64, 18, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 935, 35, 72, 18, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_CENTER | SS_NOPREFIX, 705, 60, 310, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 110, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 108, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 134, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 132, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 134, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 132, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 84, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 82, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 108, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 106, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 108, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 106, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
