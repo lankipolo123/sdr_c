@@ -618,13 +618,13 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
 
-    /* Units reporting in, out of MAX_CHANNELS - "how many are averaged
-     * in right now" alongside the average itself. */
-    if (has_avg) {
-        wsprintfA(text, "Avg %d.%d C (Units %d/%d)", (int)avg_c, (int)(avg_c * 10) % 10,
-                  reading_count, MAX_CHANNELS);
+    /* Which units are averaged in right now, shown as a range. */
+    if (has_avg && reading_count > 0) {
+        char range[16];
+        wsprintfA(range, "Unit 1-%d", reading_count);
+        wsprintfA(text, "Avg %d.%d C (%s)", (int)avg_c, (int)(avg_c * 10) % 10, range);
     } else {
-        wsprintfA(text, "Avg - (Units %d/%d)", reading_count, MAX_CHANNELS);
+        lstrcpynA(text, "Avg -", (int)sizeof(text));
     }
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
