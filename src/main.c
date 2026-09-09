@@ -626,9 +626,16 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
         DrawTextA(hdc, addr_text, -1, &addr_rc, DT_CENTER | DT_SINGLELINE);
         SelectObject(hdc, old_font);
 
+        /* Value box needs real height for g_header_font (bold, -13) -
+         * the previous 10px box was shorter than the font's own line
+         * height, so DrawTextA's default clipping (no DT_NOCLIP) cut
+         * the bottom off every glyph, including the decimal point -
+         * "27.0" rendered with no visible "." at all. DT_VCENTER now
+         * too, so it's not relying on exact pixel accounting to look
+         * right. */
         val_rc = rc;
         val_rc.top = addr_rc.bottom + 1;
-        val_rc.bottom = rc.bottom - 8;
+        val_rc.bottom = rc.bottom - 6;
         if (st->has_reading) {
             wsprintfA(val_text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
             val_color = temp_band_color(st->temperature_c);
@@ -640,7 +647,7 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
         }
         old_font = (HFONT)SelectObject(hdc, g_header_font); /* bold, a size up */
         SetTextColor(hdc, val_color);
-        DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_SINGLELINE);
+        DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
         SelectObject(hdc, old_font);
 
         {
@@ -650,7 +657,7 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
                                                      * accent tick */
             line_rc.left = rc.left + inset;
             line_rc.right = rc.right - inset;
-            line_rc.bottom = rc.bottom - 3;
+            line_rc.bottom = rc.bottom - 1;
             line_rc.top = line_rc.bottom - 2; /* 2px lit, reads as a real
                                                  * indicator, not a hairline */
         }
@@ -1510,21 +1517,23 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 66, 130, 16, IDC_SENSOR_STATUS_LBL);
     add_pill(hwnd, "Avg -", 1175, 60, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Address + reading per physical sensor unit, 3 columns x 2 rows -
-     * plain text (no box), see sensor_chip_subclass_proc(). Row gap
-     * widened from 4 to 6 now that the bold reading needs a bit more
-     * room than the old same-weight two-line layout did. */
+     * plain text (no box), see sensor_chip_subclass_proc(). Chip height
+     * 38 (was 34) - the bold reading's box needs real room, not just a
+     * few pixels more (see the DT_NOCLIP/decimal-point comment in
+     * sensor_chip_subclass_proc); row gap trimmed back to 4 to help
+     * absorb that. */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
             int col = chip % 3;
             int row = chip / 3;
             int cx = 1033 + col * (88 + 6);
-            int cy = 90 + row * (34 + 6);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 34, chip);
+            int cy = 90 + row * (38 + 4);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 88, 38, chip);
         }
     }
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 172, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 170, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 174, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 172, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
