@@ -165,6 +165,12 @@ static HWND g_sidebar_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
+static HWND g_card_mode_lbl[MAX_CHANNELS]; /* muted mode name next to "Unit N",
+                                              * matching the design mockup's
+                                              * card header - reflects the
+                                              * applied mode (ch->mode), not
+                                              * the dropdown's uncommitted
+                                              * selection */
 static HWND g_sensor_chip[SENSOR_MAX_UNITS];
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
@@ -1192,7 +1198,14 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_panel[index] = add_card_panel(hwnd, x, y, CARD_W, CARD_H, index);
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
-    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 170, 16);
+    g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 58, 16);
+    /* Muted mode name next to the header, matching the design mockup's
+     * card title row - shows the applied mode (ch->mode), updated in
+     * WM_COMMAND when Set is clicked, not the dropdown's uncommitted
+     * selection. SS_END_ELLIPSIS since the longer mode names won't all
+     * fit in the space left before the gauge column. */
+    g_card_mode_lbl[index] = add_ctrl(hwnd, "STATIC", proto_mode_name(PROTO_MODE_WHITE_NOISE),
+                                        SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, x + 88, y + 8, 60, 14, 0);
 
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
                            x + 8, y + 24, 82, 100, channel_mode_id(index));
@@ -1531,7 +1544,8 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 
     PLACE(g_card_panel[index], x, y, card_w, card_h);
     PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
-    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(170), SY(16));
+    PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(58), SY(16));
+    PLACE(g_card_mode_lbl[index], x + SX(88), y + SY(8), SX(60), SY(14));
 
     PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(82), 100);
     PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(18));
@@ -1750,6 +1764,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                             int sel = (int)SendDlgItemMessageA(hwnd, channel_mode_id(idx), CB_GETCURSEL, 0, 0);
                             if (sel >= 0) {
                                 channel_set_mode(idx, (uint8_t)sel);
+                                SetWindowTextA(g_card_mode_lbl[idx], proto_mode_name((uint8_t)sel));
                             }
                         }
                     } else if (offset == IDC_CH_ON_OFFSET && code == BN_CLICKED) {
