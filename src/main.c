@@ -189,6 +189,25 @@ static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, i
     return ctrl;
 }
 
+/* Dropdowns (mode/port/baud/data bits/parity) are CBS_DROPDOWN, not
+ * CBS_DROPDOWNLIST - CBS_DROPDOWNLIST's closed display has no child
+ * window backing it, so nothing can recolor it short of full owner-
+ * draw, which turned out to be a known-flaky corner of Win32 (see git
+ * history - first-click-doesn't-open, repaint gaps after the popup
+ * closes). CBS_DROPDOWN backs the closed display with a real EDIT
+ * control, which already gets dark-themed for free by the existing
+ * WM_CTLCOLOREDIT handler below (same one the Activity Log listbox's
+ * WM_CTLCOLORLISTBOX already goes through) - all native painting, no
+ * owner-draw. EM_SETREADONLY blocks typing into it while leaving
+ * click-to-open and list selection working normally. */
+static void make_combo_readonly(HWND combo) {
+    COMBOBOXINFO cbi;
+    cbi.cbSize = sizeof(cbi);
+    if (GetComboBoxInfo(combo, &cbi) && cbi.hwndItem) {
+        SendMessageA(cbi.hwndItem, EM_SETREADONLY, TRUE, 0);
+    }
+}
+
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
  * with no per-item on/off state to light the border with. */
@@ -1129,7 +1148,7 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_mode_lbl[index] = add_ctrl(hwnd, "STATIC", proto_mode_name(PROTO_MODE_WHITE_NOISE),
                                         SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, x + 88, y + 8, 60, 14, 0);
 
-    mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+    mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                            x + 8, y + 24, 82, 100, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
@@ -1137,6 +1156,7 @@ static void add_channel_card(HWND hwnd, int index) {
     }
     SendMessageA(mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
+    make_combo_readonly(mode_combo);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
              x + 94, y + 24, 40, 18, channel_set_id(index));
@@ -1346,17 +1366,17 @@ static void build_controls(HWND hwnd) {
     add_header(hwnd, "Connection && Settings", 737, 16, 260, 18);
 
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 719, 40, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 753, 38, 112, 160, IDC_PORT_COMBO);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 753, 38, 112, 160, IDC_PORT_COMBO));
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 871, 38, 56, 22, IDC_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 931, 38, 66, 22, IDC_CONNECT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 719, 64, 290, 16, IDC_CONN_STATUS_LBL);
 
     add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 719, 88, 34, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 755, 86, 90, 140, IDC_BAUD_COMBO);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 755, 86, 90, 140, IDC_BAUD_COMBO));
     add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 719, 112, 60, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 783, 110, 45, 100, IDC_DATABITS_COMBO);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 783, 110, 45, 100, IDC_DATABITS_COMBO));
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 839, 112, 40, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 881, 110, 70, 100, IDC_PARITY_COMBO);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 881, 110, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
@@ -1365,7 +1385,7 @@ static void build_controls(HWND hwnd) {
     add_header_icon(hwnd, 1033, 16, ICON_WAVE);
     add_header(hwnd, "Amplifier Temperature", 1051, 16, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1033, 40, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO));
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* 6 physical sensors scanning the rack area, each at its own
