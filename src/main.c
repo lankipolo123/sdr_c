@@ -139,7 +139,6 @@ static bool g_kill_switch_tripped[MAX_CHANNELS];
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
-static HWND g_log_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -1322,14 +1321,12 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    /* Sidebar: one tall box, Activity Log right at the top of it (no
-     * reserved empty space pushing it down) - room for other features
-     * is whatever's left below it, added later as needed rather than
-     * guessed at now. Connection & Settings and Amplifier Temperature
+    /* Sidebar: one tall box - top part empty (reserved for other
+     * features), Activity Log below that in the SAME box, not a
+     * separate panel. Connection & Settings and Amplifier Temperature
      * moved up into the header above. */
-    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
+    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP);
 
-    g_log_panel = add_panel(hwnd, SIDEBAR_X, LOG_PANEL_Y, SIDEBAR_W, LOG_PANEL_H);
     add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
     add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
@@ -1440,9 +1437,8 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP, FALSE);
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
-    MoveWindow(g_log_panel, SIDEBAR_X, LOG_PANEL_Y, SIDEBAR_W, LOG_PANEL_H, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W - 44, LOG_PANEL_H - 46, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 22 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
 
