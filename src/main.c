@@ -202,15 +202,16 @@ static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, i
  * owner-draw. EM_SETREADONLY blocks typing into it while leaving
  * click-to-open and list selection working normally.
  *
- * (Tried going further and replacing the sunken 3D bevel with a flat
- * colored border three separate times - on the combo box itself, on
- * its internal EDIT child, and as a ring-shaped SetWindowRgn overlay
- * sibling. None of them produced the intended result in testing (the
- * first two did nothing visible, the third filled the whole control
- * solid blue instead of just a ring - the region wasn't actually
- * restricting the paint the way it should have). All three are gone:
- * don't ship a visual change that doesn't demonstrably work. The
- * native sunken frame and dropdown-arrow button stay as-is.) */
+ * The sunken 3D bevel and dropdown-arrow button are covered now too -
+ * see combo_edge_subclass_proc/combo_arrow_subclass_proc below - but
+ * it took five attempts to get there: recoloring the combo box's own
+ * WM_NCPAINT did nothing visible, same for its EDIT child's, and a
+ * ring-shaped SetWindowRgn overlay sibling filled the whole control
+ * solid blue instead of just a ring (the region didn't actually
+ * restrict the paint). What finally worked: plain ordinary opaque
+ * rectangles - one for the arrow button, four thin ones (top/bottom/
+ * left/right) for the border - never a region trick. Confirmed the
+ * border needed to be 4px, not 2px, by testing 2/4/8px directly. */
 /* A plain rectangular overlay this time, not a region trick - the
  * SetWindowRgn ring attempt failed because the region didn't actually
  * restrict painting the way it should have; a full, ordinary opaque
@@ -267,11 +268,50 @@ static void add_combo_arrow(HWND parent, int x, int y, int w, int h) {
     SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)combo_arrow_subclass_proc);
 }
 
+/* Same "plain opaque rectangle, not a region trick" pattern as the
+ * arrow overlay - four separate thin strips (top/bottom/left/right)
+ * instead of one ring-shaped SetWindowRgn window, which is the piece
+ * that failed before. Each strip is a full ordinary rect, so there's
+ * no region-clipping to get wrong. */
+#define COMBO_BORDER_PX 4 /* the native sunken bevel is thicker than it
+                             * looks - 2px left a visible white sliver,
+                             * confirmed by testing at 2/4/8px */
+static LRESULT CALLBACK combo_edge_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        HBRUSH brush;
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        brush = CreateSolidBrush(COLOR_APP_PANEL_BORDER);
+        FillRect(hdc, &rc, brush);
+        DeleteObject(brush);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static void add_combo_edge(HWND parent, int x, int y, int w, int h) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | WS_DISABLED, x, y, w, h, 0);
+    if (!ctrl) {
+        return;
+    }
+    if (!g_panel_orig_proc) {
+        g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+    }
+    SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)combo_edge_subclass_proc);
+}
+
 static void make_combo_readonly(HWND combo) {
     COMBOBOXINFO cbi;
     RECT rc;
     HWND parent;
-    int arrow_w;
+    int arrow_w, w, h;
 
     cbi.cbSize = sizeof(cbi);
     if (GetComboBoxInfo(combo, &cbi) && cbi.hwndItem) {
@@ -281,8 +321,16 @@ static void make_combo_readonly(HWND combo) {
     parent = GetParent(combo);
     GetWindowRect(combo, &rc);
     MapWindowPoints(HWND_DESKTOP, parent, (POINT *)&rc, 2);
+    w = rc.right - rc.left;
+    h = rc.bottom - rc.top;
+
     arrow_w = GetSystemMetrics(SM_CXVSCROLL);
-    add_combo_arrow(parent, rc.right - arrow_w, rc.top, arrow_w, rc.bottom - rc.top);
+    add_combo_arrow(parent, rc.right - arrow_w, rc.top, arrow_w, h);
+
+    add_combo_edge(parent, rc.left, rc.top, w, COMBO_BORDER_PX);                  /* top */
+    add_combo_edge(parent, rc.left, rc.bottom - COMBO_BORDER_PX, w, COMBO_BORDER_PX); /* bottom */
+    add_combo_edge(parent, rc.left, rc.top, COMBO_BORDER_PX, h);                  /* left */
+    add_combo_edge(parent, rc.right - COMBO_BORDER_PX, rc.top, COMBO_BORDER_PX, h); /* right */
 }
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
