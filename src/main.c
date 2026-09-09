@@ -1296,35 +1296,36 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 112, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 110, 70, 100, IDC_PARITY_COMBO);
 
-    /* Sidebar: now just Amplifier Temperature + Activity Log stacked in
-     * one tall box spanning the channel grid's full height (headers
-     * only, no separate borders between them) - Connection & Settings
-     * moved up into the header above, so there's a lot less here than
-     * there used to be. */
-    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
-
-    add_header_icon(hwnd, 22, 158, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 40, 158, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 22, 180, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 56, 178, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 150, 178, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 210, 178, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    /* Amplifier Temperature, next to Connection & Settings in the same
+     * header bar rather than below it in the sidebar - same row shape,
+     * just offset 318px right to clear the block above. */
+    add_header_icon(hwnd, 340, 16, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 358, 16, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 340, 40, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 374, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 468, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 528, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
      * no mode toggle needed anymore. This status/gauge shows the rack-
      * wide average; each card shows its own individual reading. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 22, 204, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 22, 226, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 228, 226, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 22, 250, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 218, 248, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 340, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 340, 86, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 546, 86, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 340, 110, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 536, 108, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    add_header_icon(hwnd, 22, 300, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, 300, 200, 18);
-    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 298, 60, 20, IDC_LOG_CLEAR_BTN);
+    /* Sidebar: just Activity Log now - Connection & Settings and
+     * Amplifier Temperature both moved up into the header above, so
+     * there's a lot less here than there used to be. */
+    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP);
+
+    add_header_icon(hwnd, 22, 158, ICON_LIST);
+    add_header(hwnd, "Activity Log", 40, 158, 200, 18);
+    add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP, 243, 156, 60, 20, IDC_LOG_CLEAR_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, 322, 281, 176, IDC_LOG_LISTBOX);
+             22, 180, 281, 176, IDC_LOG_LISTBOX);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
