@@ -1305,23 +1305,24 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 142, 112, 40, 16, 0);
     add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 184, 110, 70, 100, IDC_PARITY_COMBO);
 
-    /* Amplifier Temperature, next to Connection & Settings in the same
-     * header bar rather than below it in the sidebar - same row shape,
-     * just offset 318px right to clear the block above. */
-    add_header_icon(hwnd, 340, 16, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 358, 16, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 340, 40, 32, 16, 0);
-    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 374, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 468, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 528, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
+    /* Amplifier Temperature, right-aligned in the same header bar
+     * rather than below it in the sidebar - same row shape as
+     * Connection & Settings, just anchored to the header's right edge
+     * instead of sitting bunched up next to it. */
+    add_header_icon(hwnd, 1033, 16, ICON_WAVE);
+    add_header(hwnd, "Amplifier Temperature", 1051, 16, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1033, 40, 32, 16, 0);
+    add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 1067, 38, 90, 160, IDC_SENSOR_PORT_COMBO);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1161, 38, 56, 22, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1221, 38, 66, 22, IDC_SENSOR_CONNECT_BTN);
     /* One sensor per unit, each at its own address (see UNIT_TEMP_ADDR) -
      * no mode toggle needed anymore. This status/gauge shows the rack-
      * wide average; each card shows its own individual reading. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 340, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
-    add_gauge(hwnd, 340, 86, 200, 20, IDC_SENSOR_TEMP_GAUGE);
-    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 546, 86, 72, 20, IDC_SENSOR_TEMP_LBL);
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 340, 110, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 536, 108, 80, 22, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1033, 64, 270, 16, IDC_SENSOR_STATUS_LBL);
+    add_gauge(hwnd, 1033, 86, 200, 20, IDC_SENSOR_TEMP_GAUGE);
+    add_ctrl(hwnd, "STATIC", "-", SS_LEFT | SS_NOPREFIX, 1239, 86, 72, 20, IDC_SENSOR_TEMP_LBL);
+    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 110, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 108, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
