@@ -211,12 +211,78 @@ static HWND add_ctrl(HWND parent, LPCSTR cls, LPCSTR text, DWORD style, int x, i
  * restricting the paint the way it should have). All three are gone:
  * don't ship a visual change that doesn't demonstrably work. The
  * native sunken frame and dropdown-arrow button stay as-is.) */
+/* A plain rectangular overlay this time, not a region trick - the
+ * SetWindowRgn ring attempt failed because the region didn't actually
+ * restrict painting the way it should have; a full, ordinary opaque
+ * rectangle sized to just the dropdown-arrow button avoids that
+ * failure mode entirely (nothing relies on partial occlusion). Same
+ * "sibling created after, so it's on top" positioning, WS_DISABLED so
+ * clicks fall through to the real arrow button underneath (disabled
+ * windows are skipped during hit-testing) to actually open the list. */
+static LRESULT CALLBACK combo_arrow_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        HPEN pen, old_pen;
+        HBRUSH old_brush;
+        POINT tri[3];
+        int cx, cy;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, g_brush_field);
+
+        cx = (rc.left + rc.right) / 2;
+        cy = (rc.top + rc.bottom) / 2;
+        tri[0].x = cx - 4; tri[0].y = cy - 2;
+        tri[1].x = cx + 4; tri[1].y = cy - 2;
+        tri[2].x = cx;     tri[2].y = cy + 3;
+
+        pen = CreatePen(PS_SOLID, 1, COLOR_APP_HEADER);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+        old_brush = (HBRUSH)SelectObject(hdc, g_brush_accent);
+        Polygon(hdc, tri, 3);
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static void add_combo_arrow(HWND parent, int x, int y, int w, int h) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | WS_DISABLED, x, y, w, h, 0);
+    if (!ctrl) {
+        return;
+    }
+    if (!g_panel_orig_proc) {
+        g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+    }
+    SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)combo_arrow_subclass_proc);
+}
+
 static void make_combo_readonly(HWND combo) {
     COMBOBOXINFO cbi;
+    RECT rc;
+    HWND parent;
+    int arrow_w;
+
     cbi.cbSize = sizeof(cbi);
     if (GetComboBoxInfo(combo, &cbi) && cbi.hwndItem) {
         SendMessageA(cbi.hwndItem, EM_SETREADONLY, TRUE, 0);
     }
+
+    parent = GetParent(combo);
+    GetWindowRect(combo, &rc);
+    MapWindowPoints(HWND_DESKTOP, parent, (POINT *)&rc, 2);
+    arrow_w = GetSystemMetrics(SM_CXVSCROLL);
+    add_combo_arrow(parent, rc.right - arrow_w, rc.top, arrow_w, rc.bottom - rc.top);
 }
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
