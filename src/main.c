@@ -99,6 +99,8 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
  * rather than bleeding outside them (no layout changes needed). */
 #define PANEL_CORNER_DIAMETER 24 /* header bar, sidebar */
 #define CARD_CORNER_DIAMETER 16  /* the smaller 16 channel cards */
+#define BTN_CORNER_DIAMETER 8    /* every owner-draw button (Set, ON/OFF,
+                                   * Connect, Refresh, Clear, Reset) */
 #define CARD_BORDER_ON_WIDTH 2
 #define PANEL_SHADOW_PX 5
 #define CARD_SHADOW_PX 3
@@ -1826,7 +1828,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
                     HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, fill);
 
-                    Rectangle(dis->hDC, rc.left, rc.top, rc.right, rc.bottom);
+                    RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
                     SelectObject(dis->hDC, old_brush);
                     SelectObject(dis->hDC, old_pen);
                     DeleteObject(pen);
@@ -1838,7 +1840,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return TRUE;
                 }
 
-                FillRect(dis->hDC, &rc, disabled ? g_brush_accent_dis : g_brush_accent);
+                /* Rounded to match the rest of "Direction B" (panels,
+                 * cards) instead of the old hard-cornered FillRect - a
+                 * borderless RoundRect via NULL_PEN keeps the same flat
+                 * look, just with soft corners. */
+                {
+                    HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
+                    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, disabled ? g_brush_accent_dis : g_brush_accent);
+                    RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
+                    SelectObject(dis->hDC, old_brush);
+                    SelectObject(dis->hDC, old_pen);
+                }
                 SetTextColor(dis->hDC, RGB(255, 255, 255));
                 SetBkMode(dis->hDC, TRANSPARENT);
                 GetWindowTextA(dis->hwndItem, text, sizeof(text));
