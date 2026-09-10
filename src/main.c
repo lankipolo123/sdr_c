@@ -952,7 +952,7 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
         FillRect(hdc, &rc, g_brush_panel);
         SetBkMode(hdc, TRANSPARENT);
 
-        wsprintfA(addr_text, "ADDR %d", sensor_get_unit_address(&g_sensor, unit_index));
+        wsprintfA(addr_text, "BAY %d", sensor_get_unit_address(&g_sensor, unit_index));
         addr_rc = rc;
         addr_rc.top += 3;
         addr_rc.bottom = addr_rc.top + 12;
@@ -2172,8 +2172,12 @@ static void spectrum_draw_grid(HDC hdc, RECT rc) {
         MoveToEx(hdc, rc.left, y, NULL);
         LineTo(hdc, rc.right, y);
     }
-    for (i = 1; i < 5; i++) {
-        int x = rc.left + w * i / 5;
+    /* Matches the 4 columns of channel cells drawn above - this used to
+     * divide into 5 vertical sections while the content above only ever
+     * fills 4 columns, so the rightmost 1/5th of the plot was
+     * permanently empty gridded space with nothing drawn in it. */
+    for (i = 1; i < 4; i++) {
+        int x = rc.left + w * i / 4;
         MoveToEx(hdc, x, rc.top, NULL);
         LineTo(hdc, x, rc.bottom);
     }
@@ -2199,18 +2203,26 @@ static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         if (g_spectrum_show_all) {
             const int cols = 4;
             const int rows = 4;
-            int cw = (rc.right - rc.left) / cols;
-            int cell_h = (rc.bottom - rc.top) / rows;
+            int total_w = rc.right - rc.left;
+            int total_h = rc.bottom - rc.top;
             int i;
+            /* Each boundary computed straight from the total (col * w /
+             * cols), not by accumulating a once-truncated per-cell width
+             * (col * (w / cols)) - the latter loses w % cols pixels off
+             * the right/bottom edge entirely (the last column's right
+             * edge lands short of rc.right whenever w isn't an exact
+             * multiple of 4), leaving a blank strip with no content in
+             * it. This way the last column/row's far edge is always
+             * exactly rc.right/rc.bottom. */
             for (i = 0; i < MAX_CHANNELS; i++) {
                 RECT cell;
                 char label[4];
                 int col = i % cols;
                 int row = i / cols;
-                cell.left = rc.left + col * cw + 3;
-                cell.right = rc.left + (col + 1) * cw - 3;
-                cell.top = rc.top + row * cell_h + 2;
-                cell.bottom = rc.top + (row + 1) * cell_h - 2;
+                cell.left = rc.left + col * total_w / cols + 3;
+                cell.right = rc.left + (col + 1) * total_w / cols - 3;
+                cell.top = rc.top + row * total_h / rows + 2;
+                cell.bottom = rc.top + (row + 1) * total_h / rows - 2;
                 wsprintfA(label, "%d", i + 1);
                 draw_channel_spectrum(hdc, cell, channels_get(i), label, NULL);
             }
@@ -2509,7 +2521,7 @@ static void build_controls(HWND hwnd) {
      * split rows) - splitting them would make this the taller of the
      * two cards, working against making it smaller. */
     add_header_icon(hwnd, 1033, 14, ICON_WAVE);
-    add_header(hwnd, "Amplifier Temperature", 1051, 14, 260, 18);
+    add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
     make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
