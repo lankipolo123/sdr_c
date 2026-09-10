@@ -60,7 +60,7 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             10
+#define IDC_CH_STRIDE             11
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
@@ -80,3 +80,10 @@
 #define IDC_CH_LBL_MEDIUM_OFFSET  7
 #define IDC_CH_LBL_LOW_OFFSET     8
 #define IDC_CH_LBL_OFF_OFFSET     9
+/* Bulk Actions selection checkbox, top-right corner of the card - a
+ * real dedicated click target, not "click somewhere on the card's
+ * background that isn't already covered by a real control" (that
+ * turned out to be genuinely hard to hit once connected, when every
+ * other control on the card is itself clickable and swallows the
+ * click first - reported as "this is unclickable"). */
+#define IDC_CH_SELECT_OFFSET      10

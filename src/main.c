@@ -188,6 +188,7 @@ static int g_spectrum_unit;
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
+static HWND g_bulk_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -1253,6 +1254,7 @@ static int channel_mode_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_set_id(int idx)        { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_SET_OFFSET; }
 static int channel_on_id(int idx)         { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_ON_OFFSET; }
 static int channel_off_id(int idx)        { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_OFF_OFFSET; }
+static int channel_select_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_SELECT_OFFSET; }
 static int channel_status_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_STATUS_OFFSET; }
 static int channel_track_id(int idx)      { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_TRACKBAR_OFFSET; }
 static int channel_lbl_high_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_HIGH_OFFSET; }
@@ -1273,6 +1275,7 @@ static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_ST
  * anywhere a card's panel needs to repaint. */
 static void ui_invalidate_card(int index) {
     InvalidateRect(g_card_panel[index], NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_select_id(index)), NULL, FALSE);
     InvalidateRect(g_card_icon[index], NULL, FALSE);
     InvalidateRect(g_card_header[index], NULL, FALSE);
     InvalidateRect(g_card_mode_lbl[index], NULL, FALSE);
@@ -1667,6 +1670,15 @@ static void add_channel_card(HWND hwnd, int index) {
     HWND mode_combo;
 
     g_card_panel[index] = add_card_panel(hwnd, x, y, CARD_W, CARD_H, index);
+    /* Bulk Actions selection checkbox - a real, always-there, always-
+     * empty-around-it click target in the card's top-right corner, not
+     * "click the card's background somewhere" (unreliable once
+     * connected - every other control on the card is itself clickable
+     * by then and swallows the click first). Owner-drawn like every
+     * other button here, not BS_AUTOCHECKBOX - a native checkbox is
+     * plain white/system-themed, and would be the one control on this
+     * whole app that doesn't match the dark theme. */
+    add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP, x + CARD_W - 24, y + 6, 16, 16, channel_select_id(index));
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
     g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 58, 16);
@@ -1962,6 +1974,33 @@ static void draw_channel_spectrum(HDC hdc, RECT area, const ChannelState *ch,
     }
 }
 
+/* Faint reference grid across the whole plot, underneath every trace -
+ * 3 horizontal divisions + 4 vertical, same idea as a real spectrum
+ * analyzer's graticule. Purely a visual reference, not real scale
+ * markings (this app has no receiver - see draw_channel_spectrum's own
+ * comment). */
+static void spectrum_draw_grid(HDC hdc, RECT rc) {
+    HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+    HPEN old_pen = (HPEN)SelectObject(hdc, pen);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    int i;
+
+    for (i = 1; i < 4; i++) {
+        int y = rc.top + h * i / 4;
+        MoveToEx(hdc, rc.left, y, NULL);
+        LineTo(hdc, rc.right, y);
+    }
+    for (i = 1; i < 5; i++) {
+        int x = rc.left + w * i / 5;
+        MoveToEx(hdc, x, rc.top, NULL);
+        LineTo(hdc, x, rc.bottom);
+    }
+
+    SelectObject(hdc, old_pen);
+    DeleteObject(pen);
+}
+
 static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -1974,6 +2013,7 @@ static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, g_brush_field);
+        spectrum_draw_grid(hdc, rc);
 
         if (g_spectrum_show_all) {
             const int cols = 4;
@@ -2260,6 +2300,8 @@ static void build_controls(HWND hwnd) {
         HWND bulk_mode_combo;
         int mi;
 
+        g_bulk_panel = add_panel(hwnd, SIDEBAR_X, BULK_BAR_Y, CLIENT_WIDTH - 2 * SIDEBAR_X, BULK_BAR_H);
+
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
                  22, BULK_BAR_Y + 14, 90, 16, IDC_BULK_SELECTED_LBL);
         add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
@@ -2382,6 +2424,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 #define PLACE(win, dx, dy, dw, dh) MoveWindow((win), (dx), (dy), (dw), (dh), FALSE)
 
     PLACE(g_card_panel[index], x, y, card_w, card_h);
+    PLACE(GetDlgItem(hwnd, channel_select_id(index)), x + card_w - SX(24), y + SY(6), 16, 16);
     PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
     PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(58), SY(16));
     PLACE(g_card_mode_lbl[index], x + SX(88), y + SY(8), SX(60), SY(14));
@@ -2426,6 +2469,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
+    MoveWindow(g_bulk_panel, SIDEBAR_X, BULK_BAR_Y, client_w - 2 * SIDEBAR_X, BULK_BAR_H, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
@@ -2700,6 +2744,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         channel_turn_output_off(idx);
                     } else if (offset == IDC_CH_STATUS_OFFSET && code == STN_CLICKED) {
                         on_unit_kill_reset(idx);
+                    } else if (offset == IDC_CH_SELECT_OFFSET && code == BN_CLICKED) {
+                        g_channel_selected[idx] = !g_channel_selected[idx];
+                        ui_invalidate_card(idx);
+                        ui_refresh_bulk_selected_label();
                     }
                     return 0;
                 }
@@ -2819,6 +2867,42 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
                 if (channel_index_from_id((int)dis->CtlID, &idx)) {
                     offset = ((int)dis->CtlID - IDC_CH_BASE) % IDC_CH_STRIDE;
+                }
+
+                /* Bulk Actions selection checkbox - a small square,
+                 * solid accent fill + a checkmark when selected, just an
+                 * outline when not. Never disabled (selecting channels
+                 * for a bulk action is allowed before connecting too -
+                 * only the actual bulk action buttons are gated on
+                 * connection). */
+                if (offset == IDC_CH_SELECT_OFFSET) {
+                    bool selected = g_channel_selected[idx];
+                    HPEN pen, old_pen;
+
+                    /* Plain square, not RoundRect - guaranteed full-pixel
+                     * coverage with a solid FillRect first (RoundRect's
+                     * corner curvature can leave the tiniest sliver of
+                     * whatever's underneath showing at the very corners
+                     * on some renderers - this rules that out entirely
+                     * as a cause of the reported white patch). */
+                    FillRect(dis->hDC, &rc, selected ? g_brush_accent : g_brush_panel);
+                    pen = CreatePen(PS_SOLID, 1, COLOR_APP_HEADER);
+                    old_pen = (HPEN)SelectObject(dis->hDC, pen);
+                    SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                    Rectangle(dis->hDC, rc.left, rc.top, rc.right, rc.bottom);
+                    SelectObject(dis->hDC, old_pen);
+                    DeleteObject(pen);
+
+                    if (selected) {
+                        HPEN check_pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+                        HPEN old_check_pen = (HPEN)SelectObject(dis->hDC, check_pen);
+                        MoveToEx(dis->hDC, rc.left + 3, rc.top + 8, NULL);
+                        LineTo(dis->hDC, rc.left + 6, rc.bottom - 4);
+                        LineTo(dis->hDC, rc.right - 3, rc.top + 3);
+                        SelectObject(dis->hDC, old_check_pen);
+                        DeleteObject(check_pen);
+                    }
+                    return TRUE;
                 }
 
                 /* ON/OFF are two real, separate buttons (not one toggle) -
