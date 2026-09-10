@@ -485,25 +485,35 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * etc.) was tried first and was wrong two ways: visually, most
          * of the circle then sits in the square corner area the
          * rounded panel never fills in the first place, so it read as
-         * a free-floating dot outside the panel rather than a notch
-         * cut into it - and separately, Wine's Ellipse() with a
-         * pattern-brush fill silently draws nothing at all once part
-         * of its bounding box goes negative/out-of-window (confirmed by
-         * testing: swapping to a plain solid-color fill made all 4
-         * corners render fine at that same position, so a bounding box
-         * that leaves the window is what broke pattern-brush
-         * specifically, not a real "off"). Insetting onto the rounded
-         * arc itself fixes both at once - r/sqrt(2)-ish along the
-         * corner's own 45-degree diagonal keeps the whole ellipse
-         * on-panel while still visibly overlapping the curve.
+         * a free-floating dot outside the panel rather than near it -
+         * and separately, Wine's Ellipse() with a pattern-brush fill
+         * silently draws nothing at all once part of its bounding box
+         * goes negative/out-of-window (confirmed by testing: swapping
+         * to a plain solid-color fill made all 4 corners render fine at
+         * that same position, so a bounding box that leaves the window
+         * is what broke pattern-brush specifically, not a real "off").
+         *
+         * Direct request is for the notch to sit NEAR the corner
+         * without touching the panel's own rounded edge - not
+         * overlapping it. The corner's rounded boundary is an arc of
+         * radius PANEL_CORNER_DIAMETER/2 centered at (radius, radius)
+         * from the sharp corner; a point at distance d from that arc
+         * center has clearance (radius - d) to the boundary, which is
+         * LARGEST when d is smallest, i.e. right at the arc's own
+         * center - inset = radius places the notch's center exactly
+         * there, giving it up to `radius` px of clearance in every
+         * direction before it would ever reach the edge, while still
+         * sitting inside the corner region rather than out toward the
+         * panel's flat middle. r is kept comfortably smaller than that
+         * radius so the whole circle stays inside with room to spare.
          *
          * Header only, not the sidebar panel below (same subclass
          * proc, but this is scoped to g_header_panel specifically) -
          * direct request was for the whole header, not the Bulk
          * Actions card nested inside it. */
         if (hwnd == g_header_panel) {
-            const int r = 7;
-            const int inset = 8; /* ~PANEL_CORNER_DIAMETER/2 * (1 - 1/sqrt(2)) */
+            const int r = 6;
+            const int inset = PANEL_CORNER_DIAMETER / 2; /* = 12 */
             POINT corners[4];
             POINT old_org;
             int ci;
