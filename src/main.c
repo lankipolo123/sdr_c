@@ -1556,12 +1556,12 @@ static void ui_refresh_all_channels(void) {
     }
 }
 
-/* ---- saved settings (port/baud/parity/data bits selections only - never
- * channel states or the kill switch, and never auto-connects anything.
- * A restart should never silently re-enable RF output on its own; it
- * just saves you re-picking the same COM port and baud every launch.
- * Stored next to the exe as a plain .ini, matching this app's
- * portable/no-installer approach - not AppData. ---- */
+/* ---- saved settings (port/baud/parity/data bits, per-channel mode/
+ * level/output_on - never the kill switch, and never auto-connects
+ * anything). Restoring output_on does not transmit anything on its own -
+ * see channel_restore_saved()'s comment. Stored next to the exe as a
+ * plain .ini, matching this app's portable/no-installer approach - not
+ * AppData. ---- */
 
 static void get_ini_path(char *path /* at least MAX_PATH + 8 bytes */) {
     char *dot;
@@ -1598,12 +1598,14 @@ static void save_settings(void) {
     GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, buf, sizeof(buf));
     WritePrivateProfileStringA("Sensor", "Port", buf, path);
 
-    /* Per-channel mode + resume-to level, never saved before - reopening
-     * the app silently reset every channel back to White Noise/no level
-     * with no way to get a saved setup back. Deliberately NOT saving/
-     * restoring output_on: a channel comes back ready with its mode and
-     * level remembered, but transmission always requires an explicit ON
-     * click after launch, never auto-resumes on its own. */
+    /* Per-channel mode + resume-to level + output_on, never saved before -
+     * reopening the app silently reset every channel back to White Noise/
+     * no level/OFF with no way to get a saved setup back. Saving output_on
+     * does NOT mean this app auto-resumes transmission on launch - see
+     * channel_restore_saved()'s comment: the amplifier hardware holds its
+     * own commanded state independently of whether this app is running,
+     * so restoring output_on into the UI just keeps it honest about what's
+     * actually still out there, without sending anything to get there. */
     {
         int i;
         char section[8];
@@ -1614,6 +1616,8 @@ static void save_settings(void) {
             WritePrivateProfileStringA(section, "Mode", buf, path);
             wsprintfA(buf, "%d", ch->last_level);
             WritePrivateProfileStringA(section, "Level", buf, path);
+            wsprintfA(buf, "%d", ch->output_on ? 1 : 0);
+            WritePrivateProfileStringA(section, "Output", buf, path);
         }
     }
 }
@@ -1648,11 +1652,16 @@ static void load_settings(void) {
 /* Must run AFTER channels_init() (which sets every channel back to its
  * hardcoded defaults) and after build_controls() (which needs the mode
  * combos/labels to already exist) - restores each channel's saved mode/
- * resume-to level via channel_restore_saved() (data only, no serial
- * send - see its own comment), then mirrors that into the mode combo's
- * selection and the card's mode label so the UI actually shows it.
+ * resume-to level/output_on via channel_restore_saved() (data only, no
+ * serial send - see its own comment), then mirrors mode into the mode
+ * combo's selection and the card's mode label so the UI actually shows
+ * it. output_on/level need no manual mirroring here - ui_refresh_all_
+ * channels() (called right after this, in WM_CREATE) reads them straight
+ * off channels_get() same as any other state change.
  * GetPrivateProfileIntA's own default (-1) means "key missing", so a
- * channel with no saved entry is left exactly as channels_init() set it. */
+ * channel with no saved entry is left exactly as channels_init() set it.
+ * Output defaults to 0 (off) when missing - an .ini saved before this
+ * field existed should not suddenly claim a channel is transmitting. */
 static void load_channel_settings(void) {
     char path[MAX_PATH + 8];
     char section[8];
@@ -1661,14 +1670,15 @@ static void load_channel_settings(void) {
     get_ini_path(path);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
-        int mode, level;
+        int mode, level, output_on;
         wsprintfA(section, "Ch%d", i + 1);
         mode = GetPrivateProfileIntA(section, "Mode", -1, path);
         level = GetPrivateProfileIntA(section, "Level", -1, path);
+        output_on = GetPrivateProfileIntA(section, "Output", 0, path);
         if (mode < 0 || level < 0) {
             continue;
         }
-        channel_restore_saved(i, (uint8_t)mode, level);
+        channel_restore_saved(i, (uint8_t)mode, level, output_on != 0);
         SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
         SetWindowTextA(g_card_mode_lbl[i], proto_mode_name((uint8_t)mode));
     }

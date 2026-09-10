@@ -46,15 +46,17 @@ void channels_init(Connection *conn) {
     }
 }
 
-/* Restores a saved mode/level from the .ini directly into channel state,
- * without going through channel_set_mode()/channel_set_level() - those
- * queue a real serial send, which would be wrong here: there's no
- * connection open yet at load time, and even once connected, the whole
- * point of a saved setting is to be ready without transmitting anything
- * until the user explicitly presses ON (never auto-resume RF output on
- * launch). Leaves output_on/level at their already-initialized OFF
- * state - only last_level (what ON will resume to) and mode change. */
-void channel_restore_saved(int index, uint8_t mode, int last_level) {
+/* Restores a saved mode/level/output_on from the .ini directly into
+ * channel state, without going through channel_set_mode()/
+ * channel_turn_output_on() - those queue a real serial send, which would
+ * be wrong here: there's no connection open yet at load time, and this
+ * is just the app remembering what it already believed last time, not
+ * commanding anything new. Matches the reference app's channelStore -
+ * restoring output_on into state is NOT the same as re-arming RF: the
+ * amplifier hardware holds its own last commanded state independently,
+ * so this only makes the UI honest about what's actually still running
+ * out there, without sending a single byte to get there. */
+void channel_restore_saved(int index, uint8_t mode, int last_level, bool output_on) {
     if (last_level < LEVEL_LOW || last_level > LEVEL_HIGH) {
         return;
     }
@@ -63,6 +65,8 @@ void channel_restore_saved(int index, uint8_t mode, int last_level) {
     }
     g_channels[index].mode = mode;
     g_channels[index].last_level = last_level;
+    g_channels[index].output_on = output_on;
+    g_channels[index].level = output_on ? last_level : LEVEL_OFF;
 }
 
 const ChannelState *channels_get(int index) {

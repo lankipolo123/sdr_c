@@ -51,9 +51,9 @@ typedef struct {
 void channels_init(Connection *conn);
 const ChannelState *channels_get(int index); /* index 0..MAX_CHANNELS-1 */
 
-/* Restores a saved mode/last_level straight into channel state (no serial
- * send, no output_on change) - for loading .ini settings at startup. */
-void channel_restore_saved(int index, uint8_t mode, int last_level);
+/* Restores a saved mode/last_level/output_on straight into channel state
+ * (no serial send) - for loading .ini settings at startup. */
+void channel_restore_saved(int index, uint8_t mode, int last_level, bool output_on);
 
 void channel_turn_output_on(int index);
 void channel_turn_output_off(int index);
