@@ -21,7 +21,9 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 702
+#define CLIENT_HEIGHT 754 /* was 702 - grew by BULK_BAR_H+8 to fit the new
+                             * Bulk Actions bar without shrinking anything
+                             * else; grid/sidebar/log just shift down */
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -42,8 +44,17 @@
                             * rows and gained extra gap before Data
                             * Bits/Parity, so it's the taller card again
                             * (content bottoms out ~y=175) */
-#define CONTENT_TOP  194 /* shifts down by the same 12px HEADER_H grew,
-                            * keeping the usual 8px gap below the panel */
+
+/* Bulk Actions bar - click a card to select it, then apply Mode/Set,
+ * ON/OFF, or a level to every selected channel at once. Sits between
+ * the header and the grid/sidebar, same 6px-top/8px-gap rhythm as
+ * everywhere else. */
+#define BULK_BAR_Y   (6 + HEADER_H + 8)
+#define BULK_BAR_H   44
+
+#define CONTENT_TOP  (BULK_BAR_Y + BULK_BAR_H + 8) /* sidebar panels and
+                            * channel grid start beneath the bulk bar,
+                            * same usual 8px gap used everywhere else */
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -161,6 +172,10 @@ static HBITMAP g_dot_pattern_bmp;
 static Connection g_conn;
 static Sensor g_sensor;
 static bool g_kill_switch_tripped[MAX_CHANNELS];
+
+/* Bulk Actions selection - click a card to toggle it in/out, then the
+ * Bulk Actions bar applies to every selected channel at once. */
+static bool g_channel_selected[MAX_CHANNELS];
 
 /* Spectrum panel state - true shows the all-16 overview grid (the
  * default), false shows one channel's trace full-size, with
@@ -450,7 +465,12 @@ static HWND add_panel(HWND parent, int x, int y, int w, int h) {
 
 /* Rounded-corner card panel - channel index stashed in GWLP_USERDATA so
  * it can read that channel's own on/off state at paint time, same
- * live-read pattern as sensor_chip_subclass_proc. */
+ * live-read pattern as sensor_chip_subclass_proc. Also the Bulk Actions
+ * click target: SS_NOTIFY sends STN_CLICKED to the parent on a click
+ * anywhere on the card's background (not on one of the real buttons/
+ * combo/gauge sitting on top of it - those get the click first, same as
+ * any overlapping sibling), toggling that channel selected/deselected -
+ * see the WM_COMMAND handling below and g_channel_selected. */
 static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -461,6 +481,8 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         RECT rc;
         HBRUSH old_brush;
         HPEN pen, old_pen;
+        int index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+        bool selected = (index >= 0 && index < MAX_CHANNELS) && g_channel_selected[index];
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -473,16 +495,27 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
-        /* No outline stroke - just the fill, same "no border" look the
-         * user asked for. NULL_PEN, not a same-color pen, so RoundRect
-         * doesn't draw an edge at all. */
+        /* Plain fill with no outline normally (NULL_PEN, not a same-
+         * color pen, so RoundRect doesn't draw an edge at all) - a
+         * selected card gets a real accent-colored stroke instead, the
+         * only visual cue for "this card is in the Bulk Actions
+         * selection". */
         SelectObject(hdc, g_brush_panel);
-        old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+        if (selected) {
+            pen = CreatePen(PS_SOLID, 2, COLOR_APP_HEADER);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+        } else {
+            pen = NULL;
+            old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+        }
 
         RoundRect(hdc, rc.left, rc.top, rc.right - CARD_SHADOW_PX, rc.bottom - CARD_SHADOW_PX,
                   CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
 
         SelectObject(hdc, old_pen);
+        if (pen) {
+            DeleteObject(pen);
+        }
         SelectObject(hdc, old_brush);
 
         EndPaint(hwnd, &ps);
@@ -499,8 +532,9 @@ static HWND add_card_panel(HWND parent, int x, int y, int w, int h, int index) {
      * straight over the title/mode label/mode combo/Set button sitting
      * on top of it, with nothing telling them to repaint themselves
      * afterward - "Unit N" and its mode row would just go blank the
-     * next time the channel turned on or off. */
-    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | WS_CLIPSIBLINGS, x, y, w, h, 0);
+     * next time the channel turned on or off. SS_NOTIFY so it can send
+     * STN_CLICKED for Bulk Actions selection (see the proc above). */
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | SS_NOTIFY | WS_CLIPSIBLINGS, x, y, w, h, 0);
     if (ctrl) {
         if (!g_panel_orig_proc) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
@@ -1226,6 +1260,34 @@ static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 
+/* Invalidates a card's background panel AND every one of its own
+ * foreground siblings (title, mode label, mode combo, Set, ON, OFF,
+ * status, gauge, tick labels) together, every time. WS_CLIPSIBLINGS on
+ * the panel (see add_card_panel()) is supposed to keep its repaint from
+ * touching them at all - and does most of the time - but it isn't
+ * reliably enough to trust alone (confirmed: a card clicked for Bulk
+ * Actions selection could still end up erased under Wine even with the
+ * flag set). Explicitly telling every sibling to repaint alongside the
+ * panel is the actually-guaranteed fix, independent of z-order/clipping
+ * timing. Call this instead of invalidating g_card_panel[index] alone,
+ * anywhere a card's panel needs to repaint. */
+static void ui_invalidate_card(int index) {
+    InvalidateRect(g_card_panel[index], NULL, FALSE);
+    InvalidateRect(g_card_icon[index], NULL, FALSE);
+    InvalidateRect(g_card_header[index], NULL, FALSE);
+    InvalidateRect(g_card_mode_lbl[index], NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_mode_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_set_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_status_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_track_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_high_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_medium_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_low_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_off_id(index)), NULL, FALSE);
+}
+
 /* Every control that can actually command a channel (mode Set, ON, OFF,
  * the level gauge) is disabled while RS422 isn't connected - there's no
  * bus to blind-send on, so letting the user "arm" 16 channels' worth of
@@ -1244,6 +1306,12 @@ static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_ST
  * through the dark theme (that took five attempts to get right - see
  * the big comment above combo_arrow_subclass_proc). Set/ON/OFF/gauge
  * are all custom-painted, so they stay fully themed either way. */
+static const int BULK_ACTION_BTN_IDS[] = {
+    IDC_BULK_CLEAR_BTN, IDC_BULK_SET_BTN, IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
+    IDC_BULK_HIGH_BTN, IDC_BULK_MEDIUM_BTN, IDC_BULK_LOW_BTN, IDC_BULK_LEVEL_OFF_BTN
+};
+#define BULK_ACTION_BTN_COUNT (sizeof(BULK_ACTION_BTN_IDS) / sizeof(BULK_ACTION_BTN_IDS[0]))
+
 static void set_channel_controls_enabled(bool enabled) {
     int i;
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -1261,6 +1329,81 @@ static void set_channel_controls_enabled(bool enabled) {
         InvalidateRect(on_btn, NULL, FALSE);
         InvalidateRect(off_btn, NULL, FALSE);
         InvalidateRect(gauge, NULL, FALSE);
+    }
+    for (i = 0; i < (int)BULK_ACTION_BTN_COUNT; i++) {
+        HWND btn = GetDlgItem(g_hwnd, BULK_ACTION_BTN_IDS[i]);
+        EnableWindow(btn, enabled);
+        InvalidateRect(btn, NULL, FALSE);
+    }
+}
+
+/* ---- Bulk Actions ----
+ * Click a card's background to select it (see card_panel_subclass_proc);
+ * these apply to every selected channel at once. Same safety gating as
+ * each card's own controls: OFF always works even kill-switch-tripped,
+ * ON/Set/level skip a tripped channel; the level buttons additionally
+ * skip a channel that isn't already on, matching the per-channel
+ * gauge's own "only adjusts an already-running channel" rule. */
+
+static void ui_refresh_bulk_selected_label(void) {
+    int i, count = 0;
+    char text[16];
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i]) count++;
+    }
+    wsprintfA(text, "%d selected", count);
+    SetDlgItemTextA(g_hwnd, IDC_BULK_SELECTED_LBL, text);
+}
+
+static void bulk_clear_selection(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i]) {
+            g_channel_selected[i] = false;
+            ui_invalidate_card(i);
+        }
+    }
+    ui_refresh_bulk_selected_label();
+}
+
+static void bulk_apply_mode(uint8_t mode) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i] && !g_kill_switch_tripped[i]) {
+            channel_set_mode(i, mode);
+            SetWindowTextA(g_card_mode_lbl[i], proto_mode_name(mode));
+            SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
+        }
+    }
+}
+
+static void bulk_turn_output_on(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i] && !g_kill_switch_tripped[i]) {
+            channel_turn_output_on(i);
+        }
+    }
+}
+
+static void bulk_turn_output_off(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i]) {
+            channel_turn_output_off(i);
+        }
+    }
+}
+
+static void bulk_apply_level(int level) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (!g_channel_selected[i]) continue;
+        if (level == LEVEL_OFF) {
+            channel_turn_output_off(i);
+        } else if (channels_get(i)->output_on && !g_kill_switch_tripped[i]) {
+            channel_set_level(i, level);
+        }
     }
 }
 
@@ -1640,9 +1783,12 @@ static void ui_refresh_channel(int index) {
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_off_id(index)), NULL, FALSE);
 
     /* Card border reads output_on too now (rounded + lit border while
-     * on) - only repaint it on the one field it actually depends on. */
+     * on) - only repaint it on the one field it actually depends on.
+     * Uses ui_invalidate_card(), not a bare InvalidateRect() on just the
+     * panel - see that function's comment for why the panel's own
+     * repaint can't be trusted alone to leave its siblings alone. */
     if (!cache->valid || cache->output_on != ch->output_on) {
-        InvalidateRect(g_card_panel[index], NULL, FALSE);
+        ui_invalidate_card(index);
     }
 
     cache->valid = true;
@@ -1782,11 +1928,11 @@ static void draw_channel_spectrum(HDC hdc, RECT area, const ChannelState *ch,
 
     if (caption) {
         RECT cap_rc = area;
-        cap_rc.top = area.bottom - 14;
+        cap_rc.bottom = cap_rc.top + 14;
         old_font = (HFONT)SelectObject(hdc, g_font);
         SetTextColor(hdc, COLOR_APP_MUTED);
         SetBkMode(hdc, TRANSPARENT);
-        DrawTextA(hdc, caption, -1, &cap_rc, DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOCLIP);
+        DrawTextA(hdc, caption, -1, &cap_rc, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP);
         SelectObject(hdc, old_font);
     }
 
@@ -1851,11 +1997,9 @@ static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM 
             const ChannelState *ch = channels_get(g_spectrum_unit);
             char caption[64];
             if (ch->output_on) {
-                wsprintfA(caption, "%s - %dMHz - %ddBm", proto_mode_name(ch->mode),
-                          channel_freq_mhz(g_spectrum_unit), channel_level_power_db(ch->level));
+                wsprintfA(caption, "%s", proto_mode_name(ch->mode));
             } else {
-                wsprintfA(caption, "%s - %dMHz - STANDBY", proto_mode_name(ch->mode),
-                          channel_freq_mhz(g_spectrum_unit));
+                wsprintfA(caption, "%s - STANDBY", proto_mode_name(ch->mode));
             }
             draw_channel_spectrum(hdc, rc, ch, NULL, caption);
         }
@@ -2104,6 +2248,49 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
+    /* Bulk Actions bar: click a card (its background, not one of its
+     * real controls) to select it - the card gets a lit accent border -
+     * then one of these applies to every selected channel at once.
+     * Same safety gating as each card's own controls: OFF always
+     * works even kill-switch-tripped, ON/Set/level skip a tripped
+     * channel (see the handlers below). Disabled as a whole alongside
+     * every per-channel control until RS422 connects - see
+     * set_channel_controls_enabled(). */
+    {
+        HWND bulk_mode_combo;
+        int mi;
+
+        add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
+                 22, BULK_BAR_Y + 14, 90, 16, IDC_BULK_SELECTED_LBL);
+        add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
+                 118, BULK_BAR_Y + 11, 54, 22, IDC_BULK_CLEAR_BTN);
+
+        bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
+                                    190, BULK_BAR_Y + 11, 150, 140, IDC_BULK_MODE_COMBO);
+        for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
+            const char *name = proto_mode_name((uint8_t)mi);
+            SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
+        }
+        SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
+        make_combo_readonly(bulk_mode_combo);
+        add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
+                 346, BULK_BAR_Y + 11, 50, 22, IDC_BULK_SET_BTN);
+
+        add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
+                 414, BULK_BAR_Y + 11, 54, 22, IDC_BULK_ON_BTN);
+        add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
+                 474, BULK_BAR_Y + 11, 54, 22, IDC_BULK_OFF_BTN);
+
+        add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
+                 550, BULK_BAR_Y + 11, 58, 22, IDC_BULK_HIGH_BTN);
+        add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
+                 614, BULK_BAR_Y + 11, 58, 22, IDC_BULK_MEDIUM_BTN);
+        add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
+                 678, BULK_BAR_Y + 11, 58, 22, IDC_BULK_LOW_BTN);
+        add_ctrl(hwnd, "BUTTON", "Off", BS_OWNERDRAW | WS_TABSTOP,
+                 742, BULK_BAR_Y + 11, 58, 22, IDC_BULK_LEVEL_OFF_BTN);
+    }
+
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
      * in the SAME box, not a separate panel. Connection & Settings and
@@ -2247,6 +2434,17 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
                SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34), FALSE);
+
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_SELECTED_LBL), 22, BULK_BAR_Y + 14, 90, 16, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_CLEAR_BTN), 118, BULK_BAR_Y + 11, 54, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_MODE_COMBO), 190, BULK_BAR_Y + 11, 150, 140, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_SET_BTN), 346, BULK_BAR_Y + 11, 50, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_ON_BTN), 414, BULK_BAR_Y + 11, 54, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_OFF_BTN), 474, BULK_BAR_Y + 11, 54, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_HIGH_BTN), 550, BULK_BAR_Y + 11, 58, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_MEDIUM_BTN), 614, BULK_BAR_Y + 11, 58, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_LOW_BTN), 678, BULK_BAR_Y + 11, 58, 22, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_BULK_LEVEL_OFF_BTN), 742, BULK_BAR_Y + 11, 58, 22, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
@@ -2407,6 +2605,57 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
+                return 0;
+            }
+            if (id == 0 && code == STN_CLICKED) {
+                /* A card panel's background was clicked - id is 0 for
+                 * every add_panel()/add_card_panel() control, so match
+                 * by HWND against g_card_panel instead. */
+                HWND ctl = (HWND)lParam;
+                int idx;
+                for (idx = 0; idx < MAX_CHANNELS; idx++) {
+                    if (ctl == g_card_panel[idx]) {
+                        g_channel_selected[idx] = !g_channel_selected[idx];
+                        ui_invalidate_card(idx);
+                        ui_refresh_bulk_selected_label();
+                        break;
+                    }
+                }
+                return 0;
+            }
+            if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
+                bulk_clear_selection();
+                return 0;
+            }
+            if (id == IDC_BULK_SET_BTN && code == BN_CLICKED) {
+                int sel = (int)SendDlgItemMessageA(hwnd, IDC_BULK_MODE_COMBO, CB_GETCURSEL, 0, 0);
+                if (sel >= 0) {
+                    bulk_apply_mode((uint8_t)sel);
+                }
+                return 0;
+            }
+            if (id == IDC_BULK_ON_BTN && code == BN_CLICKED) {
+                bulk_turn_output_on();
+                return 0;
+            }
+            if (id == IDC_BULK_OFF_BTN && code == BN_CLICKED) {
+                bulk_turn_output_off();
+                return 0;
+            }
+            if (id == IDC_BULK_HIGH_BTN && code == BN_CLICKED) {
+                bulk_apply_level(LEVEL_HIGH);
+                return 0;
+            }
+            if (id == IDC_BULK_MEDIUM_BTN && code == BN_CLICKED) {
+                bulk_apply_level(LEVEL_MEDIUM);
+                return 0;
+            }
+            if (id == IDC_BULK_LOW_BTN && code == BN_CLICKED) {
+                bulk_apply_level(LEVEL_LOW);
+                return 0;
+            }
+            if (id == IDC_BULK_LEVEL_OFF_BTN && code == BN_CLICKED) {
+                bulk_apply_level(LEVEL_OFF);
                 return 0;
             }
             if (id == IDC_SPECTRUM_UNIT_COMBO && code == CBN_SELCHANGE) {

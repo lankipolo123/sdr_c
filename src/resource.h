@@ -21,6 +21,22 @@
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 
+/* Bulk Actions bar, above the channel grid - click a card to select it
+ * (toggles a highlighted border), then one of these applies to every
+ * selected channel at once instead of clicking through cards one at a
+ * time. Same gating as each card's own controls: OFF always works even
+ * kill-switch-tripped, ON/Set/level skip a tripped channel. */
+#define IDC_BULK_SELECTED_LBL   1040
+#define IDC_BULK_CLEAR_BTN      1041
+#define IDC_BULK_MODE_COMBO     1042
+#define IDC_BULK_SET_BTN        1043
+#define IDC_BULK_ON_BTN         1044
+#define IDC_BULK_OFF_BTN        1045
+#define IDC_BULK_HIGH_BTN       1046
+#define IDC_BULK_MEDIUM_BTN     1047
+#define IDC_BULK_LOW_BTN        1048
+#define IDC_BULK_LEVEL_OFF_BTN  1049
+
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the
  * comment above g_sidebar_panel's creation in main.c). Not a capture -
