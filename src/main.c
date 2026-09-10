@@ -460,6 +460,46 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         DeleteObject(pen);
         SelectObject(hdc, old_brush);
 
+        /* Bulk Actions gets its own inset card within this same header
+         * panel - drawn right here, as a second RoundRect in the same
+         * WM_PAINT call, NOT as a second overlapping WS_CLIPSIBLINGS
+         * sibling window (that was tried first: two same-class
+         * WS_CLIPSIBLINGS panels fully overlapping each other clip each
+         * other's drawable region down to nothing, since WS_CLIPSIBLINGS
+         * excludes area covered by ANY overlapping sibling regardless of
+         * z-order - confirmed by testing, it rendered completely blank,
+         * no border, no shadow at all). Drawing it inline here instead
+         * sidesteps sibling clipping entirely - it's the same window,
+         * same HDC, just a second shape. Coordinates are relative to
+         * this panel's own top-left (only g_header_panel is at
+         * SIDEBAR_X=10, y=6, so these map to the absolute (454, 14) -
+         * (894, 170) region build_controls() lays the Bulk Actions
+         * controls out in). */
+        if (hwnd == g_header_panel) {
+            RECT brc;
+            brc.left = 444;
+            brc.top = 8;
+            brc.right = 884;
+            brc.bottom = 164;
+
+            old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
+            pen = CreatePen(PS_SOLID, 1, g_shadow_color);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            RoundRect(hdc, brc.left, brc.top, brc.right, brc.bottom,
+                      PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+
+            SelectObject(hdc, g_brush_panel);
+            pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            RoundRect(hdc, brc.left, brc.top, brc.right - PANEL_SHADOW_PX, brc.bottom - PANEL_SHADOW_PX,
+                      PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+            SelectObject(hdc, old_brush);
+        }
+
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -2316,6 +2356,13 @@ static void build_controls(HWND hwnd) {
         HWND bulk_mode_combo;
         int mi;
 
+        /* Bulk Actions' own inset card border/shadow is drawn by
+         * panel_subclass_proc itself (see the hwnd == g_header_panel
+         * branch there), not a second panel window here - the one
+         * section in this header meant to read as a distinct,
+         * occasional-use card rather than blending into the shared
+         * header background like Connection & Settings and Amplifier
+         * Temperature do. */
         add_header_icon(hwnd, 480, 14, ICON_LIST);
         add_header(hwnd, "Bulk Actions", 498, 14, 150, 18);
         add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
