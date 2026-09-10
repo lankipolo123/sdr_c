@@ -2346,11 +2346,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetBkMode(dis->hDC, TRANSPARENT);
                 GetWindowTextA(dis->hwndItem, text, sizeof(text));
                 DrawTextA(dis->hDC, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                if (dis->itemState & ODS_FOCUS) {
-                    RECT focus_rc = rc;
-                    InflateRect(&focus_rc, -3, -3);
-                    DrawFocusRect(dis->hDC, &focus_rc);
-                }
+                /* No dashed focus-rect after a click - the fill color
+                 * already shows which button is active/current, the
+                 * extra dotted outline just read as a stray line. */
                 return TRUE;
             }
             break;
