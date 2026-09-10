@@ -14,9 +14,11 @@ differently enough that keeping them as separate executables (and
 separate repos) was simpler than merging the two control models into one
 UI.
 
-No Qt, no Python runtime, no vendor DLL, no pyserial - just `user32.dll`,
-`gdi32.dll`, `kernel32.dll`, `advapi32.dll`, `comctl32.dll` (all part of
-Windows itself).
+No Qt, no Python runtime, no pyserial - just `user32.dll`, `gdi32.dll`,
+`kernel32.dll`, `advapi32.dll`, `comctl32.dll` (all part of Windows
+itself), plus the vendor's own `dll/Transit.dll` for the RS422 channel
+bus (see "DLL integration" below). The Amplifier Temperature sensor bus
+is unrelated and still talks raw serial directly.
 
 ## UI pattern
 
@@ -36,6 +38,22 @@ Frequency/Bandwidth are **not** per-channel controls here (matching the
 reference apps) - every Signal Control frame uses a fixed frequency and
 bandwidth; only mode and power level are real per-channel selections.
 
+## DLL integration
+
+The RS422 channel bus talks to hardware through `dll/Transit.dll`, not
+raw serial I/O - ported from sdr_app's `middleware.py`/
+`use_connection.py`, the proven hardware-confirmed reference (same DLL,
+same 5 exports: `AutoConnectSDR`, `CheckConnection`, `DisconnectSDR`,
+`CommandTokens`, `SendCommandToSDR`). `AutoConnectSDR` auto-discovers the
+dongle itself - there is no real port/baud/parity/data-bits to select,
+so the Port combo just shows a `DLL` placeholder and the other fields
+are inert (kept for UI/interface stability, matching middleware's own
+`ConnectionController.connect()` signature, which does the same).
+Sending a frame means translating it one byte at a time through
+`CommandTokens` before handing each token to `SendCommandToSDR` - never
+the raw protocol bytes, matching the confirmed real mechanism. See
+`src/transit_dll.h`/`.c` and `src/connection.c`.
+
 ## Building
 
 Requires mingw-w64 (get it via [MSYS2](https://www.msys2.org/), then run
@@ -53,9 +71,12 @@ produces `digital_noise_config_multi.exe`.
 - `src/protocol.h` / `.c` - RS422 frame format (build/parse), shared
   unchanged with `digital-noise-configuration`.
 - `src/serial_port.h` / `.c` - raw `CreateFile`/`ReadFile`/`WriteFile`
-  COM port I/O + registry port enumeration.
-- `src/connection.h` / `.c` - connection lifecycle + framing on top of
-  `serial_port`, polled from a `WM_TIMER` tick.
+  COM port I/O + registry port enumeration; used by the Amplifier
+  Temperature sensor bus only now (see below).
+- `src/transit_dll.h` / `.c` - dynamic loader for the vendor's
+  `Transit.dll`.
+- `src/connection.h` / `.c` - RS422 channel-bus connection lifecycle on
+  top of `transit_dll`, polled from a `WM_TIMER` tick.
 - `src/channels.h` / `.c` - the 16-channel blind-send layer: a FIFO send
   queue (only one frame in flight at a time, since all 16 channels share
   one physical connection), a 300ms settle delay, and optimistic state
@@ -68,4 +89,9 @@ produces `digital_noise_config_multi.exe`.
 Built and exercised under Wine: window/grid creation, port list refresh,
 Mode Set / ON / OFF / level-trackbar interaction, and the blind-send
 queue -> settle -> optimistic-UI-update cycle across multiple channels.
-Not yet tested against real hardware.
+
+The Transit.dll integration itself: confirmed the DLL loads under Wine
+and `AutoConnectSDR` genuinely executes and returns (no crash) - with no
+real RS422 dongle attached there, it correctly comes back "not
+connected" rather than faking success. Not yet tested against real
+hardware - that's the one thing this environment can't confirm.

@@ -1,45 +1,61 @@
 #include "connection.h"
 #include <string.h>
 
+#define TRANSIT_DLL_PATH "dll\\Transit.dll"
+#define TRANSIT_BUF_SIZE 256
+
+static bool dll_buf_says_connected(const char *buf) {
+    return lstrcmpiA(buf, "Connected") == 0;
+}
+
 void conn_init(Connection *conn, ConnectionCallbacks cb) {
     memset(conn, 0, sizeof(*conn));
-    conn->port.handle = INVALID_HANDLE_VALUE;
     conn->cb = cb;
     proto_parser_init(&conn->parser);
 }
 
 bool conn_connect(Connection *conn, const char *port_name, DWORD baud, char parity, uint8_t data_bits) {
-    if (serial_open(&conn->port, port_name, baud, parity, data_bits)) {
-        conn->connected = true;
+    char buf[TRANSIT_BUF_SIZE];
+    long result;
+
+    /* Transit.dll auto-discovers the RS422 dongle itself - see
+     * connection.h's comment on why these stay unused. */
+    (void)port_name;
+    (void)baud;
+    (void)parity;
+    (void)data_bits;
+
+    if (!transit_dll_is_loaded(&conn->dll) && !transit_dll_load(&conn->dll, TRANSIT_DLL_PATH)) {
+        if (conn->cb.on_error) {
+            conn->cb.on_error("Transit.dll not found/loadable", conn->cb.ctx);
+        }
+        return false;
+    }
+
+    ZeroMemory(buf, sizeof(buf));
+    result = conn->dll.auto_connect_sdr(buf, (long)sizeof(buf));
+    conn->connected = dll_buf_says_connected(buf);
+
+    if (conn->connected) {
         proto_parser_init(&conn->parser);
-        if (conn->cb.on_connected_changed) {
-            conn->cb.on_connected_changed(true, conn->cb.ctx);
-        }
-        return true;
-    }
-
-    if (GetLastError() == ERROR_ACCESS_DENIED) {
-        Sleep(300);
-        if (serial_open(&conn->port, port_name, baud, parity, data_bits)) {
-            conn->connected = true;
-            proto_parser_init(&conn->parser);
-            if (conn->cb.on_connected_changed) {
-                conn->cb.on_connected_changed(true, conn->cb.ctx);
-            }
-            return true;
-        }
-    }
-
-    if (conn->cb.on_error) {
-        char msg[128];
-        wsprintfA(msg, "Failed to open %s", port_name);
+    } else if (conn->cb.on_error) {
+        char msg[160];
+        wsprintfA(msg, "AutoConnectSDR: not connected (return=%ld, buffer=\"%s\")", result, buf);
         conn->cb.on_error(msg, conn->cb.ctx);
     }
-    return false;
+
+    if (conn->cb.on_connected_changed) {
+        conn->cb.on_connected_changed(conn->connected, conn->cb.ctx);
+    }
+    return conn->connected;
 }
 
 void conn_disconnect(Connection *conn) {
-    serial_close(&conn->port);
+    char buf[TRANSIT_BUF_SIZE];
+    if (transit_dll_is_loaded(&conn->dll)) {
+        ZeroMemory(buf, sizeof(buf));
+        conn->dll.disconnect_sdr(buf, (long)sizeof(buf));
+    }
     conn->connected = false;
     if (conn->cb.on_connected_changed) {
         conn->cb.on_connected_changed(false, conn->cb.ctx);
@@ -47,66 +63,71 @@ void conn_disconnect(Connection *conn) {
 }
 
 bool conn_is_connected(const Connection *conn) {
-    return conn->connected && serial_is_open(&conn->port);
+    return conn->connected;
 }
 
+/* One byte at a time, token-translated - the confirmed real mechanism
+ * (see middleware.py's dll_send_command): CommandTokens looks each byte
+ * up in the DLL's own translation table; an unmapped byte ("??") falls
+ * back to its 2-digit hex text instead, matching the reference exactly
+ * (frequency bytes mostly fall outside the small token table). */
 bool conn_send(Connection *conn, const uint8_t *data, uint8_t len) {
+    int i;
+
     if (!conn_is_connected(conn)) {
         if (conn->cb.on_error) {
             conn->cb.on_error("Cannot send: not connected", conn->cb.ctx);
         }
         return false;
     }
-    if (!serial_write(&conn->port, data, len, NULL)) {
-        /* A hard write failure (as opposed to "nothing to read yet") means
-         * the port itself is gone - most commonly the USB adapter was
-         * unplugged. Disconnect so the UI reflects that immediately,
-         * rather than staying "Connected" with a dead handle forever
-         * (which is what made a re-plugged adapter look like it wouldn't
-         * reconnect - the app never noticed it had disconnected in the
-         * first place, so Connect looked like a no-op). */
-        if (conn->cb.on_error) {
-            conn->cb.on_error("Write failed - port disconnected", conn->cb.ctx);
+
+    for (i = 0; i < len; i++) {
+        char hex[4];
+        char token[TRANSIT_BUF_SIZE];
+
+        wsprintfA(hex, "%02X", data[i]);
+        ZeroMemory(token, sizeof(token));
+        conn->dll.command_tokens(hex, token, (long)sizeof(token));
+
+        if (token[0] == '\0' || (token[0] == '?' && token[1] == '?' && token[2] == '\0')) {
+            lstrcpynA(token, hex, (int)sizeof(token));
         }
-        conn_disconnect(conn);
-        return false;
+        conn->dll.send_command_to_sdr(token, (long)lstrlenA(token));
     }
+
     if (conn->cb.on_raw_tx) {
         conn->cb.on_raw_tx(data, len, conn->cb.ctx);
     }
     return true;
 }
 
+/* No raw-read/incoming-frame equivalent exists in the confirmed DLL API -
+ * this just re-checks CheckConnection so a real disconnect (dongle
+ * unplugged) gets noticed instead of the UI sitting on "Connected"
+ * forever. */
 void conn_poll(Connection *conn) {
-    uint8_t chunk[256];
-    DWORD read_len = 0;
+    char buf[TRANSIT_BUF_SIZE];
 
     if (!conn_is_connected(conn)) {
         return;
     }
 
-    if (!serial_read(&conn->port, chunk, sizeof(chunk), &read_len)) {
-        /* Same reasoning as the write-failure case above: a hard read
-         * error means the device is gone, not just quiet. Disconnect
-         * once instead of logging "Read failed" on every 100ms tick
-         * forever. */
+    ZeroMemory(buf, sizeof(buf));
+    conn->dll.check_connection(buf, (long)sizeof(buf));
+    if (!dll_buf_says_connected(buf)) {
         if (conn->cb.on_error) {
-            conn->cb.on_error("Read failed - port disconnected", conn->cb.ctx);
+            conn->cb.on_error("CheckConnection: link lost", conn->cb.ctx);
         }
         conn_disconnect(conn);
-        return;
     }
-    if (read_len == 0) {
-        return;
-    }
-
-    if (conn->cb.on_raw_rx) {
-        conn->cb.on_raw_rx(chunk, (uint16_t)read_len, conn->cb.ctx);
-    }
-
-    proto_parser_feed(&conn->parser, chunk, (uint16_t)read_len, conn->cb.on_frame, conn->cb.ctx);
 }
 
 int conn_list_ports(char names[][16], int max_ports) {
-    return serial_list_ports(names, max_ports);
+    /* No real ports to enumerate - Transit.dll auto-discovers the RS422
+     * dongle itself. Matches middleware's own list_ports() -> ["DLL"]. */
+    if (max_ports > 0) {
+        lstrcpynA(names[0], "DLL", 16);
+        return 1;
+    }
+    return 0;
 }

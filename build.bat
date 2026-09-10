@@ -9,10 +9,13 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -mwindows -Os -s ^
+REM -Wno-cast-function-type: transit_dll.c's GetProcAddress casts are the
+REM standard, unavoidable Win32 idiom (FARPROC's varargs signature never
+REM matches the real one) - see transit_dll.c's own comment on this.
+gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -Wno-cast-function-type -mwindows -Os -s ^
     -fno-ident -fno-asynchronous-unwind-tables ^
     -ffunction-sections -fdata-sections -Wl,--gc-sections ^
-    -o digital_noise_config_multi.exe src\main.c src\connection.c src\channels.c src\protocol.c src\serial_port.c src\modbus.c src\sensor.c src\app_res.o ^
+    -o digital_noise_config_multi.exe src\main.c src\connection.c src\channels.c src\protocol.c src\serial_port.c src\modbus.c src\sensor.c src\transit_dll.c src\app_res.o ^
     -ladvapi32 -lgdi32 -luser32 -lmsimg32
 
 if %ERRORLEVEL% NEQ 0 (
