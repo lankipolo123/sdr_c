@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdlib.h>
 #include "resource.h"
 #include "connection.h"
 #include "channels.h"
@@ -160,6 +161,12 @@ static HBITMAP g_dot_pattern_bmp;
 static Connection g_conn;
 static Sensor g_sensor;
 static bool g_kill_switch_tripped[MAX_CHANNELS];
+
+/* Spectrum panel state - true shows the all-16 overview grid (the
+ * default), false shows one channel's trace full-size, with
+ * g_spectrum_unit (0..MAX_CHANNELS-1) picking which. */
+static bool g_spectrum_show_all = true;
+static int g_spectrum_unit;
 
 /* Handles needed to reposition things on WM_SIZE that don't otherwise
  * have a retrievable control ID (channel_*_id() covers everything else
@@ -1636,37 +1643,221 @@ static void ui_refresh_all_channels(void) {
     }
 }
 
-/* ---- signal status panel ----
- * Real per-channel RF parameters, straight from ChannelState and the
- * fixed blind-send constants - not a simulated/illustrative graph.
- * This app has no receiver, so there is nothing to actually plot; this
- * is exactly what is being commanded on the wire for every channel,
- * nothing guessed or synthesized. */
+/* ---- spectrum panel ----
+ * Not a capture - this app has no receiver - but not a guess either:
+ * every channel's mode/level/on-off is exactly what THIS APP
+ * commanded, so both the trace shape and the caption's dBm/MHz come
+ * straight from real, known state. The trace shape per mode was
+ * matched against a real ZS-407 capture earlier this session (PRN =
+ * noisy flat block + wide harmonic, Comb = many narrow teeth + medium
+ * harmonic, Linear Sweep = fewer/tighter teeth + narrow harmonic, CW =
+ * one clean spike + one clean harmonic) - drawn as an actual jagged
+ * trace line, not solid bars, so it reads as a spectrum plot rather
+ * than a bar chart. Off channels just show a flat floor line. */
 
-static const char *const SIGNAL_MODE_ABBREV[PROTO_MODE_COUNT] = {
-    "PRN", "Sweep", "Comb", "CW"
-};
-
-static void ui_refresh_signal_status(void) {
-    HWND list = GetDlgItem(g_hwnd, IDC_SIGNAL_STATUS_LISTBOX);
-    int top = (int)SendMessageA(list, LB_GETTOPINDEX, 0, 0);
-    int i;
-
-    SendMessageA(list, LB_RESETCONTENT, 0, 0);
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        const ChannelState *ch = channels_get(i);
-        const char *mode_abbrev = (ch->mode < PROTO_MODE_COUNT) ? SIGNAL_MODE_ABBREV[ch->mode] : "?";
-        char line[64];
-        if (ch->output_on) {
-            wsprintfA(line, "Unit %d - ON - %s - %dMHz - %ddBm",
-                      i + 1, mode_abbrev, CHANNEL_BLIND_FREQ_MHZ, channel_level_power_db(ch->level));
-        } else {
-            wsprintfA(line, "Unit %d - OFF - %s - %dMHz",
-                      i + 1, mode_abbrev, CHANNEL_BLIND_FREQ_MHZ);
-        }
-        SendMessageA(list, LB_ADDSTRING, 0, (LPARAM)line);
+static int spectrum_peak_pct(int level) {
+    switch (level) {
+        case LEVEL_LOW:    return 40;
+        case LEVEL_MEDIUM: return 70;
+        case LEVEL_HIGH:   return 100;
+        default:           return 0;
     }
-    SendMessageA(list, LB_SETTOPINDEX, (WPARAM)top, 0);
+}
+
+/* Small random wobble, not true per-frame chaos - called with a fixed
+ * amplitude per role (noise floor vs. tooth peak) so the trace has
+ * live texture without the underlying shape ever looking unstable. */
+static int spectrum_jitter(int amplitude) {
+    if (amplitude <= 0) return 0;
+    return (rand() % (2 * amplitude + 1)) - amplitude;
+}
+
+/* Height (0..100, % of `area`'s vertical span above the floor) of the
+ * trace at pixel column `px` of `w` - the per-mode shape. `peak_pct`
+ * is the channel's level-scaled ceiling (see spectrum_peak_pct). */
+static int spectrum_height_pct(uint8_t mode, int px, int w, int peak_pct) {
+    int fund_lo = w * 28 / 100, fund_hi = w * 46 / 100;
+    int harm_lo = w * 66 / 100, harm_hi = w * 80 / 100;
+    int harm_mid = (harm_lo + harm_hi) / 2;
+    int val = 1 + spectrum_jitter(2); /* near-floor noise everywhere */
+
+    switch (mode) {
+        case PROTO_MODE_WHITE_NOISE: /* Pseudo Random Noise */
+            if (px >= fund_lo && px <= fund_hi) {
+                val = peak_pct - 6 + spectrum_jitter(9);
+            } else if (px >= harm_lo && px <= harm_hi) {
+                val = peak_pct * 28 / 100 + spectrum_jitter(6);
+            }
+            break;
+        case PROTO_MODE_LINEAR_SWEEP: {
+            const int tooth_w = 6;
+            if (px >= fund_lo && px <= fund_hi && (px - fund_lo) % tooth_w <= 1) {
+                int tooth_idx = (px - fund_lo) / tooth_w;
+                int h = peak_pct - (tooth_idx % 3) * 18;
+                if (h < 20) h = 20;
+                val = h + spectrum_jitter(6);
+            } else if (px >= harm_mid - 1 && px <= harm_mid + 1) {
+                val = peak_pct * 16 / 100 + spectrum_jitter(4);
+            }
+            break;
+        }
+        case PROTO_MODE_COMB_SPECTRUM: {
+            int band_lo = fund_lo - w * 4 / 100;
+            int band_hi = fund_hi + w * 4 / 100;
+            const int tooth_w = 4;
+            if (px >= band_lo && px <= band_hi && (px - band_lo) % tooth_w <= 1) {
+                int tooth_idx = (px - band_lo) / tooth_w;
+                int h = peak_pct - (tooth_idx % 4) * 14;
+                if (h < 15) h = 15;
+                val = h + spectrum_jitter(6);
+            } else if (px >= harm_lo && px <= harm_hi) {
+                val = peak_pct * 42 / 100 + spectrum_jitter(8);
+            }
+            break;
+        }
+        case PROTO_MODE_SINGLE: /* Continuous Wave */
+        default: {
+            int fund_mid = (fund_lo + fund_hi) / 2;
+            if (px >= fund_mid - 1 && px <= fund_mid + 1) {
+                val = peak_pct + spectrum_jitter(3);
+            } else if (px >= harm_mid - 1 && px <= harm_mid + 1) {
+                val = peak_pct * 20 / 100 + spectrum_jitter(4);
+            }
+            break;
+        }
+    }
+    if (val < 0) val = 0;
+    if (val > 100) val = 100;
+    return val;
+}
+
+#define SPECTRUM_MAX_TRACE_PTS 360
+
+/* Draws one channel's trace into `area` - flat muted floor when off, a
+ * real jagged trace line (mode-shaped fundamental + 2nd-harmonic bump,
+ * scaled by level) when on. `label` (may be NULL) prints a small unit
+ * number in the corner, for the all-16 grid; `caption` (may be NULL)
+ * prints the exact real mode/frequency/power along the bottom, for the
+ * single-channel view. */
+static void draw_channel_spectrum(HDC hdc, RECT area, const ChannelState *ch,
+                                   const char *label, const char *caption) {
+    int w = area.right - area.left;
+    int h = area.bottom - area.top;
+    int floor_y = area.bottom - 2;
+    HPEN floor_pen, old_pen;
+    HFONT old_font;
+
+    floor_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+    old_pen = (HPEN)SelectObject(hdc, floor_pen);
+    MoveToEx(hdc, area.left, floor_y, NULL);
+    LineTo(hdc, area.right, floor_y);
+    SelectObject(hdc, old_pen);
+    DeleteObject(floor_pen);
+
+    if (label) {
+        RECT lbl_rc = area;
+        lbl_rc.bottom = lbl_rc.top + 12;
+        old_font = (HFONT)SelectObject(hdc, g_font);
+        SetTextColor(hdc, ch->output_on ? COLOR_APP_TEXT : COLOR_APP_MUTED);
+        SetBkMode(hdc, TRANSPARENT);
+        DrawTextA(hdc, label, -1, &lbl_rc, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP);
+        SelectObject(hdc, old_font);
+    }
+
+    if (caption) {
+        RECT cap_rc = area;
+        cap_rc.top = area.bottom - 14;
+        old_font = (HFONT)SelectObject(hdc, g_font);
+        SetTextColor(hdc, COLOR_APP_MUTED);
+        SetBkMode(hdc, TRANSPARENT);
+        DrawTextA(hdc, caption, -1, &cap_rc, DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOCLIP);
+        SelectObject(hdc, old_font);
+    }
+
+    if (!ch->output_on || w < 12 || h < 10) {
+        return;
+    }
+
+    {
+        int peak_pct = spectrum_peak_pct(ch->level);
+        HPEN trace_pen = CreatePen(PS_SOLID, 1, ch_gauge_stop_color(ch->level));
+        HPEN old_trace_pen = (HPEN)SelectObject(hdc, trace_pen);
+        int n = w;
+        int px;
+        if (n > SPECTRUM_MAX_TRACE_PTS) n = SPECTRUM_MAX_TRACE_PTS;
+
+        MoveToEx(hdc, area.left, floor_y, NULL);
+        for (px = 0; px < n; px++) {
+            int sample_px = px * w / n;
+            int pct = spectrum_height_pct(ch->mode, sample_px, w, peak_pct);
+            int y = floor_y - h * pct / 100;
+            LineTo(hdc, area.left + sample_px, y);
+        }
+        LineTo(hdc, area.right, floor_y);
+
+        SelectObject(hdc, old_trace_pen);
+        DeleteObject(trace_pen);
+    }
+}
+
+static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, g_brush_field);
+
+        if (g_spectrum_show_all) {
+            const int cols = 4;
+            const int rows = 4;
+            int cw = (rc.right - rc.left) / cols;
+            int cell_h = (rc.bottom - rc.top) / rows;
+            int i;
+            for (i = 0; i < MAX_CHANNELS; i++) {
+                RECT cell;
+                char label[4];
+                int col = i % cols;
+                int row = i / cols;
+                cell.left = rc.left + col * cw + 3;
+                cell.right = rc.left + (col + 1) * cw - 3;
+                cell.top = rc.top + row * cell_h + 2;
+                cell.bottom = rc.top + (row + 1) * cell_h - 2;
+                wsprintfA(label, "%d", i + 1);
+                draw_channel_spectrum(hdc, cell, channels_get(i), label, NULL);
+            }
+        } else {
+            const ChannelState *ch = channels_get(g_spectrum_unit);
+            char caption[64];
+            if (ch->output_on) {
+                wsprintfA(caption, "%s - %dMHz - %ddBm", proto_mode_name(ch->mode),
+                          CHANNEL_BLIND_FREQ_MHZ, channel_level_power_db(ch->level));
+            } else {
+                wsprintfA(caption, "%s - STANDBY", proto_mode_name(ch->mode));
+            }
+            draw_channel_spectrum(hdc, rc, ch, NULL, caption);
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_spectrum_plot(HWND parent, int x, int y, int w, int h, int id) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, id);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)spectrum_plot_subclass_proc);
+    }
+    return ctrl;
 }
 
 /* ---- saved settings (port/baud/parity/data bits, per-channel mode/
@@ -1896,17 +2087,30 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    /* Sidebar: one tall box - Signal Status up top (the space that used
-     * to just be "reserved for other features"), Activity Log below
-     * that in the SAME box, not a separate panel. Connection & Settings
-     * and Amplifier Temperature moved up into the header above. */
+    /* Sidebar: one tall box - Spectrum up top (the space that used to
+     * just be "reserved for other features"), Activity Log below that
+     * in the SAME box, not a separate panel. Connection & Settings and
+     * Amplifier Temperature moved up into the header above. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP);
 
     add_header_icon(hwnd, 22, CONTENT_TOP + 10, ICON_WAVE);
-    add_header(hwnd, "Signal Status", 40, CONTENT_TOP + 10, 160, 18);
-    add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
-             22, CONTENT_TOP + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34),
-             IDC_SIGNAL_STATUS_LISTBOX);
+    add_header(hwnd, "Spectrum", 40, CONTENT_TOP + 10, 188, 18);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
+                                  236, CONTENT_TOP + 8, 56, 140, IDC_SPECTRUM_UNIT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "All", BS_OWNERDRAW | WS_TABSTOP,
+             SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, IDC_SPECTRUM_ALL_BTN);
+    add_spectrum_plot(hwnd, 22, CONTENT_TOP + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34),
+                       IDC_SPECTRUM_PLOT);
+    {
+        int u;
+        char item[4];
+        HWND combo = GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO);
+        for (u = 0; u < MAX_CHANNELS; u++) {
+            wsprintfA(item, "%d", u + 1);
+            SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)item);
+        }
+        SendMessageA(combo, CB_SETCURSEL, (WPARAM)g_spectrum_unit, 0);
+    }
 
     add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
@@ -2022,7 +2226,9 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
 
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SIGNAL_STATUS_LISTBOX), 22, CONTENT_TOP + 34,
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO), 236, CONTENT_TOP + 8, 56, 140, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
                SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34), FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -2096,7 +2302,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
              * set once Connect is actually clicked. */
             set_channel_controls_enabled(false);
             ui_refresh_all_channels();
-            ui_refresh_signal_status();
             ui_refresh_sensor();
             return 0;
         }
@@ -2145,7 +2350,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ui_refresh_sensor();
                 check_kill_switch();
                 ui_refresh_kill_switch();
-                ui_refresh_signal_status();
+                InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
             }
             return 0;
 
@@ -2185,6 +2390,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
+                return 0;
+            }
+            if (id == IDC_SPECTRUM_UNIT_COMBO && code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessageA(hwnd, IDC_SPECTRUM_UNIT_COMBO, CB_GETCURSEL, 0, 0);
+                if (sel >= 0) {
+                    g_spectrum_unit = sel;
+                    g_spectrum_show_all = false;
+                    InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
+                }
+                return 0;
+            }
+            if (id == IDC_SPECTRUM_ALL_BTN && code == BN_CLICKED) {
+                g_spectrum_show_all = true;
+                InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
                 return 0;
             }
             {

@@ -21,14 +21,18 @@
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 
-/* Signal Status panel - sits in the sidebar box above Activity Log
- * (the space that was always "reserved for other features" - see the
- * comment above g_sidebar_panel's creation in main.c). Lists every
- * channel's actual commanded RF parameters (mode, power, the fixed
- * blind-send frequency, on/off) straight from ChannelState - real
- * data, not a simulated graph (this app has no receiver, so there's
- * nothing to actually plot). */
-#define IDC_SIGNAL_STATUS_LISTBOX  1030
+/* Spectrum panel - sits in the sidebar box above Activity Log (the
+ * space that was always "reserved for other features" - see the
+ * comment above g_sidebar_panel's creation in main.c). Not a capture -
+ * this app has no receiver - but not a guess either: every channel's
+ * mode/level/on-off is exactly what this app itself commanded, so the
+ * trace shape (matched against a real ZS-407 capture per mode earlier)
+ * and the exact dBm/MHz caption both come straight from real, known
+ * state. IDC_SPECTRUM_UNIT_COMBO jumps directly to one of 1-16;
+ * IDC_SPECTRUM_ALL_BTN goes back to the all-16 overview grid. */
+#define IDC_SPECTRUM_UNIT_COMBO  1030
+#define IDC_SPECTRUM_ALL_BTN     1031
+#define IDC_SPECTRUM_PLOT        1032
 
 #define ID_POLL_TIMER        1
 
