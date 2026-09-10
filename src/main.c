@@ -46,6 +46,18 @@
 #define CONTENT_TOP  194 /* shifts down by the same 12px HEADER_H grew,
                             * keeping the usual 8px gap below the panel */
 
+/* Connection & Settings and Bulk Actions pushed right, compressing the
+ * gaps to Bulk Actions and Ambient Temperature respectively (which
+ * stays fixed, unshifted) - not making either section smaller, just
+ * packing them closer together so the freed space shows up on the far
+ * left of the header (before Connection & Settings) instead of just
+ * sitting unused between the three sections. Applied as a flat offset
+ * added to every one of that section's own x-coordinates below, rather
+ * than hand-recomputing each one, so the original per-control layout
+ * numbers stay visible/auditable in the source. */
+#define CONN_X_SHIFT 180
+#define BULK_X_SHIFT 80
+
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
 #define BAUD_DEFAULT_INDEX 4 /* 115200 */
@@ -562,9 +574,9 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * controls out in). */
         if (hwnd == g_header_panel) {
             RECT brc;
-            brc.left = 444;
+            brc.left = 444 + BULK_X_SHIFT;
             brc.top = 8;
-            brc.right = 884;
+            brc.right = 884 + BULK_X_SHIFT;
             brc.bottom = 164;
 
             /* CARD_CORNER_DIAMETER/CARD_SHADOW_PX, not the PANEL_*
@@ -1582,7 +1594,7 @@ static void set_bulk_select_mode(bool on) {
      * card's checkbox position (see build_controls()'s Bulk Actions
      * block) so the rest of the layout still mirrors a channel card. */
     MoveWindow(GetDlgItem(g_hwnd, IDC_BULK_TOGGLE_BTN),
-               on ? 740 : 605, on ? 22 : 81, 138, 22, TRUE);
+               (on ? 740 : 605) + BULK_X_SHIFT, on ? 22 : 81, 138, 22, TRUE);
 }
 
 static void bulk_apply_mode(uint8_t mode) {
@@ -2443,8 +2455,8 @@ static void build_controls(HWND hwnd) {
      * (tucked up against Amplifier Temperature), leaving the whole left
      * half of the header empty. Bulk Actions now takes the middle
      * column, Amplifier Temperature stays right-aligned. */
-    add_header_icon(hwnd, 36, 14, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 54, 14, 260, 18);
+    add_header_icon(hwnd, 36 + CONN_X_SHIFT, 14, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 54 + CONN_X_SHIFT, 14, 260, 18);
 
     /* Every row below is centered within this section's own ~310px-wide
      * span (roughly x=22-332) instead of flush against its left edge -
@@ -2457,18 +2469,18 @@ static void build_controls(HWND hwnd) {
      * pitch is a modest ~8px gap between a row's visual bottom and
      * the next row's top - not the cramped 3-4px pitch from before
      * (too tight), not the old ~30-40px gaps either (too spacious). */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 63, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 99, 34, 90, 140, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 201, 36, 100, 16, IDC_CONN_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 105, 63, 64, 18, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 177, 63, 72, 18, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 63 + CONN_X_SHIFT, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 99 + CONN_X_SHIFT, 34, 90, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 201 + CONN_X_SHIFT, 36, 100, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 105 + CONN_X_SHIFT, 63, 64, 18, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 177 + CONN_X_SHIFT, 63, 72, 18, IDC_CONNECT_BTN);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 113, 91, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 151, 89, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 57, 120, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 121, 118, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 182, 120, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 226, 118, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 113 + CONN_X_SHIFT, 91, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 151 + CONN_X_SHIFT, 89, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 57 + CONN_X_SHIFT, 120, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 121 + CONN_X_SHIFT, 118, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 182 + CONN_X_SHIFT, 120, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 226 + CONN_X_SHIFT, 118, 70, 100, IDC_PARITY_COMBO));
 
     /* Bulk Actions - middle column of the header, between Connection &
      * Settings (left) and Amplifier Temperature (right). Off by default -
@@ -2507,20 +2519,20 @@ static void build_controls(HWND hwnd) {
          * gauge + High/Medium/Low/Off tick labels there -> the same 4
          * levels as actual buttons here, since bulk applies a level with
          * a click rather than a drag). */
-        add_header_icon(hwnd, 470, 24, ICON_LIST);
-        add_header(hwnd, "Bulk Actions", 488, 24, 150, 18);
+        add_header_icon(hwnd, 470 + BULK_X_SHIFT, 24, ICON_LIST);
+        add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
-                 648, 26, 84, 16, IDC_BULK_SELECTED_LBL);
+                 648 + BULK_X_SHIFT, 26, 84, 16, IDC_BULK_SELECTED_LBL);
         /* Starting position matches the collapsed (off) state - centered
          * in the card, since that's all there is to look at until it's
          * clicked. set_bulk_select_mode() moves it to the row-1 corner
          * slot (matching a Unit card's checkbox position) once expanded,
          * and back here when collapsed again. */
         add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
-                 605, 81, 138, 22, IDC_BULK_TOGGLE_BTN);
+                 605 + BULK_X_SHIFT, 81, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                    470, 54, 230, 140, IDC_BULK_MODE_COMBO);
+                                    470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
         for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
             const char *name = proto_mode_name((uint8_t)mi);
             SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -2528,29 +2540,29 @@ static void build_controls(HWND hwnd) {
         SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
         make_combo_readonly_ex(bulk_mode_combo, g_bulk_combo_overlays);
         add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-                 710, 54, 60, 20, IDC_BULK_SET_BTN);
+                 710 + BULK_X_SHIFT, 54, 60, 20, IDC_BULK_SET_BTN);
 
         add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-                 470, 84, 110, 22, IDC_BULK_ON_BTN);
+                 470 + BULK_X_SHIFT, 84, 110, 22, IDC_BULK_ON_BTN);
         add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-                 590, 84, 110, 22, IDC_BULK_OFF_BTN);
+                 590 + BULK_X_SHIFT, 84, 110, 22, IDC_BULK_OFF_BTN);
 
         add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-                 470, 116, 90, 20, IDC_BULK_CLEAR_BTN);
+                 470 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_CLEAR_BTN);
         /* Select All's real value is the opposite case: select all,
          * then uncheck the few you want left out, instead of clicking
          * 12+ individual checkboxes by hand. */
         add_ctrl(hwnd, "BUTTON", "Select All", BS_OWNERDRAW | WS_TABSTOP,
-                 568, 116, 90, 20, IDC_BULK_SELECT_ALL_BTN);
+                 568 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_SELECT_ALL_BTN);
 
         add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
-                 790, 54, 84, 18, IDC_BULK_HIGH_BTN);
+                 790 + BULK_X_SHIFT, 54, 84, 18, IDC_BULK_HIGH_BTN);
         add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
-                 790, 76, 84, 18, IDC_BULK_MEDIUM_BTN);
+                 790 + BULK_X_SHIFT, 76, 84, 18, IDC_BULK_MEDIUM_BTN);
         add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
-                 790, 98, 84, 18, IDC_BULK_LOW_BTN);
+                 790 + BULK_X_SHIFT, 98, 84, 18, IDC_BULK_LOW_BTN);
         add_ctrl(hwnd, "BUTTON", "Off", BS_OWNERDRAW | WS_TABSTOP,
-                 790, 120, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
+                 790 + BULK_X_SHIFT, 120, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
     }
 
     /* Amplifier Temperature, right-aligned in the same header bar
