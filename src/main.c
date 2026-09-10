@@ -36,10 +36,12 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     168 /* was 180 - Amplifier Temperature's ADDR grid
-                            * chips shrunk 38->32px tall, tallest content
-                            * now bottoms out around y=156 */
-#define CONTENT_TOP  182 /* shifts down by the same 12px HEADER_H lost,
+#define HEADER_H     180 /* was 168 - Connection & Settings split Port
+                            * from Refresh/Connect back onto separate
+                            * rows and gained extra gap before Data
+                            * Bits/Parity, so it's the taller card again
+                            * (content bottoms out ~y=175) */
+#define CONTENT_TOP  194 /* shifts down by the same 12px HEADER_H grew,
                             * keeping the usual 8px gap below the panel */
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
@@ -1642,26 +1644,25 @@ static void build_controls(HWND hwnd) {
     /* Every row below is centered within this section's own ~310px-wide
      * span (roughly x=705-1015) instead of flush against its left
      * edge - each row's total width is computed, then its start x is
-     * (span_width - row_width) / 2 past the span's left edge. Port/
-     * Refresh/Connect merged back onto one row (matching Amplifier
-     * Temperature's already-compact shape) instead of Port alone with
-     * Refresh/Connect below - splitting them earlier made this card
-     * taller than it needed to be; one row is a bigger, more visible
-     * size cut than trimming gaps further would have been. Combo
-     * narrowed 160 -> 110 to make room for the buttons on the same
-     * row. */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 713, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 749, 34, 110, 140, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 867, 35, 64, 18, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 935, 35, 72, 18, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_CENTER | SS_NOPREFIX, 705, 60, 310, 16, IDC_CONN_STATUS_LBL);
+     * (span_width - row_width) / 2 past the span's left edge.
+     * Refresh/Connect moved back to their own row below Port (not
+     * sharing Port's row anymore) and Port widened back out now that
+     * it has the row to itself. Connected/Disconnected now left-
+     * aligned with the Port row's own start x instead of centered
+     * across the whole zone. Extra gap added between Baud and the
+     * Data Bits/Parity row below it. */
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 757, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 793, 34, 160, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 788, 60, 64, 18, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 860, 60, 72, 18, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 757, 86, 196, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 84, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 82, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 108, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 106, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 108, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 106, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 116, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 114, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 156, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 154, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 156, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 154, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
