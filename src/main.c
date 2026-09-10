@@ -504,6 +504,30 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             SelectObject(hdc, old_pen);
             DeleteObject(pen);
             SelectObject(hdc, old_brush);
+
+            /* A small circular "punch" cut out of each of the 4 corners
+             * - filled with the page background color (what's actually
+             * behind every panel/card in this app), not the card's own
+             * fill, so each corner reads as a literal hole rather than
+             * a decoration sitting on top of the card. */
+            {
+                const int r = 7;
+                POINT corners[4];
+                int ci;
+                corners[0].x = brc.left;  corners[0].y = brc.top;
+                corners[1].x = brc.right - CARD_SHADOW_PX;  corners[1].y = brc.top;
+                corners[2].x = brc.left;  corners[2].y = brc.bottom - CARD_SHADOW_PX;
+                corners[3].x = brc.right - CARD_SHADOW_PX;  corners[3].y = brc.bottom - CARD_SHADOW_PX;
+
+                old_brush = (HBRUSH)SelectObject(hdc, g_brush_page);
+                old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+                for (ci = 0; ci < 4; ci++) {
+                    Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
+                            corners[ci].x + r, corners[ci].y + r);
+                }
+                SelectObject(hdc, old_pen);
+                SelectObject(hdc, old_brush);
+            }
         }
 
         EndPaint(hwnd, &ps);
@@ -1469,6 +1493,14 @@ static void set_bulk_select_mode(bool on) {
         ShowWindow(GetDlgItem(g_hwnd, channel_select_id(i)), on ? SW_SHOW : SW_HIDE);
     }
     SetDlgItemTextA(g_hwnd, IDC_BULK_TOGGLE_BTN, on ? "Done" : "Select Channels");
+
+    /* Collapsed, this button is the only thing in an otherwise empty
+     * card, so it sits centered in it rather than pinned to the corner.
+     * Expanded, it moves to the row-1 corner slot that matches a Unit
+     * card's checkbox position (see build_controls()'s Bulk Actions
+     * block) so the rest of the layout still mirrors a channel card. */
+    MoveWindow(GetDlgItem(g_hwnd, IDC_BULK_TOGGLE_BTN),
+               on ? 740 : 605, on ? 22 : 81, 138, 22, TRUE);
 }
 
 static void bulk_apply_mode(uint8_t mode) {
@@ -2385,8 +2417,13 @@ static void build_controls(HWND hwnd) {
         add_header(hwnd, "Bulk Actions", 488, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
                  648, 26, 84, 16, IDC_BULK_SELECTED_LBL);
+        /* Starting position matches the collapsed (off) state - centered
+         * in the card, since that's all there is to look at until it's
+         * clicked. set_bulk_select_mode() moves it to the row-1 corner
+         * slot (matching a Unit card's checkbox position) once expanded,
+         * and back here when collapsed again. */
         add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
-                 740, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
+                 605, 81, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                                     470, 54, 230, 140, IDC_BULK_MODE_COMBO);
