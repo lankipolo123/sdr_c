@@ -187,11 +187,8 @@ static int g_spectrum_unit;
 
 /* Handles needed to reposition things on WM_SIZE that don't otherwise
  * have a retrievable control ID (channel_*_id() covers everything else
- * per-card - GetDlgItem() finds those directly). The 3 header card
- * panels (Connection & Settings / Bulk Actions / Amplifier Temperature)
- * aren't here - like the 16 channel cards, they stay fixed size/position
- * on resize rather than stretching, so nothing needs to re-find them
- * later. */
+ * per-card - GetDlgItem() finds those directly). */
+static HWND g_header_panel;
 static HWND g_sidebar_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
@@ -2259,21 +2256,15 @@ static void build_controls(HWND hwnd) {
     unsigned i;
     int idx;
 
-    /* App header row: 3 separate card panels (Connection & Settings /
-     * Bulk Actions / Amplifier Temperature) instead of one continuous
-     * bar - each gets its own rounded border + drop shadow via
-     * add_panel(), the same visual language as every channel card below,
-     * so this row actually reads as 3 cards sitting side by side rather
-     * than one flat strip of controls with no boundary between them.
-     * Sized to each section's own content plus a comfortable margin,
-     * not stretched to fill the row - same "fixed, not grown" choice
-     * already made for the 16 channel cards below (see
-     * relayout_for_size()'s comment). Content controls are still direct
-     * children of hwnd at fixed absolute positions, same as before -
-     * only the background box changed. */
-    add_panel(hwnd, 10, 6, 330, HEADER_H);
-    add_panel(hwnd, 454, 6, 440, HEADER_H);
-    add_panel(hwnd, 1007, 6, 326, HEADER_H);
+    /* App header bar: "Connection & Settings" heading (icon + title,
+     * same as it had back when this section lived in the sidebar), then
+     * its controls stacked as separate rows the same way they were in
+     * the sidebar - lengthy, not widy, rather than one row spread thin
+     * across the full header width. Panel itself still spans the full
+     * width (same 6px top margin and 8px gap-before-content as every
+     * other panel-to-panel spacing below) - the content just doesn't
+     * try to fill it. */
+    g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -2530,24 +2521,19 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 #undef PLACE
 }
 
-/* Recomputes the whole layout for a new client size: only the sidebar
- * panel stretches vertically to fill the taller client area - the
- * header's 3 card panels and the 16 channel cards all stay fixed at
- * their designed size no matter how big the window gets (maximized/
- * fullscreen included). Extra window space just stays empty background
- * rather than growing anything - keeps the grid compact and readable
- * on a large monitor instead of every card ballooning to fill it.
- * (Cards used to grow to fill the available space; that's what was
- * making them look oversized at fullscreen - removed.) Never shrinks
- * below the designed CARD_W x CARD_H (see WM_GETMINMAXINFO, which stops
- * the window itself getting that small). */
+/* Recomputes the whole layout for a new client size: only the header
+ * bar and sidebar panel stretch horizontally to fill the wider client
+ * area - the 16 cards stay fixed at the designed CARD_W x CARD_H no
+ * matter how big the window gets (maximized/fullscreen included).
+ * Extra window space just stays empty background rather than growing
+ * the cards - keeps the grid compact and readable on a large monitor
+ * instead of every card ballooning to fill it. (Cards used to grow to
+ * fill the available space; that's what was making them look oversized
+ * at fullscreen - removed.) Never shrinks below the designed CARD_W x
+ * CARD_H (see WM_GETMINMAXINFO, which stops the window itself getting
+ * that small). */
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int i;
-    (void)client_w; /* header cards no longer stretch to fill horizontal
-                      * space, so the new client width doesn't factor
-                      * into this layout - kept as a parameter since
-                      * callers still have it and WM_SIZE's (w, h)
-                      * pairing reads naturally at call sites. */
     (void)client_h; /* cards no longer grow to fill vertical space, so the
                       * new client height doesn't factor into this layout -
                       * kept as a parameter since callers still have it and
@@ -2557,6 +2543,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         return;
     }
 
+    MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
