@@ -1,3 +1,44 @@
 #include "resource.h"
+#include <winuser.h>
 
 IDI_APP_ICON ICON "app.ico"
+
+/* An application manifest, not just an icon, and a full VERSIONINFO
+ * block below (Company/Product/Description/Version) - a completely
+ * bare, stripped, unsigned exe with zero of this metadata is exactly
+ * the profile Defender/AV heuristics flag as suspicious for a new,
+ * frequently-changing file. Neither of these makes the exe "trusted"
+ * on their own (there's no substitute for actually code-signing it),
+ * but a real publisher/product identity and no missing manifest
+ * meaningfully cuts down heuristic false positives compared to a file
+ * that looks like it's deliberately hiding everything about itself. */
+1 RT_MANIFEST "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "lankipolo123"
+            VALUE "FileDescription", "Digital Noise Configuration - Multi"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "digital_noise_config_multi"
+            VALUE "LegalCopyright", "lankipolo123"
+            VALUE "OriginalFilename", "digital_noise_config_multi.exe"
+            VALUE "ProductName", "Digital Noise Configuration - Multi"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
