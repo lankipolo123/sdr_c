@@ -34,9 +34,12 @@ Each of the 16 channel cards matches the pattern used by
 - A vertical level trackbar with High/Medium/Low/Off tick labels (the
   active one highlighted), in place of a plain dropdown.
 
-Frequency/Bandwidth are **not** per-channel controls here (matching the
-reference apps) - every Signal Control frame uses a fixed frequency and
-bandwidth; only mode and power level are real per-channel selections.
+Bandwidth is **not** a per-channel control (matching the reference
+apps) - every Signal Control frame uses a fixed `CHANNEL_BLIND_BANDWIDTH_MHZ`.
+Frequency **is** real per-channel: each of the 16 channels has its own
+actual operating frequency (`channel_freq_mhz()` in `channels.c`), not
+one shared default. Mode and power level are also real per-channel
+selections, same as before.
 
 ## DLL integration
 

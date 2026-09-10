@@ -12,10 +12,12 @@
  * would make the whole panel feel unresponsive for no real gain in
  * trustworthiness.
  *
- * Frequency/bandwidth are NOT per-channel controls here (matching the
- * reference apps again) - every Signal Control frame uses the fixed
- * CHANNEL_BLIND_FREQ_MHZ/CHANNEL_BLIND_BANDWIDTH_MHZ. Only mode and
- * power level are real per-channel selections.
+ * Bandwidth is NOT a per-channel control (matching the reference apps) -
+ * every Signal Control frame uses the fixed CHANNEL_BLIND_BANDWIDTH_MHZ.
+ * Frequency IS real per-channel: each of the 16 channels has its own
+ * actual operating frequency (see channel_freq_mhz()), not one shared
+ * default - only bandwidth stays a single fixed value across all of
+ * them.
  *
  * All 16 channels share one physical serial connection, so sends queue
  * through a simple FIFO - only one frame is ever in flight at a time.
@@ -29,7 +31,6 @@
 #define MAX_CHANNELS 16
 #define CHANNEL_SEND_SETTLE_MS 300
 
-#define CHANNEL_BLIND_FREQ_MHZ      2450
 #define CHANNEL_BLIND_BANDWIDTH_MHZ 100
 
 #define LEVEL_OFF    0
@@ -64,6 +65,11 @@ void channel_set_mode(int index, uint8_t mode);
  * exposed for UI code that needs to show the real, accurate commanded
  * power rather than just the Low/Medium/High name. */
 int channel_level_power_db(int level);
+
+/* Each channel's real, fixed operating frequency in MHz (index 0..15 =
+ * Unit 1..16) - exposed for UI code that needs to show the real,
+ * accurate commanded frequency. */
+int channel_freq_mhz(int index);
 
 /* Call every timer tick: starts the next queued send if the bus is free,
  * and applies a settled send's state once its settle delay has passed. */

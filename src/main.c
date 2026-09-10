@@ -1836,9 +1836,10 @@ static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM 
             char caption[64];
             if (ch->output_on) {
                 wsprintfA(caption, "%s - %dMHz - %ddBm", proto_mode_name(ch->mode),
-                          CHANNEL_BLIND_FREQ_MHZ, channel_level_power_db(ch->level));
+                          channel_freq_mhz(g_spectrum_unit), channel_level_power_db(ch->level));
             } else {
-                wsprintfA(caption, "%s - STANDBY", proto_mode_name(ch->mode));
+                wsprintfA(caption, "%s - %dMHz - STANDBY", proto_mode_name(ch->mode),
+                          channel_freq_mhz(g_spectrum_unit));
             }
             draw_channel_spectrum(hdc, rc, ch, NULL, caption);
         }

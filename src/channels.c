@@ -82,6 +82,18 @@ int channel_level_power_db(int level) {
     }
 }
 
+/* Each channel's real, fixed operating frequency (MHz) - Unit 1..16,
+ * confirmed real values, not a shared guess like the old
+ * CHANNEL_BLIND_FREQ_MHZ default this replaced. */
+static const int CHANNEL_FREQ_MHZ[MAX_CHANNELS] = {
+    735, 859, 920, 1469, 1795, 2041, 2325, 2375,
+    2450, 3375, 3550, 3725, 5250, 5450, 5650, 5875
+};
+
+int channel_freq_mhz(int index) {
+    return CHANNEL_FREQ_MHZ[index];
+}
+
 static void enqueue(int index, const ProtoFrame *frame, const char *label,
                      bool set_output, bool output_value,
                      bool set_level, int level_value,
@@ -148,7 +160,7 @@ void channel_set_level(int index, int level) {
     }
 
     proto_build_signal_control(&frame, ch->address, ch->mode,
-                                CHANNEL_BLIND_FREQ_MHZ, CHANNEL_BLIND_BANDWIDTH_MHZ, power_db);
+                                (uint16_t)channel_freq_mhz(index), CHANNEL_BLIND_BANDWIDTH_MHZ, power_db);
     wsprintfA(label, "Level -> %d", level);
     enqueue(index, &frame, label, true, true, true, level, false, 0);
     ch->last_level = level;
@@ -163,7 +175,7 @@ void channel_set_mode(int index, uint8_t mode) {
     const char *mode_name;
 
     proto_build_signal_control(&frame, ch->address, mode,
-                                CHANNEL_BLIND_FREQ_MHZ, CHANNEL_BLIND_BANDWIDTH_MHZ, power_db);
+                                (uint16_t)channel_freq_mhz(index), CHANNEL_BLIND_BANDWIDTH_MHZ, power_db);
     mode_name = proto_mode_name(mode);
     wsprintfA(label, "Mode -> %s", mode_name ? mode_name : "?");
     enqueue(index, &frame, label, false, false, false, 0, true, mode);
