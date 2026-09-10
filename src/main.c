@@ -1653,26 +1653,25 @@ static void build_controls(HWND hwnd) {
      * span (roughly x=705-1015) instead of flush against its left
      * edge - each row's total width is computed, then its start x is
      * (span_width - row_width) / 2 past the span's left edge.
-     * Refresh/Connect moved back to their own row below Port (not
-     * sharing Port's row anymore). Port combo kept compact (90px,
-     * matching Baud below it) rather than widened just because it has
-     * the row to itself - direct request was just "com port, connect/
-     * disconnect", not a wide dropdown. Connected/Disconnected left-
-     * aligned with the Port row's own start x instead of centered
-     * across the whole zone. Extra gap added between Baud and the
-     * Data Bits/Parity row below it. */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 797, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 833, 34, 90, 140, IDC_PORT_COMBO));
+     * Refresh/Connect on their own row below Port. Port combo kept
+     * compact (90px, matching Baud below it) - direct request was
+     * just "com port, connect/disconnect", not a wide dropdown.
+     * Connected/Disconnected moved onto the same row as Port itself
+     * (was its own row below the buttons) rather than a separate row.
+     * Extra gap kept between Baud and the Data Bits/Parity row below
+     * it. */
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 746, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 782, 34, 90, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 884, 36, 100, 16, IDC_CONN_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 788, 60, 64, 18, IDC_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 860, 60, 72, 18, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 797, 86, 196, 16, IDC_CONN_STATUS_LBL);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 116, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 114, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 156, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 154, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 156, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 154, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 96, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 94, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 146, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 144, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 146, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 144, 70, 100, IDC_PARITY_COMBO));
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
