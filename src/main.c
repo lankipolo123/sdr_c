@@ -55,7 +55,7 @@
  * added to every one of that section's own x-coordinates below, rather
  * than hand-recomputing each one, so the original per-control layout
  * numbers stay visible/auditable in the source. */
-#define CONN_X_SHIFT 205
+#define CONN_X_SHIFT 225
 #define BULK_X_SHIFT 80
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
