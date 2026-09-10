@@ -201,6 +201,15 @@ static HWND g_card_mode_lbl[MAX_CHANNELS]; /* muted mode name next to "Unit N",
                                               * applied mode (ch->mode), not
                                               * the dropdown's uncommitted
                                               * selection */
+/* Each channel's mode combo's readonly-theming overlay windows (see
+ * make_combo_readonly_ex) - separate sibling windows, not children of
+ * the combo, so a bare InvalidateRect on the combo itself doesn't touch
+ * them. Not tracking these was the actual cause of a reported "white
+ * dropdown" - selecting/deselecting a card invalidates+repaints it via
+ * ui_invalidate_card(), and without these in that list, repaint timing
+ * could leave the overlay unpainted, exposing the native COMBOBOX's own
+ * white arrow/bevel underneath instead of the dark themed one. */
+static HWND g_card_combo_overlays[MAX_CHANNELS][5];
 static HWND g_sensor_chip[SENSOR_MAX_UNITS];
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
@@ -1377,12 +1386,18 @@ static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_ST
  * timing. Call this instead of invalidating g_card_panel[index] alone,
  * anywhere a card's panel needs to repaint. */
 static void ui_invalidate_card(int index) {
+    int oi;
     InvalidateRect(g_card_panel[index], NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_select_id(index)), NULL, FALSE);
     InvalidateRect(g_card_icon[index], NULL, FALSE);
     InvalidateRect(g_card_header[index], NULL, FALSE);
     InvalidateRect(g_card_mode_lbl[index], NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_mode_id(index)), NULL, FALSE);
+    for (oi = 0; oi < 5; oi++) {
+        if (g_card_combo_overlays[index][oi]) {
+            InvalidateRect(g_card_combo_overlays[index][oi], NULL, FALSE);
+        }
+    }
     InvalidateRect(GetDlgItem(g_hwnd, channel_set_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
@@ -1413,7 +1428,7 @@ static void ui_invalidate_card(int index) {
  * the big comment above combo_arrow_subclass_proc). Set/ON/OFF/gauge
  * are all custom-painted, so they stay fully themed either way. */
 static const int BULK_ACTION_BTN_IDS[] = {
-    IDC_BULK_CLEAR_BTN, IDC_BULK_SET_BTN, IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
+    IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN, IDC_BULK_SET_BTN, IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
     IDC_BULK_HIGH_BTN, IDC_BULK_MEDIUM_BTN, IDC_BULK_LOW_BTN, IDC_BULK_LEVEL_OFF_BTN
 };
 #define BULK_ACTION_BTN_COUNT (sizeof(BULK_ACTION_BTN_IDS) / sizeof(BULK_ACTION_BTN_IDS[0]))
@@ -1472,8 +1487,23 @@ static void bulk_clear_selection(void) {
     ui_refresh_bulk_selected_label();
 }
 
+/* Select-all's real value isn't "apply to all 16 at once" (rare) - it's
+ * making the opposite case fast: select all, then uncheck the handful
+ * you actually want left out, instead of clicking 12+ individual
+ * checkboxes to build the same set by hand. */
+static void bulk_select_all(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (!g_channel_selected[i]) {
+            g_channel_selected[i] = true;
+            ui_invalidate_card(i);
+        }
+    }
+    ui_refresh_bulk_selected_label();
+}
+
 static const int BULK_BAR_SHOWHIDE_IDS[] = {
-    IDC_BULK_SELECTED_LBL, IDC_BULK_CLEAR_BTN, IDC_BULK_MODE_COMBO, IDC_BULK_SET_BTN,
+    IDC_BULK_SELECTED_LBL, IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN, IDC_BULK_MODE_COMBO, IDC_BULK_SET_BTN,
     IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN, IDC_BULK_HIGH_BTN, IDC_BULK_MEDIUM_BTN,
     IDC_BULK_LOW_BTN, IDC_BULK_LEVEL_OFF_BTN
 };
@@ -1844,7 +1874,7 @@ static void add_channel_card(HWND hwnd, int index) {
     }
     SendMessageA(mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
-    make_combo_readonly(mode_combo);
+    make_combo_readonly_ex(mode_combo, g_card_combo_overlays[index]);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
              x + 94, y + 24, 40, 18, channel_set_id(index));
@@ -2455,6 +2485,11 @@ static void build_controls(HWND hwnd) {
 
         add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
                  470, 116, 90, 20, IDC_BULK_CLEAR_BTN);
+        /* Select All's real value is the opposite case: select all,
+         * then uncheck the few you want left out, instead of clicking
+         * 12+ individual checkboxes by hand. */
+        add_ctrl(hwnd, "BUTTON", "Select All", BS_OWNERDRAW | WS_TABSTOP,
+                 568, 116, 90, 20, IDC_BULK_SELECT_ALL_BTN);
 
         add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
                  790, 54, 84, 18, IDC_BULK_HIGH_BTN);
@@ -2856,6 +2891,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
                 bulk_clear_selection();
+                return 0;
+            }
+            if (id == IDC_BULK_SELECT_ALL_BTN && code == BN_CLICKED) {
+                bulk_select_all();
                 return 0;
             }
             if (id == IDC_BULK_SET_BTN && code == BN_CLICKED) {
