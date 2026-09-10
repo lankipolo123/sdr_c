@@ -472,25 +472,45 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         SelectObject(hdc, old_brush);
 
         /* A small circular "punch" cut out of each of the whole header
-         * bar's 4 corners, sitting right on the corner itself (not
-         * inset away from it) so it reads as a literal notch cut into
-         * the bar's edge, the way a die-cut hole in a real card/ticket
-         * corner would - filled with the actual tiled dot-pattern brush
-         * (not a flat color) so the page's own dot texture visibly
-         * continues behind the hole, rather than a plain disc sitting
-         * on top of the bar. Header only, not the sidebar panel below
-         * (same subclass proc, but this is scoped to g_header_panel
-         * specifically) - direct request was for the whole header, not
-         * the Bulk Actions card nested inside it. */
+         * bar's 4 corners, sitting on the panel's own rounded-corner
+         * ARC (not the sharp rectangular corner point the panel's
+         * RoundRect calls never actually draw into) so it reads as a
+         * notch cut into the bar's rounded edge, the way a die-cut hole
+         * in a real card/ticket corner would - filled with the actual
+         * tiled dot-pattern brush (not a flat color) so the page's own
+         * dot texture visibly continues behind the hole, rather than a
+         * plain disc sitting on top of the bar.
+         *
+         * Centering it exactly on the sharp corner (rc.left, rc.top
+         * etc.) was tried first and was wrong two ways: visually, most
+         * of the circle then sits in the square corner area the
+         * rounded panel never fills in the first place, so it read as
+         * a free-floating dot outside the panel rather than a notch
+         * cut into it - and separately, Wine's Ellipse() with a
+         * pattern-brush fill silently draws nothing at all once part
+         * of its bounding box goes negative/out-of-window (confirmed by
+         * testing: swapping to a plain solid-color fill made all 4
+         * corners render fine at that same position, so a bounding box
+         * that leaves the window is what broke pattern-brush
+         * specifically, not a real "off"). Insetting onto the rounded
+         * arc itself fixes both at once - r/sqrt(2)-ish along the
+         * corner's own 45-degree diagonal keeps the whole ellipse
+         * on-panel while still visibly overlapping the curve.
+         *
+         * Header only, not the sidebar panel below (same subclass
+         * proc, but this is scoped to g_header_panel specifically) -
+         * direct request was for the whole header, not the Bulk
+         * Actions card nested inside it. */
         if (hwnd == g_header_panel) {
             const int r = 7;
+            const int inset = 8; /* ~PANEL_CORNER_DIAMETER/2 * (1 - 1/sqrt(2)) */
             POINT corners[4];
             POINT old_org;
             int ci;
-            corners[0].x = rc.left;  corners[0].y = rc.top;
-            corners[1].x = rc.right - PANEL_SHADOW_PX;  corners[1].y = rc.top;
-            corners[2].x = rc.left;  corners[2].y = rc.bottom - PANEL_SHADOW_PX;
-            corners[3].x = rc.right - PANEL_SHADOW_PX;  corners[3].y = rc.bottom - PANEL_SHADOW_PX;
+            corners[0].x = rc.left + inset;  corners[0].y = rc.top + inset;
+            corners[1].x = rc.right - PANEL_SHADOW_PX - inset;  corners[1].y = rc.top + inset;
+            corners[2].x = rc.left + inset;  corners[2].y = rc.bottom - PANEL_SHADOW_PX - inset;
+            corners[3].x = rc.right - PANEL_SHADOW_PX - inset;  corners[3].y = rc.bottom - PANEL_SHADOW_PX - inset;
 
             /* This panel's own client (0,0) sits at (SIDEBAR_X, 6) in
              * the main window - phase-align the pattern brush to that
