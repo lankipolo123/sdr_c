@@ -482,19 +482,25 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             brc.right = 884;
             brc.bottom = 164;
 
+            /* CARD_CORNER_DIAMETER/CARD_SHADOW_PX, not the PANEL_*
+             * constants used above for the outer header panel itself -
+             * direct request was for this to match a channel card's own
+             * look exactly (smaller, tighter corner radius and a
+             * shallower shadow than the bigger header/sidebar panels
+             * use), not just "a border of some kind". */
             old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
             pen = CreatePen(PS_SOLID, 1, g_shadow_color);
             old_pen = (HPEN)SelectObject(hdc, pen);
             RoundRect(hdc, brc.left, brc.top, brc.right, brc.bottom,
-                      PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
+                      CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
             SelectObject(hdc, old_pen);
             DeleteObject(pen);
 
             SelectObject(hdc, g_brush_panel);
             pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
             old_pen = (HPEN)SelectObject(hdc, pen);
-            RoundRect(hdc, brc.left, brc.top, brc.right - PANEL_SHADOW_PX, brc.bottom - PANEL_SHADOW_PX,
-                      PANEL_CORNER_DIAMETER, PANEL_CORNER_DIAMETER);
+            RoundRect(hdc, brc.left, brc.top, brc.right - CARD_SHADOW_PX, brc.bottom - CARD_SHADOW_PX,
+                      CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
             SelectObject(hdc, old_pen);
             DeleteObject(pen);
             SelectObject(hdc, old_brush);
