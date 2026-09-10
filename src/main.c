@@ -472,30 +472,34 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         SelectObject(hdc, old_brush);
 
         /* A small circular "punch" cut out of each of the whole header
-         * bar's 4 corners - filled with the page background color (what's
-         * actually behind every panel/card in this app), not the panel's
-         * own fill, so each corner reads as a literal hole rather than a
-         * decoration sitting on top of the bar. Header only, not the
-         * sidebar panel below (same subclass proc, but this is scoped to
-         * g_header_panel specifically) - direct request was for the
-         * whole header, not the Bulk Actions card nested inside it. */
+         * bar's 4 corners, sitting right on the corner itself (not
+         * inset away from it) so it reads as a literal notch cut into
+         * the bar's edge, the way a die-cut hole in a real card/ticket
+         * corner would - filled with the actual tiled dot-pattern brush
+         * (not a flat color) so the page's own dot texture visibly
+         * continues behind the hole, rather than a plain disc sitting
+         * on top of the bar. Header only, not the sidebar panel below
+         * (same subclass proc, but this is scoped to g_header_panel
+         * specifically) - direct request was for the whole header, not
+         * the Bulk Actions card nested inside it. */
         if (hwnd == g_header_panel) {
-            /* Inset by r (not centered exactly on the corner point) - a
-             * circle centered right on the edge gets half its area
-             * clipped away by the window's own bounds, so it rendered
-             * as a partial bite instead of a full circle. Moving each
-             * center in by the radius keeps the whole circle inside the
-             * panel, fully visible. */
             const int r = 7;
-            const int inset = r + 2;
             POINT corners[4];
+            POINT old_org;
             int ci;
-            corners[0].x = rc.left + inset;  corners[0].y = rc.top + inset;
-            corners[1].x = rc.right - PANEL_SHADOW_PX - inset;  corners[1].y = rc.top + inset;
-            corners[2].x = rc.left + inset;  corners[2].y = rc.bottom - PANEL_SHADOW_PX - inset;
-            corners[3].x = rc.right - PANEL_SHADOW_PX - inset;  corners[3].y = rc.bottom - PANEL_SHADOW_PX - inset;
+            corners[0].x = rc.left;  corners[0].y = rc.top;
+            corners[1].x = rc.right - PANEL_SHADOW_PX;  corners[1].y = rc.top;
+            corners[2].x = rc.left;  corners[2].y = rc.bottom - PANEL_SHADOW_PX;
+            corners[3].x = rc.right - PANEL_SHADOW_PX;  corners[3].y = rc.bottom - PANEL_SHADOW_PX;
 
-            old_brush = (HBRUSH)SelectObject(hdc, g_brush_page);
+            /* This panel's own client (0,0) sits at (SIDEBAR_X, 6) in
+             * the main window - phase-align the pattern brush to that
+             * offset so the dots inside each hole are continuous with
+             * the real background dots just outside the panel, instead
+             * of the tile restarting at this window's own (0,0) and
+             * visibly seaming against the surrounding pattern. */
+            SetBrushOrgEx(hdc, -(SIDEBAR_X % DOT_GRID_SPACING), -(6 % DOT_GRID_SPACING), &old_org);
+            old_brush = (HBRUSH)SelectObject(hdc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
             old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
             for (ci = 0; ci < 4; ci++) {
                 Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
@@ -503,6 +507,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             }
             SelectObject(hdc, old_pen);
             SelectObject(hdc, old_brush);
+            SetBrushOrgEx(hdc, old_org.x, old_org.y, NULL);
         }
 
         /* Bulk Actions gets its own inset card within this same header
