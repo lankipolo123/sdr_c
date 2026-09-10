@@ -3083,6 +3083,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     if (dis->CtlID == IDC_CONNECT_BTN || dis->CtlID == IDC_SENSOR_CONNECT_BTN) {
                         GetWindowTextA(dis->hwndItem, text, sizeof(text));
                         fill = (lstrcmpiA(text, "Disconnect") == 0) ? g_brush_disconnected : g_brush_connected;
+                    } else if (dis->CtlID == IDC_BULK_ON_BTN) {
+                        /* Same green/red as a channel card's own ON/OFF
+                         * pair - Bulk's ON/OFF are one-shot actions
+                         * rather than a toggle reflecting a single
+                         * channel's current state, so there's no "which
+                         * one is active" to light up; they just stay
+                         * green/red always, so the color still reads as
+                         * "what this does" the same way it does on every
+                         * card below. */
+                        fill = g_brush_connected;
+                    } else if (dis->CtlID == IDC_BULK_OFF_BTN) {
+                        fill = g_brush_disconnected;
                     }
                     {
                         HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
