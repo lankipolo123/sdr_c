@@ -500,12 +500,17 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
              * visibly seaming against the surrounding pattern. */
             SetBrushOrgEx(hdc, -(SIDEBAR_X % DOT_GRID_SPACING), -(6 % DOT_GRID_SPACING), &old_org);
             old_brush = (HBRUSH)SelectObject(hdc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
-            old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+            /* A visible ring around the hole (not NULL_PEN/borderless) -
+             * a real die-cut hole has a defined edge, not just a patch
+             * of texture with no boundary. */
+            pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            old_pen = (HPEN)SelectObject(hdc, pen);
             for (ci = 0; ci < 4; ci++) {
                 Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
                         corners[ci].x + r, corners[ci].y + r);
             }
             SelectObject(hdc, old_pen);
+            DeleteObject(pen);
             SelectObject(hdc, old_brush);
             SetBrushOrgEx(hdc, old_org.x, old_org.y, NULL);
         }
