@@ -25,7 +25,14 @@
  * (toggles a highlighted border), then one of these applies to every
  * selected channel at once instead of clicking through cards one at a
  * time. Same gating as each card's own controls: OFF always works even
- * kill-switch-tripped, ON/Set/level skip a tripped channel. */
+ * kill-switch-tripped, ON/Set/level skip a tripped channel.
+ *
+ * Off by default - single-channel operation is the normal/primary way
+ * to use this app, not bulk. IDC_BULK_TOGGLE_BTN is the only thing
+ * visible until clicked; it reveals the rest of this bar AND every
+ * card's selection checkbox. Clicking it again hides everything again
+ * and clears whatever was selected. */
+#define IDC_BULK_TOGGLE_BTN     1039
 #define IDC_BULK_SELECTED_LBL   1040
 #define IDC_BULK_CLEAR_BTN      1041
 #define IDC_BULK_MODE_COMBO     1042
