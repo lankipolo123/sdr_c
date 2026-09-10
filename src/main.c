@@ -1597,6 +1597,25 @@ static void save_settings(void) {
 
     GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, buf, sizeof(buf));
     WritePrivateProfileStringA("Sensor", "Port", buf, path);
+
+    /* Per-channel mode + resume-to level, never saved before - reopening
+     * the app silently reset every channel back to White Noise/no level
+     * with no way to get a saved setup back. Deliberately NOT saving/
+     * restoring output_on: a channel comes back ready with its mode and
+     * level remembered, but transmission always requires an explicit ON
+     * click after launch, never auto-resumes on its own. */
+    {
+        int i;
+        char section[8];
+        for (i = 0; i < MAX_CHANNELS; i++) {
+            const ChannelState *ch = channels_get(i);
+            wsprintfA(section, "Ch%d", i + 1);
+            wsprintfA(buf, "%u", (unsigned)ch->mode);
+            WritePrivateProfileStringA(section, "Mode", buf, path);
+            wsprintfA(buf, "%d", ch->last_level);
+            WritePrivateProfileStringA(section, "Level", buf, path);
+        }
+    }
 }
 
 /* Call after build_controls() has populated every combo's item list -
@@ -1623,6 +1642,35 @@ static void load_settings(void) {
     }
     if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) > 0) {
         select_combo_by_text(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), buf);
+    }
+}
+
+/* Must run AFTER channels_init() (which sets every channel back to its
+ * hardcoded defaults) and after build_controls() (which needs the mode
+ * combos/labels to already exist) - restores each channel's saved mode/
+ * resume-to level via channel_restore_saved() (data only, no serial
+ * send - see its own comment), then mirrors that into the mode combo's
+ * selection and the card's mode label so the UI actually shows it.
+ * GetPrivateProfileIntA's own default (-1) means "key missing", so a
+ * channel with no saved entry is left exactly as channels_init() set it. */
+static void load_channel_settings(void) {
+    char path[MAX_PATH + 8];
+    char section[8];
+    int i;
+
+    get_ini_path(path);
+
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        int mode, level;
+        wsprintfA(section, "Ch%d", i + 1);
+        mode = GetPrivateProfileIntA(section, "Mode", -1, path);
+        level = GetPrivateProfileIntA(section, "Level", -1, path);
+        if (mode < 0 || level < 0) {
+            continue;
+        }
+        channel_restore_saved(i, (uint8_t)mode, level);
+        SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
+        SetWindowTextA(g_card_mode_lbl[i], proto_mode_name((uint8_t)mode));
     }
 }
 
@@ -1903,6 +1951,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ccb.on_error = conn_on_error;
             conn_init(&g_conn, ccb);
             channels_init(&g_conn);
+            load_channel_settings(); /* after channels_init(), which it would otherwise overwrite */
             sensor_init(&g_sensor);
             {
                 int addr_i;

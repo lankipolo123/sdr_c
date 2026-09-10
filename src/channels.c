@@ -46,6 +46,25 @@ void channels_init(Connection *conn) {
     }
 }
 
+/* Restores a saved mode/level from the .ini directly into channel state,
+ * without going through channel_set_mode()/channel_set_level() - those
+ * queue a real serial send, which would be wrong here: there's no
+ * connection open yet at load time, and even once connected, the whole
+ * point of a saved setting is to be ready without transmitting anything
+ * until the user explicitly presses ON (never auto-resume RF output on
+ * launch). Leaves output_on/level at their already-initialized OFF
+ * state - only last_level (what ON will resume to) and mode change. */
+void channel_restore_saved(int index, uint8_t mode, int last_level) {
+    if (last_level < LEVEL_LOW || last_level > LEVEL_HIGH) {
+        return;
+    }
+    if (mode >= PROTO_MODE_COUNT) {
+        return;
+    }
+    g_channels[index].mode = mode;
+    g_channels[index].last_level = last_level;
+}
+
 const ChannelState *channels_get(int index) {
     return &g_channels[index];
 }

@@ -1,6 +1,7 @@
 *.exe
 *.o
 *.obj
+*.ini
 
 # Transit.dll is a proprietary vendor DLL, never committed - same rule
 # sdr_app's .gitignore follows for it.
