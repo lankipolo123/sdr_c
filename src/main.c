@@ -430,7 +430,15 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
 }
 
 static HWND add_panel(HWND parent, int x, int y, int w, int h) {
-    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, 0);
+    /* WS_CLIPSIBLINGS - without it, this panel's own background repaint
+     * isn't clipped away from higher-z-order sibling controls sitting
+     * on top of it, so it can paint straight over them (see
+     * add_card_panel()'s comment - same bug, same fix, just the header/
+     * sidebar panels instead of a channel card). Only added here (and
+     * on add_card_panel below), not app-wide - a blanket add broke
+     * painting everywhere else, this app has too many controls placed
+     * at genuinely overlapping positions expecting no clipping. */
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | WS_CLIPSIBLINGS, x, y, w, h, 0);
     if (ctrl) {
         if (!g_panel_orig_proc) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
@@ -484,7 +492,15 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
 }
 
 static HWND add_card_panel(HWND parent, int x, int y, int w, int h, int index) {
-    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, 0);
+    /* WS_CLIPSIBLINGS - see add_panel()'s comment above. This is the
+     * control that actually caused the reported bug: its repaint is
+     * invalidated every time this channel's output_on flips (see
+     * ui_refresh_channel()), and without this flag that repaint drew
+     * straight over the title/mode label/mode combo/Set button sitting
+     * on top of it, with nothing telling them to repaint themselves
+     * afterward - "Unit N" and its mode row would just go blank the
+     * next time the channel turned on or off. */
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | WS_CLIPSIBLINGS, x, y, w, h, 0);
     if (ctrl) {
         if (!g_panel_orig_proc) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
