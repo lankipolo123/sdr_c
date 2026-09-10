@@ -21,17 +21,14 @@
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 
-/* Spectrum preview panel - sits in the sidebar box above Activity Log
+/* Signal Status panel - sits in the sidebar box above Activity Log
  * (the space that was always "reserved for other features" - see the
- * comment above g_sidebar_panel's creation in main.c). Not a real
- * capture, just a quick illustrative read on what's live: either all
- * 16 channels as a small-multiples grid, or one channel's mode-shaped
- * trace blown up full-size. */
-#define IDC_SPECTRUM_PREV_BTN    1030
-#define IDC_SPECTRUM_NEXT_BTN    1031
-#define IDC_SPECTRUM_UNIT_LBL    1032
-#define IDC_SPECTRUM_ALL_BTN     1033
-#define IDC_SPECTRUM_PLOT        1034
+ * comment above g_sidebar_panel's creation in main.c). Lists every
+ * channel's actual commanded RF parameters (mode, power, the fixed
+ * blind-send frequency, on/off) straight from ChannelState - real
+ * data, not a simulated graph (this app has no receiver, so there's
+ * nothing to actually plot). */
+#define IDC_SIGNAL_STATUS_LISTBOX  1030
 
 #define ID_POLL_TIMER        1
 

@@ -60,6 +60,11 @@ void channel_turn_output_off(int index);
 void channel_set_level(int index, int level); /* LEVEL_OFF turns output off */
 void channel_set_mode(int index, uint8_t mode);
 
+/* The actual dBm value a level commands (LOW=-12, MEDIUM=-6, HIGH=0) -
+ * exposed for UI code that needs to show the real, accurate commanded
+ * power rather than just the Low/Medium/High name. */
+int channel_level_power_db(int level);
+
 /* Call every timer tick: starts the next queued send if the bus is free,
  * and applies a settled send's state once its settle delay has passed. */
 void channels_poll(void);

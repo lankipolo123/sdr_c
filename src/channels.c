@@ -73,7 +73,7 @@ const ChannelState *channels_get(int index) {
     return &g_channels[index];
 }
 
-static int level_to_power_db(int level) {
+int channel_level_power_db(int level) {
     switch (level) {
         case LEVEL_LOW:    return -12;
         case LEVEL_MEDIUM: return -6;
@@ -134,7 +134,7 @@ void channel_set_level(int index, int level) {
         return;
     }
 
-    power_db = level_to_power_db(level);
+    power_db = channel_level_power_db(level);
     power_code = proto_power_code(power_db);
     (void)power_code; /* proto_build_signal_control re-derives this itself */
 
@@ -157,7 +157,7 @@ void channel_set_level(int index, int level) {
 void channel_set_mode(int index, uint8_t mode) {
     ChannelState *ch = &g_channels[index];
     int level = (ch->level != LEVEL_OFF) ? ch->level : ch->last_level;
-    int power_db = level_to_power_db(level);
+    int power_db = channel_level_power_db(level);
     ProtoFrame frame;
     char label[48];
     const char *mode_name;
