@@ -1654,16 +1654,18 @@ static void build_controls(HWND hwnd) {
      * edge - each row's total width is computed, then its start x is
      * (span_width - row_width) / 2 past the span's left edge.
      * Refresh/Connect moved back to their own row below Port (not
-     * sharing Port's row anymore) and Port widened back out now that
-     * it has the row to itself. Connected/Disconnected now left-
+     * sharing Port's row anymore). Port combo kept compact (90px,
+     * matching Baud below it) rather than widened just because it has
+     * the row to itself - direct request was just "com port, connect/
+     * disconnect", not a wide dropdown. Connected/Disconnected left-
      * aligned with the Port row's own start x instead of centered
      * across the whole zone. Extra gap added between Baud and the
      * Data Bits/Parity row below it. */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 757, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 793, 34, 160, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 797, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 833, 34, 90, 140, IDC_PORT_COMBO));
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 788, 60, 64, 18, IDC_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 860, 60, 72, 18, IDC_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 757, 86, 196, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 797, 86, 196, 16, IDC_CONN_STATUS_LBL);
 
     add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 116, 34, 16, 0);
     make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 114, 90, 140, IDC_BAUD_COMBO));
