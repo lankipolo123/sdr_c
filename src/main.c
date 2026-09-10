@@ -880,12 +880,18 @@ static void ui_show_warning(const char *message) {
 
 /* ---- connection -> UI callbacks ---- */
 
+/* Defined below, once channel_mode_id()/channel_set_id()/etc. exist -
+ * forward-declared here so conn_on_connected_changed() can gate every
+ * channel control on the RS422 link the instant it changes. */
+static void set_channel_controls_enabled(bool enabled);
+
 static void conn_on_connected_changed(bool connected, void *ctx) {
     (void)ctx;
     SetDlgItemTextA(g_hwnd, IDC_CONN_STATUS_LBL, connected ? "Connected" : "Disconnected");
     EnableWindow(GetDlgItem(g_hwnd, IDC_CONNECT_BTN), TRUE);
     SetWindowTextA(GetDlgItem(g_hwnd, IDC_CONNECT_BTN), connected ? "Disconnect" : "Connect");
     InvalidateRect(GetDlgItem(g_hwnd, IDC_CONN_STATUS_LBL), NULL, TRUE);
+    set_channel_controls_enabled(connected);
 }
 
 static void conn_on_frame(const ProtoParsedFrame *frame, void *ctx) {
@@ -1197,6 +1203,44 @@ static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 
+/* Every control that can actually command a channel (mode Set, ON, OFF,
+ * the level gauge) is disabled while RS422 isn't connected - there's no
+ * bus to blind-send on, so letting the user "arm" 16 channels' worth of
+ * mode/level/output first and have it silently go nowhere is worse than
+ * just not letting them touch it yet. Mirrors conn_is_connected() on
+ * every connect/disconnect and once at startup. EnableWindow() alone
+ * already blocks all mouse input to a disabled window at the OS level
+ * (WM_NCHITTEST returns HTTRANSPARENT for it) - the gauge's click/drag
+ * handling in channel_gauge_subclass_proc never even runs disabled.
+ *
+ * The mode combo itself is deliberately left out: selecting a mode is
+ * local/uncommitted until Set is clicked (see the WM_COMMAND handler),
+ * so it's harmless while disconnected - and a disabled native COMBOBOX
+ * stops sending WM_CTLCOLORSTATIC at all, falling back to Windows' own
+ * plain white/gray disabled look, which would blow a bright hole
+ * through the dark theme (that took five attempts to get right - see
+ * the big comment above combo_arrow_subclass_proc). Set/ON/OFF/gauge
+ * are all custom-painted, so they stay fully themed either way. */
+static void set_channel_controls_enabled(bool enabled) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        HWND set_btn = GetDlgItem(g_hwnd, channel_set_id(i));
+        HWND on_btn = GetDlgItem(g_hwnd, channel_on_id(i));
+        HWND off_btn = GetDlgItem(g_hwnd, channel_off_id(i));
+        HWND gauge = GetDlgItem(g_hwnd, channel_track_id(i));
+
+        EnableWindow(set_btn, enabled);
+        EnableWindow(on_btn, enabled);
+        EnableWindow(off_btn, enabled);
+        EnableWindow(gauge, enabled);
+
+        InvalidateRect(set_btn, NULL, FALSE);
+        InvalidateRect(on_btn, NULL, FALSE);
+        InvalidateRect(off_btn, NULL, FALSE);
+        InvalidateRect(gauge, NULL, FALSE);
+    }
+}
+
 /* Maps a control ID back to its channel index, for any control that
  * belongs to a channel card. Returns false for IDs outside that range. */
 static bool channel_index_from_id(int id, int *out_idx) {
@@ -1285,6 +1329,42 @@ static LRESULT CALLBACK channel_gauge_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         GetClientRect(hwnd, &rc);
         h = rc.bottom - rc.top;
         w = rc.right - rc.left;
+
+        /* Disconnected: no gradient, no handle - just a flat muted
+         * track, matching every other channel control's disabled look
+         * (see set_channel_controls_enabled()). Nothing to dial in
+         * before there's a connection to send it over. */
+        if (!IsWindowEnabled(hwnd)) {
+            int track_w = w / 4;
+            int track_cx = rc.left + w / 2;
+            RECT track;
+            HBRUSH bg_brush, track_brush;
+            HPEN track_pen, old_pen;
+            HBRUSH old_brush;
+
+            if (track_w < 6) track_w = 6;
+            track.left = track_cx - track_w / 2;
+            track.right = track.left + track_w;
+            track.top = rc.top;
+            track.bottom = rc.bottom;
+
+            bg_brush = CreateSolidBrush(COLOR_APP_PANEL_BG);
+            FillRect(hdc, &rc, bg_brush);
+            DeleteObject(bg_brush);
+
+            track_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            old_pen = (HPEN)SelectObject(hdc, track_pen);
+            track_brush = CreateSolidBrush(COLOR_APP_MUTED);
+            old_brush = (HBRUSH)SelectObject(hdc, track_brush);
+            RoundRect(hdc, track.left, track.top, track.right, track.bottom, track_w, track_w);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(track_brush);
+            DeleteObject(track_pen);
+
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
 
         /* Real volume-slider look: a narrow rounded track down the
          * middle (not the full control width - a full-width bar with a
@@ -1970,6 +2050,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
             }
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
+            /* Starts disconnected - every channel control starts
+             * disabled too, same as conn_on_connected_changed() would
+             * set once Connect is actually clicked. */
+            set_channel_controls_enabled(false);
             ui_refresh_all_channels();
             ui_refresh_sensor();
             return 0;
@@ -2215,7 +2299,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 if (offset == IDC_CH_ON_OFFSET || offset == IDC_CH_OFF_OFFSET) {
                     const ChannelState *ch = channels_get(idx);
                     bool active = (offset == IDC_CH_ON_OFFSET) ? ch->output_on : !ch->output_on;
-                    HBRUSH fill = active
+                    HBRUSH fill = (active && !disabled)
                         ? (offset == IDC_CH_ON_OFFSET ? g_brush_connected : g_brush_disconnected)
                         : g_brush_panel;
                     HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
@@ -2227,7 +2311,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     SelectObject(dis->hDC, old_pen);
                     DeleteObject(pen);
 
-                    SetTextColor(dis->hDC, active ? RGB(255, 255, 255) : COLOR_APP_MUTED);
+                    SetTextColor(dis->hDC, (active && !disabled) ? RGB(255, 255, 255) : COLOR_APP_MUTED);
                     SetBkMode(dis->hDC, TRANSPARENT);
                     GetWindowTextA(dis->hwndItem, text, sizeof(text));
                     DrawTextA(dis->hDC, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
