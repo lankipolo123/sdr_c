@@ -768,10 +768,18 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
-        /* No fill at all - transparent, the parent panel's own
-         * background shows through (same "erase skipped, let the
-         * parent's already-painted background bleed through" pattern
-         * used for the chamfered/rounded panel corners elsewhere). */
+        /* Real fill, not transparent - this control sits well inside the
+         * Amplifier Temperature panel, nowhere near its rounded corners,
+         * so a flat g_brush_panel fill looks identical to "background
+         * bleeds through" here, but actually clears old glyph pixels.
+         * Without this, WM_ERASEBKGND returning 1 (and the caller's
+         * InvalidateRect(..., FALSE) skipping erase too) meant a changed
+         * reading's new digits painted directly over the old ones -
+         * "27.0" -> "27.1" left a smeared double-exposure of both,
+         * confirmed by a real-hardware screenshot. DT_NOCLIP on the value
+         * text below means glyphs can extend past its own rect, so this
+         * clears the whole control, not just the text sub-rects. */
+        FillRect(hdc, &rc, g_brush_panel);
         SetBkMode(hdc, TRANSPARENT);
 
         wsprintfA(addr_text, "ADDR %d", sensor_get_unit_address(&g_sensor, unit_index));
