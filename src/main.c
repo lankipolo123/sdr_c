@@ -21,9 +21,7 @@
 #include "sensor.h"
 
 #define CLIENT_WIDTH  1343
-#define CLIENT_HEIGHT 754 /* was 702 - grew by BULK_BAR_H+8 to fit the new
-                             * Bulk Actions bar without shrinking anything
-                             * else; grid/sidebar/log just shift down */
+#define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -45,16 +43,8 @@
                             * Bits/Parity, so it's the taller card again
                             * (content bottoms out ~y=175) */
 
-/* Bulk Actions bar - click a card to select it, then apply Mode/Set,
- * ON/OFF, or a level to every selected channel at once. Sits between
- * the header and the grid/sidebar, same 6px-top/8px-gap rhythm as
- * everywhere else. */
-#define BULK_BAR_Y   (6 + HEADER_H + 8)
-#define BULK_BAR_H   44
-
-#define CONTENT_TOP  (BULK_BAR_Y + BULK_BAR_H + 8) /* sidebar panels and
-                            * channel grid start beneath the bulk bar,
-                            * same usual 8px gap used everywhere else */
+#define CONTENT_TOP  194 /* shifts down by the same 12px HEADER_H grew,
+                            * keeping the usual 8px gap below the panel */
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -188,7 +178,6 @@ static int g_spectrum_unit;
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
-static HWND g_bulk_panel;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -1980,7 +1969,12 @@ static void draw_channel_spectrum(HDC hdc, RECT area, const ChannelState *ch,
  * markings (this app has no receiver - see draw_channel_spectrum's own
  * comment). */
 static void spectrum_draw_grid(HDC hdc, RECT rc) {
-    HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+    /* COLOR_APP_MUTED, not COLOR_APP_PANEL_BORDER - the border color
+     * turned out too close to the field background to actually notice
+     * ("wheres the damn lines" - they genuinely weren't visible enough
+     * on real hardware). This is clearly visible without being as loud
+     * as real text. */
+    HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_MUTED);
     HPEN old_pen = (HPEN)SelectObject(hdc, pen);
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;
@@ -2205,16 +2199,17 @@ static void build_controls(HWND hwnd) {
      * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
-    /* Right-aligned like Amplifier Temperature, tucked right up against
-     * it (24px gap, matching the tighter spacing used everywhere else
-     * here) instead of floating apart with a big gap between them -
-     * reads as one grouped pair anchored to the header's right edge. */
-    add_header_icon(hwnd, 719, 14, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 737, 14, 260, 18);
+    /* Left-aligned against the header panel's own left edge, matching
+     * every other section's left margin (22px) - was right-of-center
+     * (tucked up against Amplifier Temperature), leaving the whole left
+     * half of the header empty. Bulk Actions now takes the middle
+     * column, Amplifier Temperature stays right-aligned. */
+    add_header_icon(hwnd, 36, 14, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 54, 14, 260, 18);
 
     /* Every row below is centered within this section's own ~310px-wide
-     * span (roughly x=705-1015) instead of flush against its left
-     * edge - each row's total width is computed, then its start x is
+     * span (roughly x=22-332) instead of flush against its left edge -
+     * each row's total width is computed, then its start x is
      * (span_width - row_width) / 2 past the span's left edge.
      * Refresh/Connect on their own row below Port. Port combo kept
      * compact (90px, matching Baud below it) - direct request was
@@ -2223,18 +2218,64 @@ static void build_controls(HWND hwnd) {
      * pitch is a modest ~8px gap between a row's visual bottom and
      * the next row's top - not the cramped 3-4px pitch from before
      * (too tight), not the old ~30-40px gaps either (too spacious). */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 746, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 782, 34, 90, 140, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 884, 36, 100, 16, IDC_CONN_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 788, 63, 64, 18, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 860, 63, 72, 18, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 63, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 99, 34, 90, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 201, 36, 100, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 105, 63, 64, 18, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 177, 63, 72, 18, IDC_CONNECT_BTN);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 796, 91, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 834, 89, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 740, 120, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 804, 118, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 865, 120, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 909, 118, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 113, 91, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 151, 89, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 57, 120, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 121, 118, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 182, 120, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 226, 118, 70, 100, IDC_PARITY_COMBO));
+
+    /* Bulk Actions - middle column of the header, between Connection &
+     * Settings (left) and Amplifier Temperature (right). Click a card's
+     * checkbox to select it (lit accent border), then one of these
+     * applies to every selected channel at once. Same safety gating as
+     * each card's own controls: OFF always works even kill-switch-
+     * tripped, ON/Set/level skip a tripped channel. Disabled as a whole
+     * alongside every per-channel control until RS422 connects - see
+     * set_channel_controls_enabled(). Two rows, same row-pitch as
+     * Connection & Settings' own rows (y=36/63) instead of a separate
+     * bar - no longer needs its own panel or extra window height. */
+    {
+        HWND bulk_mode_combo;
+        int mi;
+
+        add_header_icon(hwnd, 480, 14, ICON_LIST);
+        add_header(hwnd, "Bulk Actions", 498, 14, 160, 18);
+
+        add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
+                 480, 36, 80, 16, IDC_BULK_SELECTED_LBL);
+        add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
+                 564, 34, 54, 18, IDC_BULK_CLEAR_BTN);
+        bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
+                                    626, 34, 140, 140, IDC_BULK_MODE_COMBO);
+        for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
+            const char *name = proto_mode_name((uint8_t)mi);
+            SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
+        }
+        SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
+        make_combo_readonly(bulk_mode_combo);
+        add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
+                 774, 34, 50, 18, IDC_BULK_SET_BTN);
+
+        add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
+                 480, 63, 50, 18, IDC_BULK_ON_BTN);
+        add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
+                 536, 63, 50, 18, IDC_BULK_OFF_BTN);
+        add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
+                 610, 63, 54, 18, IDC_BULK_HIGH_BTN);
+        add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
+                 670, 63, 58, 18, IDC_BULK_MEDIUM_BTN);
+        add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
+                 734, 63, 50, 18, IDC_BULK_LOW_BTN);
+        add_ctrl(hwnd, "BUTTON", "Off", BS_OWNERDRAW | WS_TABSTOP,
+                 790, 63, 50, 18, IDC_BULK_LEVEL_OFF_BTN);
+    }
 
     /* Amplifier Temperature, right-aligned in the same header bar
      * rather than below it in the sidebar - same row shape as
@@ -2287,51 +2328,6 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 172, 80, 22, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-
-    /* Bulk Actions bar: click a card (its background, not one of its
-     * real controls) to select it - the card gets a lit accent border -
-     * then one of these applies to every selected channel at once.
-     * Same safety gating as each card's own controls: OFF always
-     * works even kill-switch-tripped, ON/Set/level skip a tripped
-     * channel (see the handlers below). Disabled as a whole alongside
-     * every per-channel control until RS422 connects - see
-     * set_channel_controls_enabled(). */
-    {
-        HWND bulk_mode_combo;
-        int mi;
-
-        g_bulk_panel = add_panel(hwnd, SIDEBAR_X, BULK_BAR_Y, CLIENT_WIDTH - 2 * SIDEBAR_X, BULK_BAR_H);
-
-        add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
-                 22, BULK_BAR_Y + 14, 90, 16, IDC_BULK_SELECTED_LBL);
-        add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-                 118, BULK_BAR_Y + 11, 54, 22, IDC_BULK_CLEAR_BTN);
-
-        bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                    190, BULK_BAR_Y + 11, 150, 140, IDC_BULK_MODE_COMBO);
-        for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
-            const char *name = proto_mode_name((uint8_t)mi);
-            SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
-        }
-        SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
-        make_combo_readonly(bulk_mode_combo);
-        add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-                 346, BULK_BAR_Y + 11, 50, 22, IDC_BULK_SET_BTN);
-
-        add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-                 414, BULK_BAR_Y + 11, 54, 22, IDC_BULK_ON_BTN);
-        add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-                 474, BULK_BAR_Y + 11, 54, 22, IDC_BULK_OFF_BTN);
-
-        add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
-                 550, BULK_BAR_Y + 11, 58, 22, IDC_BULK_HIGH_BTN);
-        add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
-                 614, BULK_BAR_Y + 11, 58, 22, IDC_BULK_MEDIUM_BTN);
-        add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
-                 678, BULK_BAR_Y + 11, 58, 22, IDC_BULK_LOW_BTN);
-        add_ctrl(hwnd, "BUTTON", "Off", BS_OWNERDRAW | WS_TABSTOP,
-                 742, BULK_BAR_Y + 11, 58, 22, IDC_BULK_LEVEL_OFF_BTN);
-    }
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -2469,7 +2465,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_bulk_panel, SIDEBAR_X, BULK_BAR_Y, client_w - 2 * SIDEBAR_X, BULK_BAR_H, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
@@ -2478,17 +2473,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
                SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34), FALSE);
-
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_SELECTED_LBL), 22, BULK_BAR_Y + 14, 90, 16, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_CLEAR_BTN), 118, BULK_BAR_Y + 11, 54, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_MODE_COMBO), 190, BULK_BAR_Y + 11, 150, 140, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_SET_BTN), 346, BULK_BAR_Y + 11, 50, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_ON_BTN), 414, BULK_BAR_Y + 11, 54, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_OFF_BTN), 474, BULK_BAR_Y + 11, 54, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_HIGH_BTN), 550, BULK_BAR_Y + 11, 58, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_MEDIUM_BTN), 614, BULK_BAR_Y + 11, 58, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_LOW_BTN), 678, BULK_BAR_Y + 11, 58, 22, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_BULK_LEVEL_OFF_BTN), 742, BULK_BAR_Y + 11, 58, 22, FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
