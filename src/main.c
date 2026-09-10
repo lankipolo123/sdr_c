@@ -2368,18 +2368,28 @@ static void build_controls(HWND hwnd) {
          * section in this header meant to read as a distinct,
          * occasional-use card rather than blending into the shared
          * header background like Connection & Settings and Amplifier
-         * Temperature do. */
-        add_header_icon(hwnd, 480, 14, ICON_LIST);
-        add_header(hwnd, "Bulk Actions", 498, 14, 150, 18);
-        add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
-                 650, 12, 130, 20, IDC_BULK_TOGGLE_BTN);
-
+         * Temperature do.
+         *
+         * Layout is a bigger version of a channel card's own layout
+         * (see add_channel_card()), not an unrelated arrangement: icon +
+         * title + a caption + a corner control on row 1 (title/mode-
+         * name/selection-checkbox there -> title/selected-count/toggle-
+         * button here), combo + a button on row 2 (mode combo + Set,
+         * same on both), a primary on/off row on row 3, a status-line
+         * row at the bottom-left on row 4 (STANDBY there -> Clear here),
+         * and a right-side vertical column spanning rows 2-4 (the level
+         * gauge + High/Medium/Low/Off tick labels there -> the same 4
+         * levels as actual buttons here, since bulk applies a level with
+         * a click rather than a drag). */
+        add_header_icon(hwnd, 470, 24, ICON_LIST);
+        add_header(hwnd, "Bulk Actions", 488, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
-                 480, 36, 80, 16, IDC_BULK_SELECTED_LBL);
-        add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-                 564, 34, 54, 18, IDC_BULK_CLEAR_BTN);
+                 648, 26, 84, 16, IDC_BULK_SELECTED_LBL);
+        add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
+                 740, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
+
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                    626, 34, 140, 140, IDC_BULK_MODE_COMBO);
+                                    470, 54, 230, 140, IDC_BULK_MODE_COMBO);
         for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
             const char *name = proto_mode_name((uint8_t)mi);
             SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -2387,20 +2397,24 @@ static void build_controls(HWND hwnd) {
         SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
         make_combo_readonly_ex(bulk_mode_combo, g_bulk_combo_overlays);
         add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-                 774, 34, 50, 18, IDC_BULK_SET_BTN);
+                 710, 54, 60, 20, IDC_BULK_SET_BTN);
 
         add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-                 480, 63, 50, 18, IDC_BULK_ON_BTN);
+                 470, 84, 110, 22, IDC_BULK_ON_BTN);
         add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-                 536, 63, 50, 18, IDC_BULK_OFF_BTN);
+                 590, 84, 110, 22, IDC_BULK_OFF_BTN);
+
+        add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
+                 470, 116, 90, 20, IDC_BULK_CLEAR_BTN);
+
         add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
-                 610, 63, 54, 18, IDC_BULK_HIGH_BTN);
+                 790, 54, 84, 18, IDC_BULK_HIGH_BTN);
         add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
-                 670, 63, 58, 18, IDC_BULK_MEDIUM_BTN);
+                 790, 76, 84, 18, IDC_BULK_MEDIUM_BTN);
         add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
-                 734, 63, 50, 18, IDC_BULK_LOW_BTN);
+                 790, 98, 84, 18, IDC_BULK_LOW_BTN);
         add_ctrl(hwnd, "BUTTON", "Off", BS_OWNERDRAW | WS_TABSTOP,
-                 790, 63, 50, 18, IDC_BULK_LEVEL_OFF_BTN);
+                 790, 120, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
     }
 
     /* Amplifier Temperature, right-aligned in the same header bar
