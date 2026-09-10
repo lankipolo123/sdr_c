@@ -471,13 +471,20 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * g_header_panel specifically) - direct request was for the
          * whole header, not the Bulk Actions card nested inside it. */
         if (hwnd == g_header_panel) {
+            /* Inset by r (not centered exactly on the corner point) - a
+             * circle centered right on the edge gets half its area
+             * clipped away by the window's own bounds, so it rendered
+             * as a partial bite instead of a full circle. Moving each
+             * center in by the radius keeps the whole circle inside the
+             * panel, fully visible. */
             const int r = 7;
+            const int inset = r + 2;
             POINT corners[4];
             int ci;
-            corners[0].x = rc.left;  corners[0].y = rc.top;
-            corners[1].x = rc.right - PANEL_SHADOW_PX;  corners[1].y = rc.top;
-            corners[2].x = rc.left;  corners[2].y = rc.bottom - PANEL_SHADOW_PX;
-            corners[3].x = rc.right - PANEL_SHADOW_PX;  corners[3].y = rc.bottom - PANEL_SHADOW_PX;
+            corners[0].x = rc.left + inset;  corners[0].y = rc.top + inset;
+            corners[1].x = rc.right - PANEL_SHADOW_PX - inset;  corners[1].y = rc.top + inset;
+            corners[2].x = rc.left + inset;  corners[2].y = rc.bottom - PANEL_SHADOW_PX - inset;
+            corners[3].x = rc.right - PANEL_SHADOW_PX - inset;  corners[3].y = rc.bottom - PANEL_SHADOW_PX - inset;
 
             old_brush = (HBRUSH)SelectObject(hdc, g_brush_page);
             old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
