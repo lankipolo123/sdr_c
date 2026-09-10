@@ -154,6 +154,8 @@ static HBRUSH g_brush_accent_dis;
 static HBRUSH g_brush_dot;
 static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
+static HBRUSH g_brush_level_medium; /* matches ch_gauge_stop_color(LEVEL_MEDIUM) */
+static HBRUSH g_brush_level_off;    /* matches ch_gauge_stop_color(LEVEL_OFF) */
 static HBRUSH g_brush_shadow;
 static const COLORREF g_shadow_color = COLOR_APP_SHADOW;
 static HBRUSH g_brush_dot_pattern; /* tiled DOT_GRID_SPACING x DOT_GRID_SPACING bitmap brush */
@@ -3135,6 +3137,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         fill = g_brush_connected;
                     } else if (dis->CtlID == IDC_BULK_OFF_BTN) {
                         fill = g_brush_disconnected;
+                    } else if (dis->CtlID == IDC_BULK_HIGH_BTN) {
+                        /* Same 4 stop colors as a channel card's own
+                         * level gauge (see ch_gauge_stop_color()) -
+                         * High/Medium/Low/Off here are 4 separate
+                         * buttons instead of a draggable gradient, but
+                         * direct request was for them to still read as
+                         * "the same colors", top-to-bottom, as the real
+                         * gauge does. */
+                        fill = g_brush_disconnected; /* red, same as LEVEL_HIGH */
+                    } else if (dis->CtlID == IDC_BULK_MEDIUM_BTN) {
+                        fill = g_brush_level_medium; /* orange */
+                    } else if (dis->CtlID == IDC_BULK_LOW_BTN) {
+                        fill = g_brush_connected; /* green, same as LEVEL_LOW */
+                    } else if (dis->CtlID == IDC_BULK_LEVEL_OFF_BTN) {
+                        fill = g_brush_level_off; /* muted gray, same as LEVEL_OFF */
                     }
                     {
                         HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
@@ -3173,6 +3190,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_dot) DeleteObject(g_brush_dot);
             if (g_brush_connected) DeleteObject(g_brush_connected);
             if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
+            if (g_brush_level_medium) DeleteObject(g_brush_level_medium);
+            if (g_brush_level_off) DeleteObject(g_brush_level_off);
             if (g_brush_shadow) DeleteObject(g_brush_shadow);
             if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
@@ -3207,6 +3226,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     g_brush_dot = CreateSolidBrush(COLOR_APP_DOT);
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
+    g_brush_level_medium = CreateSolidBrush(RGB(224, 146, 34));
+    g_brush_level_off = CreateSolidBrush(COLOR_APP_MUTED);
     g_brush_shadow = CreateSolidBrush(COLOR_APP_SHADOW);
     build_dot_pattern_brush();
 
