@@ -1,4 +1,5 @@
 #include "connection.h"
+#include "serial_port.h"
 #include <string.h>
 
 #define TRANSIT_DLL_PATH "dll\\Transit.dll"
@@ -123,11 +124,5 @@ void conn_poll(Connection *conn) {
 }
 
 int conn_list_ports(char names[][16], int max_ports) {
-    /* No real ports to enumerate - Transit.dll auto-discovers the RS422
-     * dongle itself. Matches middleware's own list_ports() -> ["DLL"]. */
-    if (max_ports > 0) {
-        lstrcpynA(names[0], "DLL", 16);
-        return 1;
-    }
-    return 0;
+    return serial_list_ports(names, max_ports);
 }

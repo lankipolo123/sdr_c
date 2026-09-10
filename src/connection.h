@@ -52,7 +52,7 @@ bool conn_send(Connection *conn, const uint8_t *data, uint8_t len);
  * forever. Call this from a timer tick. */
 void conn_poll(Connection *conn);
 
-/* No real ports to enumerate - Transit.dll auto-discovers the RS422
- * dongle itself. Always returns a single "DLL" placeholder entry,
- * matching middleware's own list_ports() -> ["DLL"]. */
+/* Wraps serial_list_ports() - real COM port enumeration, same as
+ * before. AutoConnectSDR itself ignores whatever's selected here (it
+ * auto-discovers the dongle on its own), but the list stays real. */
 int conn_list_ports(char names[][16], int max_ports);

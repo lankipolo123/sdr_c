@@ -45,10 +45,11 @@ raw serial I/O - ported from sdr_app's `middleware.py`/
 `use_connection.py`, the proven hardware-confirmed reference (same DLL,
 same 5 exports: `AutoConnectSDR`, `CheckConnection`, `DisconnectSDR`,
 `CommandTokens`, `SendCommandToSDR`). `AutoConnectSDR` auto-discovers the
-dongle itself - there is no real port/baud/parity/data-bits to select,
-so the Port combo just shows a `DLL` placeholder and the other fields
-are inert (kept for UI/interface stability, matching middleware's own
-`ConnectionController.connect()` signature, which does the same).
+dongle itself, so Port/Baud/Parity/Data Bits are inert now (kept in the
+UI and in `conn_connect()`'s signature for stability, matching
+middleware's own `ConnectionController.connect()` signature, which does
+the same) - whatever's selected has no effect on what Connect actually
+does.
 Sending a frame means translating it one byte at a time through
 `CommandTokens` before handing each token to `SendCommandToSDR` - never
 the raw protocol bytes, matching the confirmed real mechanism. See
