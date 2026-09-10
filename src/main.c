@@ -161,6 +161,12 @@ static Connection g_conn;
 static Sensor g_sensor;
 static bool g_kill_switch_tripped[MAX_CHANNELS];
 
+/* Spectrum preview panel state - true shows the all-16 small-multiples
+ * grid (the default), false shows one channel's trace full-size, with
+ * g_spectrum_unit (0..MAX_CHANNELS-1) picking which. */
+static bool g_spectrum_show_all = true;
+static int g_spectrum_unit;
+
 /* Handles needed to reposition things on WM_SIZE that don't otherwise
  * have a retrievable control ID (channel_*_id() covers everything else
  * per-card - GetDlgItem() finds those directly). */
@@ -1636,6 +1642,184 @@ static void ui_refresh_all_channels(void) {
     }
 }
 
+/* ---- spectrum preview panel ----
+ * Not a real capture off the amplifier - there's no per-channel
+ * frequency to plot anyway, every channel blind-sends on the same
+ * fixed CHANNEL_BLIND_FREQ_MHZ. This is a quick illustrative read on
+ * what's actually live: a fundamental shaped like that channel's mode
+ * plus a smaller 2nd-harmonic bump, scaled by level, matching the
+ * mode-shape research done earlier against a real ZS-407 capture (PRN
+ * = flat block + wide harmonic, Comb = many narrow teeth + medium
+ * harmonic, Linear Sweep = fewer/tighter teeth + narrow harmonic, CW =
+ * one clean spike + one clean harmonic). Off channels just show a flat
+ * floor line. */
+
+static int spectrum_peak_pct(int level) {
+    switch (level) {
+        case LEVEL_LOW:    return 40;
+        case LEVEL_MEDIUM: return 70;
+        case LEVEL_HIGH:   return 100;
+        default:           return 0;
+    }
+}
+
+static void spectrum_fill_bar(HDC hdc, HBRUSH brush, int cx, int half_w, int top, int bottom) {
+    RECT r;
+    if (half_w < 1) half_w = 1;
+    r.left = cx - half_w;
+    r.right = cx + half_w;
+    r.top = top;
+    r.bottom = bottom;
+    if (r.top >= r.bottom) return;
+    FillRect(hdc, &r, brush);
+}
+
+/* Draws one channel's trace into `area` - flat muted floor when off,
+ * mode-shaped fundamental + harmonic when on. `label` (may be NULL)
+ * prints a small unit number in the corner, for the all-16 grid. */
+static void draw_channel_spectrum(HDC hdc, RECT area, const ChannelState *ch, const char *label) {
+    int w = area.right - area.left;
+    int h = area.bottom - area.top;
+    int floor_y = area.bottom - 2;
+    HPEN floor_pen, old_pen;
+    HBRUSH brush, old_brush;
+    HFONT old_font;
+    int peak_pct;
+    int fund_cx, harm_cx;
+
+    floor_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+    old_pen = (HPEN)SelectObject(hdc, floor_pen);
+    MoveToEx(hdc, area.left, floor_y, NULL);
+    LineTo(hdc, area.right, floor_y);
+    SelectObject(hdc, old_pen);
+    DeleteObject(floor_pen);
+
+    if (label) {
+        RECT lbl_rc = area;
+        lbl_rc.bottom = lbl_rc.top + 12;
+        old_font = (HFONT)SelectObject(hdc, g_font);
+        SetTextColor(hdc, ch->output_on ? COLOR_APP_TEXT : COLOR_APP_MUTED);
+        SetBkMode(hdc, TRANSPARENT);
+        DrawTextA(hdc, label, -1, &lbl_rc, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOCLIP);
+        SelectObject(hdc, old_font);
+    }
+
+    if (!ch->output_on || w < 12 || h < 10) {
+        return;
+    }
+
+    peak_pct = spectrum_peak_pct(ch->level);
+    brush = CreateSolidBrush(ch_gauge_stop_color(ch->level));
+    old_brush = (HBRUSH)SelectObject(hdc, brush);
+
+    fund_cx = area.left + w * 35 / 100;
+    harm_cx = area.left + w * 72 / 100;
+
+    switch (ch->mode) {
+        case PROTO_MODE_WHITE_NOISE: { /* Pseudo Random Noise */
+            int fund_top = floor_y - h * peak_pct / 100;
+            int harm_top = floor_y - h * peak_pct * 30 / 10000;
+            spectrum_fill_bar(hdc, brush, fund_cx, w * 9 / 100, fund_top, floor_y);
+            spectrum_fill_bar(hdc, brush, harm_cx, w * 6 / 100, harm_top, floor_y);
+            break;
+        }
+        case PROTO_MODE_LINEAR_SWEEP: {
+            int i;
+            const int teeth = 6;
+            for (i = 0; i < teeth; i++) {
+                int cx = fund_cx - w * 6 / 100 + i * (w * 12 / 100 / teeth);
+                int pk = peak_pct - (i % 3) * 15;
+                if (pk < 20) pk = 20;
+                spectrum_fill_bar(hdc, brush, cx, 1, floor_y - h * pk / 100, floor_y);
+            }
+            spectrum_fill_bar(hdc, brush, harm_cx, 1, floor_y - h * peak_pct * 15 / 10000, floor_y);
+            break;
+        }
+        case PROTO_MODE_COMB_SPECTRUM: {
+            int i;
+            const int teeth = 10;
+            for (i = 0; i < teeth; i++) {
+                int cx = fund_cx - w * 10 / 100 + i * (w * 20 / 100 / teeth);
+                int pk = peak_pct - (i % 4) * 12;
+                if (pk < 15) pk = 15;
+                spectrum_fill_bar(hdc, brush, cx, 1, floor_y - h * pk / 100, floor_y);
+            }
+            spectrum_fill_bar(hdc, brush, harm_cx, w * 4 / 100, floor_y - h * peak_pct * 45 / 10000, floor_y);
+            break;
+        }
+        case PROTO_MODE_SINGLE: /* Continuous Wave */
+        default: {
+            int fund_top = floor_y - h * peak_pct / 100;
+            int harm_top = floor_y - h * peak_pct * 20 / 10000;
+            spectrum_fill_bar(hdc, brush, fund_cx, 1, fund_top, floor_y);
+            spectrum_fill_bar(hdc, brush, harm_cx, 1, harm_top, floor_y);
+            break;
+        }
+    }
+
+    SelectObject(hdc, old_brush);
+    DeleteObject(brush);
+}
+
+static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, g_brush_field);
+
+        if (g_spectrum_show_all) {
+            const int cols = 4;
+            const int rows = 4;
+            int cw = (rc.right - rc.left) / cols;
+            int cell_h = (rc.bottom - rc.top) / rows;
+            int i;
+            for (i = 0; i < MAX_CHANNELS; i++) {
+                RECT cell;
+                char label[4];
+                int col = i % cols;
+                int row = i / cols;
+                cell.left = rc.left + col * cw + 3;
+                cell.right = rc.left + (col + 1) * cw - 3;
+                cell.top = rc.top + row * cell_h + 2;
+                cell.bottom = rc.top + (row + 1) * cell_h - 2;
+                wsprintfA(label, "%d", i + 1);
+                draw_channel_spectrum(hdc, cell, channels_get(i), label);
+            }
+        } else {
+            draw_channel_spectrum(hdc, rc, channels_get(g_spectrum_unit), NULL);
+        }
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
+}
+
+static HWND add_spectrum_plot(HWND parent, int x, int y, int w, int h, int id) {
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, id);
+    if (ctrl) {
+        if (!g_panel_orig_proc) {
+            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
+        }
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)spectrum_plot_subclass_proc);
+    }
+    return ctrl;
+}
+
+static void ui_refresh_spectrum_unit_label(void) {
+    char text[16];
+    wsprintfA(text, "Unit %d", g_spectrum_unit + 1);
+    SetDlgItemTextA(g_hwnd, IDC_SPECTRUM_UNIT_LBL, text);
+    InvalidateRect(GetDlgItem(g_hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
+}
+
 /* ---- saved settings (port/baud/parity/data bits, per-channel mode/
  * level/output_on - never the kill switch, and never auto-connects
  * anything). Restoring output_on does not transmit anything on its own -
@@ -1863,11 +2047,22 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    /* Sidebar: one tall box - top part empty (reserved for other
-     * features), Activity Log below that in the SAME box, not a
-     * separate panel. Connection & Settings and Amplifier Temperature
-     * moved up into the header above. */
+    /* Sidebar: one tall box - Spectrum preview up top (the space that
+     * used to just be "reserved for other features"), Activity Log
+     * below that in the SAME box, not a separate panel. Connection &
+     * Settings and Amplifier Temperature moved up into the header
+     * above. */
     g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP);
+
+    add_header_icon(hwnd, 22, CONTENT_TOP + 10, ICON_WAVE);
+    add_header(hwnd, "Spectrum", 40, CONTENT_TOP + 10, 134, 18);
+    add_ctrl(hwnd, "BUTTON", "<", BS_OWNERDRAW | WS_TABSTOP, 182, CONTENT_TOP + 8, 22, 20, IDC_SPECTRUM_PREV_BTN);
+    add_ctrl(hwnd, "STATIC", "Unit 1", SS_CENTER | SS_NOPREFIX, 210, CONTENT_TOP + 11, 54, 16, IDC_SPECTRUM_UNIT_LBL);
+    add_ctrl(hwnd, "BUTTON", ">", BS_OWNERDRAW | WS_TABSTOP, 270, CONTENT_TOP + 8, 22, 20, IDC_SPECTRUM_NEXT_BTN);
+    add_ctrl(hwnd, "BUTTON", "All", BS_OWNERDRAW | WS_TABSTOP,
+             SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, IDC_SPECTRUM_ALL_BTN);
+    add_spectrum_plot(hwnd, 22, CONTENT_TOP + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34),
+                       IDC_SPECTRUM_PLOT);
 
     add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
     add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
@@ -1983,6 +2178,12 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
 
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PREV_BTN), 182, CONTENT_TOP + 8, 22, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_LBL), 210, CONTENT_TOP + 11, 54, 16, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_NEXT_BTN), 270, CONTENT_TOP + 8, 22, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
+               SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34), FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
@@ -2103,6 +2304,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ui_refresh_sensor();
                 check_kill_switch();
                 ui_refresh_kill_switch();
+                InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
             }
             return 0;
 
@@ -2142,6 +2344,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
+                return 0;
+            }
+            if (id == IDC_SPECTRUM_PREV_BTN && code == BN_CLICKED) {
+                g_spectrum_show_all = false;
+                g_spectrum_unit = (g_spectrum_unit + MAX_CHANNELS - 1) % MAX_CHANNELS;
+                ui_refresh_spectrum_unit_label();
+                return 0;
+            }
+            if (id == IDC_SPECTRUM_NEXT_BTN && code == BN_CLICKED) {
+                g_spectrum_show_all = false;
+                g_spectrum_unit = (g_spectrum_unit + 1) % MAX_CHANNELS;
+                ui_refresh_spectrum_unit_label();
+                return 0;
+            }
+            if (id == IDC_SPECTRUM_ALL_BTN && code == BN_CLICKED) {
+                g_spectrum_show_all = true;
+                InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
                 return 0;
             }
             {
