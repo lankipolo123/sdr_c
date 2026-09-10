@@ -43,6 +43,7 @@
 #define IDC_BULK_MEDIUM_BTN     1047
 #define IDC_BULK_LOW_BTN        1048
 #define IDC_BULK_LEVEL_OFF_BTN  1049
+#define IDC_BULK_SELECT_ALL_BTN 1050
 
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the
