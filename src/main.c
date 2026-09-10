@@ -460,6 +460,33 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         DeleteObject(pen);
         SelectObject(hdc, old_brush);
 
+        /* A small circular "punch" cut out of each of the whole header
+         * bar's 4 corners - filled with the page background color (what's
+         * actually behind every panel/card in this app), not the panel's
+         * own fill, so each corner reads as a literal hole rather than a
+         * decoration sitting on top of the bar. Header only, not the
+         * sidebar panel below (same subclass proc, but this is scoped to
+         * g_header_panel specifically) - direct request was for the
+         * whole header, not the Bulk Actions card nested inside it. */
+        if (hwnd == g_header_panel) {
+            const int r = 7;
+            POINT corners[4];
+            int ci;
+            corners[0].x = rc.left;  corners[0].y = rc.top;
+            corners[1].x = rc.right - PANEL_SHADOW_PX;  corners[1].y = rc.top;
+            corners[2].x = rc.left;  corners[2].y = rc.bottom - PANEL_SHADOW_PX;
+            corners[3].x = rc.right - PANEL_SHADOW_PX;  corners[3].y = rc.bottom - PANEL_SHADOW_PX;
+
+            old_brush = (HBRUSH)SelectObject(hdc, g_brush_page);
+            old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+            for (ci = 0; ci < 4; ci++) {
+                Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
+                        corners[ci].x + r, corners[ci].y + r);
+            }
+            SelectObject(hdc, old_pen);
+            SelectObject(hdc, old_brush);
+        }
+
         /* Bulk Actions gets its own inset card within this same header
          * panel - drawn right here, as a second RoundRect in the same
          * WM_PAINT call, NOT as a second overlapping WS_CLIPSIBLINGS
@@ -504,30 +531,6 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             SelectObject(hdc, old_pen);
             DeleteObject(pen);
             SelectObject(hdc, old_brush);
-
-            /* A small circular "punch" cut out of each of the 4 corners
-             * - filled with the page background color (what's actually
-             * behind every panel/card in this app), not the card's own
-             * fill, so each corner reads as a literal hole rather than
-             * a decoration sitting on top of the card. */
-            {
-                const int r = 7;
-                POINT corners[4];
-                int ci;
-                corners[0].x = brc.left;  corners[0].y = brc.top;
-                corners[1].x = brc.right - CARD_SHADOW_PX;  corners[1].y = brc.top;
-                corners[2].x = brc.left;  corners[2].y = brc.bottom - CARD_SHADOW_PX;
-                corners[3].x = brc.right - CARD_SHADOW_PX;  corners[3].y = brc.bottom - CARD_SHADOW_PX;
-
-                old_brush = (HBRUSH)SelectObject(hdc, g_brush_page);
-                old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
-                for (ci = 0; ci < 4; ci++) {
-                    Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
-                            corners[ci].x + r, corners[ci].y + r);
-                }
-                SelectObject(hdc, old_pen);
-                SelectObject(hdc, old_brush);
-            }
         }
 
         EndPaint(hwnd, &ps);
