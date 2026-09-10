@@ -36,10 +36,10 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     180 /* was 200 - both header cards shrunk (smaller
-                            * controls, tighter rows), tallest content
-                            * now bottoms out around y=172 */
-#define CONTENT_TOP  194 /* shifts down by the same 20px HEADER_H lost,
+#define HEADER_H     168 /* was 180 - Amplifier Temperature's ADDR grid
+                            * chips shrunk 38->32px tall, tallest content
+                            * now bottoms out around y=156 */
+#define CONTENT_TOP  182 /* shifts down by the same 12px HEADER_H lost,
                             * keeping the usual 8px gap below the panel */
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
@@ -89,7 +89,6 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define COLOR_APP_DOT       RGB(50, 52, 57)
 #define COLOR_APP_PANEL_BORDER RGB(63, 66, 71)
 #define COLOR_APP_SHADOW    RGB(14, 15, 17)
-#define COLOR_APP_SILVER    RGB(192, 196, 202)
 
 /* "Direction B" from the UI design proposal, applied app-wide: rounded
  * corners everywhere instead of the old chamfer (panel_subclass_proc
@@ -377,61 +376,6 @@ static void make_combo_readonly(HWND combo) {
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
  * with no per-item on/off state to light the border with. */
-
-/* Short L-shaped silver line at each of a rect's 4 corners - a
- * decorative accent, not a full outline. Shared by the header panel's
- * two "card" zones below. */
-static void draw_corner_brackets(HDC hdc, RECT rc, COLORREF color, int inset, int len) {
-    HPEN pen = CreatePen(PS_SOLID, 1, color);
-    HPEN old_pen = (HPEN)SelectObject(hdc, pen);
-
-    MoveToEx(hdc, rc.left + inset, rc.top + inset + len, NULL);
-    LineTo(hdc, rc.left + inset, rc.top + inset);
-    LineTo(hdc, rc.left + inset + len, rc.top + inset);
-
-    MoveToEx(hdc, rc.right - inset - len, rc.top + inset, NULL);
-    LineTo(hdc, rc.right - inset, rc.top + inset);
-    LineTo(hdc, rc.right - inset, rc.top + inset + len);
-
-    MoveToEx(hdc, rc.left + inset, rc.bottom - inset - len, NULL);
-    LineTo(hdc, rc.left + inset, rc.bottom - inset);
-    LineTo(hdc, rc.left + inset + len, rc.bottom - inset);
-
-    MoveToEx(hdc, rc.right - inset - len, rc.bottom - inset, NULL);
-    LineTo(hdc, rc.right - inset, rc.bottom - inset);
-    LineTo(hdc, rc.right - inset, rc.bottom - inset - len);
-
-    SelectObject(hdc, old_pen);
-    DeleteObject(pen);
-}
-
-/* The header panel is one continuous window holding two sections side
- * by side (Connection & Settings, Amplifier Temperature) - there's no
- * separate window per section to subclass individually. Read as "2
- * cards" anyway by drawing corner brackets at each section's own 4
- * corners, positioned to roughly bound that section's actual controls
- * (see build_controls() for where each section's content starts/
- * ends), rather than physically splitting the panel into two windows. */
-#define HEADER_LEFT_CARD_X0  705
-#define HEADER_LEFT_CARD_X1  1015
-#define HEADER_RIGHT_CARD_X0 1023
-#define HEADER_RIGHT_CARD_X1 1289 /* was 1313 - that was the exact same
-                                     * x as the panel's own visible right
-                                     * edge (confirmed by pixel-sampling
-                                     * a screenshot), so the bracket
-                                     * looked fused to the panel border
-                                     * instead of a separate accent. Now
-                                     * a real ~24px margin. */
-#define HEADER_CARD_Y0 6
-/* Separate bottom bound per card now - Connection & Settings merged
- * Port/Refresh/Connect back onto one row (like Amplifier Temperature
- * already had), so it's noticeably shorter than the ADDR-grid-bearing
- * right card. Sharing one Y1 would leave the shorter card's bracket
- * floating with empty space again - the exact problem already fixed
- * once for the right card. */
-#define HEADER_LEFT_CARD_Y1  132 /* content bottoms out ~y=127 */
-#define HEADER_RIGHT_CARD_Y1 174 /* content bottoms out ~y=168 (ADDR grid) */
-
 static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -469,16 +413,6 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
         SelectObject(hdc, old_brush);
-
-        if (hwnd == g_header_panel) {
-            RECT left_card, right_card;
-            left_card.left = HEADER_LEFT_CARD_X0; left_card.top = HEADER_CARD_Y0;
-            left_card.right = HEADER_LEFT_CARD_X1; left_card.bottom = HEADER_LEFT_CARD_Y1;
-            right_card.left = HEADER_RIGHT_CARD_X0; right_card.top = HEADER_CARD_Y0;
-            right_card.right = HEADER_RIGHT_CARD_X1; right_card.bottom = HEADER_RIGHT_CARD_Y1;
-            draw_corner_brackets(hdc, left_card, COLOR_APP_SILVER, 0, 10);
-            draw_corner_brackets(hdc, right_card, COLOR_APP_SILVER, 0, 10);
-        }
 
         EndPaint(hwnd, &ps);
         return 0;
@@ -1705,10 +1639,10 @@ static void build_controls(HWND hwnd) {
     add_header_icon(hwnd, 719, 14, ICON_PLUG);
     add_header(hwnd, "Connection && Settings", 737, 14, 260, 18);
 
-    /* Every row below is centered within the card's own bracket zone
-     * (HEADER_LEFT_CARD_X0/X1) instead of flush against its left edge -
-     * each row's total width is computed, then its start x is
-     * (zone_width - row_width) / 2 past the zone's left edge. Port/
+    /* Every row below is centered within this section's own ~310px-wide
+     * span (roughly x=705-1015) instead of flush against its left
+     * edge - each row's total width is computed, then its start x is
+     * (span_width - row_width) / 2 past the span's left edge. Port/
      * Refresh/Connect merged back onto one row (matching Amplifier
      * Temperature's already-compact shape) instead of Port alone with
      * Refresh/Connect below - splitting them earlier made this card
@@ -1758,23 +1692,22 @@ static void build_controls(HWND hwnd) {
     add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Address + reading per physical sensor unit, 3 columns x 2 rows -
      * plain text (no box), see sensor_chip_subclass_proc(). Chip height
-     * unchanged at 38 (the bold reading's box needs real room - see the
-     * DT_NOCLIP/decimal-point comment in sensor_chip_subclass_proc) but
-     * width trimmed 88 -> 84 and the column gap 6 -> 4 so the grid fits
-     * inside the card zone's new, narrower right margin. Centered
-     * within the zone (start x=1026, not flush against 1023). This
-     * card has no spare row to merge away like Connection & Settings
-     * did (Port/Refresh/Connect were already combined) - the 2-row,
-     * 38px-tall ADDR grid is what's actually keeping it tall, and
-     * that floor is fixed, so only the gaps above it got tightened. */
+     * trimmed 38 -> 32: the value text draws with DT_NOCLIP now (see
+     * sensor_chip_subclass_proc), which is what actually fixed the old
+     * decimal-point clipping bug, not the taller box - DT_NOCLIP draws
+     * outside a short rect instead of cutting the glyphs off, so the
+     * box itself can shrink safely. Width also trimmed 88 -> 84 and
+     * the column gap 6 -> 4 so the grid fits inside the card zone's
+     * narrower right margin. Centered within the zone (start x=1026,
+     * not flush against 1023). */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
             int col = chip % 3;
             int row = chip / 3;
             int cx = 1026 + col * (84 + 4);
-            int cy = 88 + row * (38 + 4);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 84, 38, chip);
+            int cy = 88 + row * (32 + 4);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 84, 32, chip);
         }
     }
     add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 174, 190, 16, IDC_KILL_STATUS_LBL);
