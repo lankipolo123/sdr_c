@@ -55,12 +55,15 @@
  * added to every one of that section's own x-coordinates below, rather
  * than hand-recomputing each one, so the original per-control layout
  * numbers stay visible/auditable in the source. */
-/* Capped here - the "Disconnected" status label is Connection &
- * Settings' widest-reaching control (right edge at 301+shift); above
- * ~223 its shifted right edge starts overlapping the Bulk Actions
- * card's left border (444+BULK_X_SHIFT), which is what caused the
- * card's edge to look cut/incomplete at 225. */
-#define CONN_X_SHIFT 271
+/* CONN_X_SHIFT is capped relative to whatever BULK_X_SHIFT currently
+ * is - the "Disconnected" status label is Connection & Settings'
+ * widest-reaching control (right edge at 301+CONN_X_SHIFT), and it
+ * overlaps the Bulk Actions card's left border (444+BULK_X_SHIFT) once
+ * CONN_X_SHIFT gets within ~5px of BULK_X_SHIFT+143. When BULK_X_SHIFT
+ * changes, CONN_X_SHIFT needs to move by the same delta to keep this
+ * gap - forgetting that once already caused the card's left edge to
+ * look cut/incomplete. */
+#define CONN_X_SHIFT 256
 #define BULK_X_SHIFT 118
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
