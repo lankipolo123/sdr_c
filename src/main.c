@@ -2180,7 +2180,15 @@ static void draw_channel_spectrum(HDC hdc, RECT area, const ChannelState *ch,
         SelectObject(hdc, old_font);
     }
 
-    if (!ch->output_on || w < 12 || h < 10) {
+    /* Trace only draws while actually connected - ch->output_on is this
+     * app's own remembered state (can still read true after a
+     * disconnect, e.g. restored from the .ini or just not turned off
+     * before unplugging), not whether there's a live RS422 link right
+     * now. The whole point of this trace is that it's real, commanded
+     * state, not a guess - once disconnected, this app isn't actually
+     * commanding anything anymore, so there's nothing real left to
+     * show. */
+    if (!ch->output_on || !conn_is_connected(&g_conn) || w < 12 || h < 10) {
         return;
     }
 
