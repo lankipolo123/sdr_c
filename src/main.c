@@ -189,18 +189,6 @@ static bool g_kill_switch_tripped[MAX_CHANNELS];
  * Bulk Actions bar applies to every selected channel at once. */
 static bool g_channel_selected[MAX_CHANNELS];
 
-/* Off by default - single-channel operation is the normal way to use
- * this app. IDC_BULK_TOGGLE_BTN flips this on/off (see
- * set_bulk_select_mode()); only then do the per-card checkboxes and the
- * rest of the Bulk Actions row become visible/clickable. */
-static bool g_bulk_select_mode;
-
-/* The Bulk Actions mode combo's readonly-theming overlay windows (see
- * make_combo_readonly_ex) - separate sibling windows, not children of
- * the combo, so ShowWindow on the combo alone leaves them on screen.
- * Tracked here so set_bulk_select_mode() can show/hide them too. */
-static HWND g_bulk_combo_overlays[5];
-
 /* Spectrum panel state - true shows the all-16 overview grid (the
  * default), false shows one channel's trace full-size, with
  * g_spectrum_unit (0..MAX_CHANNELS-1) picking which. */
@@ -1562,44 +1550,6 @@ static void bulk_select_all(void) {
     ui_refresh_bulk_selected_label();
 }
 
-static const int BULK_BAR_SHOWHIDE_IDS[] = {
-    IDC_BULK_SELECTED_LBL, IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN, IDC_BULK_MODE_COMBO, IDC_BULK_SET_BTN,
-    IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN, IDC_BULK_HIGH_BTN, IDC_BULK_MEDIUM_BTN,
-    IDC_BULK_LOW_BTN, IDC_BULK_LEVEL_OFF_BTN
-};
-#define BULK_BAR_SHOWHIDE_COUNT (sizeof(BULK_BAR_SHOWHIDE_IDS) / sizeof(BULK_BAR_SHOWHIDE_IDS[0]))
-
-/* Bulk select mode is off by default - single-channel operation is the
- * normal way to use this app, bulk is an occasional extra, not the main
- * way to operate it (see the header comment above where this is wired
- * in). Toggling it off always clears whatever was selected too, so
- * turning it back on later starts clean rather than resuming a stale,
- * invisible selection. */
-static void set_bulk_select_mode(bool on) {
-    int i;
-
-    g_bulk_select_mode = on;
-    if (!on) {
-        bulk_clear_selection();
-    }
-
-    for (i = 0; i < (int)BULK_BAR_SHOWHIDE_COUNT; i++) {
-        ShowWindow(GetDlgItem(g_hwnd, BULK_BAR_SHOWHIDE_IDS[i]), on ? SW_SHOW : SW_HIDE);
-    }
-    for (i = 0; i < 5; i++) {
-        if (g_bulk_combo_overlays[i]) {
-            ShowWindow(g_bulk_combo_overlays[i], on ? SW_SHOW : SW_HIDE);
-        }
-    }
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        ShowWindow(GetDlgItem(g_hwnd, channel_select_id(i)), on ? SW_SHOW : SW_HIDE);
-    }
-    /* "Bulk Command" while expanded, not "Done" - direct request. Stays
-     * "Select Channels" collapsed, since that's still what clicking it
-     * does from there. */
-    SetDlgItemTextA(g_hwnd, IDC_BULK_TOGGLE_BTN, on ? "Bulk Command" : "Select Channels");
-}
-
 static void bulk_apply_mode(uint8_t mode) {
     int i;
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -2495,19 +2445,18 @@ static void build_controls(HWND hwnd) {
     make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 226 + CONN_X_SHIFT, 118, 70, 100, IDC_PARITY_COMBO));
 
     /* Bulk Actions - middle column of the header, between Connection &
-     * Settings (left) and Amplifier Temperature (right). Off by default -
-     * single-channel operation is the normal way to use this app, bulk
-     * is an occasional extra, not the main way to operate it. Only the
-     * icon/title and the toggle button are visible until it's clicked;
-     * that reveals the rest of this bar AND every card's selection
-     * checkbox (see set_bulk_select_mode()). Click a card's checkbox to
-     * select it (lit accent border), then one of these applies to every
-     * selected channel at once. Same safety gating as each card's own
-     * controls: OFF always works even kill-switch-tripped, ON/Set/level
-     * skip a tripped channel. The action controls are also disabled
-     * alongside every per-channel control until RS422 connects - see
-     * set_channel_controls_enabled(). Two rows, same row-pitch as
-     * Connection & Settings' own rows (y=36/63). */
+     * Settings (left) and Amplifier Temperature (right). Always
+     * expanded - no toggle/collapse anymore (direct request: the
+     * combo, Set, ON/OFF, Clear/Select All, level buttons, and every
+     * card's selection checkbox are all visible from launch). Click a
+     * card's checkbox to select it (lit accent border), then one of
+     * these applies to every selected channel at once. Same safety
+     * gating as each card's own controls: OFF always works even
+     * kill-switch-tripped, ON/Set/level skip a tripped channel. The
+     * action controls are also disabled alongside every per-channel
+     * control until RS422 connects - see set_channel_controls_enabled().
+     * Two rows, same row-pitch as Connection & Settings' own rows
+     * (y=36/63). */
     {
         HWND bulk_mode_combo;
         int mi;
@@ -2522,24 +2471,18 @@ static void build_controls(HWND hwnd) {
          *
          * Layout is a bigger version of a channel card's own layout
          * (see add_channel_card()), not an unrelated arrangement: icon +
-         * title + a caption + a corner control on row 1 (title/mode-
-         * name/selection-checkbox there -> title/selected-count/toggle-
-         * button here), combo + a button on row 2 (mode combo + Set,
-         * same on both), a primary on/off row on row 3, a status-line
-         * row at the bottom-left on row 4 (STANDBY there -> Clear here),
-         * and a right-side vertical column spanning rows 2-4 (the level
-         * gauge + High/Medium/Low/Off tick labels there -> the same 4
-         * levels as actual buttons here, since bulk applies a level with
-         * a click rather than a drag). */
+         * title + a caption on row 1 (title/mode-name there -> title/
+         * selected-count here), combo + a button on row 2 (mode combo +
+         * Set, same on both), a primary on/off row on row 3, a status-
+         * line row at the bottom-left on row 4 (STANDBY there -> Clear
+         * here), and a right-side vertical column spanning rows 2-4 (the
+         * level gauge + High/Medium/Low/Off tick labels there -> the
+         * same 4 levels as actual buttons here, since bulk applies a
+         * level with a click rather than a drag). */
         add_header_icon(hwnd, 470 + BULK_X_SHIFT, 24, ICON_LIST);
         add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
                  648 + BULK_X_SHIFT, 26, 84, 16, IDC_BULK_SELECTED_LBL);
-        /* Fixed in the row-1 corner slot always (matching a Unit card's
-         * checkbox position), collapsed or expanded - no longer moves/
-         * centers when collapsed. */
-        add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
-                 740 + BULK_X_SHIFT, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                                     470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
@@ -2548,7 +2491,7 @@ static void build_controls(HWND hwnd) {
             SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
         }
         SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
-        make_combo_readonly_ex(bulk_mode_combo, g_bulk_combo_overlays);
+        make_combo_readonly(bulk_mode_combo);
         add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
                  710 + BULK_X_SHIFT, 54, 60, 20, IDC_BULK_SET_BTN);
 
@@ -2687,12 +2630,6 @@ static void build_controls(HWND hwnd) {
         SendDlgItemMessageA(hwnd, IDC_PARITY_COMBO, CB_ADDSTRING, 0, (LPARAM)PARITY_LABELS[i]);
     }
     SendDlgItemMessageA(hwnd, IDC_PARITY_COMBO, CB_SETCURSEL, 0, 0);
-
-    /* Must run after add_channel_card() has created every card's
-     * selection checkbox above - set_bulk_select_mode() hides them by
-     * ID via GetDlgItem, which finds nothing (and so hides nothing) for
-     * a checkbox that doesn't exist yet. */
-    set_bulk_select_mode(false);
 
     g_layout_ready = true;
 }
@@ -2939,14 +2876,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
                 return 0;
             }
-            if (id == 0 && code == STN_CLICKED && g_bulk_select_mode) {
+            if (id == 0 && code == STN_CLICKED) {
                 /* A card panel's background was clicked - id is 0 for
                  * every add_panel()/add_card_panel() control, so match
-                 * by HWND against g_card_panel instead. Only live while
-                 * bulk select mode is on - otherwise this would let a
-                 * stray click on a card's empty background silently
-                 * select a channel with no visible feedback (the
-                 * checkbox that shows it is hidden outside bulk mode). */
+                 * by HWND against g_card_panel instead. Bulk selection
+                 * is always live now (no toggle to gate it). */
                 HWND ctl = (HWND)lParam;
                 int idx;
                 for (idx = 0; idx < MAX_CHANNELS; idx++) {
@@ -2957,10 +2891,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         break;
                     }
                 }
-                return 0;
-            }
-            if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
-                set_bulk_select_mode(!g_bulk_select_mode);
                 return 0;
             }
             if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
