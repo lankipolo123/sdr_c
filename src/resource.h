@@ -21,12 +21,18 @@
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 
-/* Bulk Actions bar, above the channel grid - click a card to select it
- * (toggles a highlighted border), then one of these applies to every
+/* Bulk Actions bar, above the channel grid - click a card's checkbox to
+ * select it (lit accent border), then one of these applies to every
  * selected channel at once instead of clicking through cards one at a
  * time. Same gating as each card's own controls: OFF always works even
  * kill-switch-tripped, ON/Set/level skip a tripped channel. Always
- * expanded - no toggle/collapse. */
+ * expanded - no toggle/collapse.
+ *
+ * IDC_BULK_TOGGLE_BTN does NOT hide anything - it just arms/disarms
+ * clicking a card's plain background as a second way to toggle
+ * selection (off by default, so a stray click doesn't silently select
+ * a channel). The checkbox itself always works regardless. */
+#define IDC_BULK_TOGGLE_BTN     1039
 #define IDC_BULK_SELECTED_LBL   1040
 #define IDC_BULK_CLEAR_BTN      1041
 #define IDC_BULK_MODE_COMBO     1042

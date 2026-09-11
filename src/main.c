@@ -185,9 +185,17 @@ static Connection g_conn;
 static Sensor g_sensor;
 static bool g_kill_switch_tripped[MAX_CHANNELS];
 
-/* Bulk Actions selection - click a card to toggle it in/out, then the
- * Bulk Actions bar applies to every selected channel at once. */
+/* Bulk Actions selection - click a card's checkbox to toggle it in/out,
+ * then the Bulk Actions bar applies to every selected channel at once.
+ * The bar and every card's checkbox are always visible now - nothing
+ * hides behind this. */
 static bool g_channel_selected[MAX_CHANNELS];
+
+/* Whether clicking a card's own background (not its checkbox) also
+ * toggles selection - off by default so a stray click on a card
+ * doesn't silently select it. IDC_BULK_TOGGLE_BTN arms/disarms this;
+ * the checkbox itself always works regardless of this flag. */
+static bool g_bulk_select_mode;
 
 /* Spectrum panel state - true shows the all-16 overview grid (the
  * default), false shows one channel's trace full-size, with
@@ -2446,17 +2454,18 @@ static void build_controls(HWND hwnd) {
 
     /* Bulk Actions - middle column of the header, between Connection &
      * Settings (left) and Amplifier Temperature (right). Always
-     * expanded - no toggle/collapse anymore (direct request: the
-     * combo, Set, ON/OFF, Clear/Select All, level buttons, and every
-     * card's selection checkbox are all visible from launch). Click a
-     * card's checkbox to select it (lit accent border), then one of
-     * these applies to every selected channel at once. Same safety
-     * gating as each card's own controls: OFF always works even
-     * kill-switch-tripped, ON/Set/level skip a tripped channel. The
-     * action controls are also disabled alongside every per-channel
-     * control until RS422 connects - see set_channel_controls_enabled().
-     * Two rows, same row-pitch as Connection & Settings' own rows
-     * (y=36/63). */
+     * expanded - the combo, Set, ON/OFF, Clear/Select All, level
+     * buttons, and every card's selection checkbox are all visible
+     * from launch; nothing here hides. Click a card's checkbox to
+     * select it (lit accent border), then one of these applies to
+     * every selected channel at once - IDC_BULK_TOGGLE_BTN just
+     * arms/disarms an extra convenience (see its own comment below),
+     * it doesn't reveal anything. Same safety gating as each card's
+     * own controls: OFF always works even kill-switch-tripped, ON/Set/
+     * level skip a tripped channel. The action controls are also
+     * disabled alongside every per-channel control until RS422
+     * connects - see set_channel_controls_enabled(). Two rows, same
+     * row-pitch as Connection & Settings' own rows (y=36/63). */
     {
         HWND bulk_mode_combo;
         int mi;
@@ -2471,8 +2480,9 @@ static void build_controls(HWND hwnd) {
          *
          * Layout is a bigger version of a channel card's own layout
          * (see add_channel_card()), not an unrelated arrangement: icon +
-         * title + a caption on row 1 (title/mode-name there -> title/
-         * selected-count here), combo + a button on row 2 (mode combo +
+         * title + a caption + a corner control on row 1 (title/mode-
+         * name/selection-checkbox there -> title/selected-count/arm-
+         * toggle button here), combo + a button on row 2 (mode combo +
          * Set, same on both), a primary on/off row on row 3, a status-
          * line row at the bottom-left on row 4 (STANDBY there -> Clear
          * here), and a right-side vertical column spanning rows 2-4 (the
@@ -2483,6 +2493,13 @@ static void build_controls(HWND hwnd) {
         add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
                  648 + BULK_X_SHIFT, 26, 84, 16, IDC_BULK_SELECTED_LBL);
+        /* Fixed in the row-1 corner slot, matching a Unit card's
+         * checkbox position - arms/disarms clicking a card's plain
+         * background to toggle its selection (the checkbox itself
+         * always works either way). Off by default so a stray click
+         * on a card doesn't silently select it. */
+        add_ctrl(hwnd, "BUTTON", "Card Click: Off", BS_OWNERDRAW | WS_TABSTOP,
+                 740 + BULK_X_SHIFT, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                                     470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
@@ -2876,11 +2893,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
                 return 0;
             }
-            if (id == 0 && code == STN_CLICKED) {
+            if (id == 0 && code == STN_CLICKED && g_bulk_select_mode) {
                 /* A card panel's background was clicked - id is 0 for
                  * every add_panel()/add_card_panel() control, so match
-                 * by HWND against g_card_panel instead. Bulk selection
-                 * is always live now (no toggle to gate it). */
+                 * by HWND against g_card_panel instead. Only live while
+                 * armed (IDC_BULK_TOGGLE_BTN) - otherwise a stray click
+                 * on a card's empty background would silently select it.
+                 * The card's own checkbox always works regardless. */
                 HWND ctl = (HWND)lParam;
                 int idx;
                 for (idx = 0; idx < MAX_CHANNELS; idx++) {
@@ -2891,6 +2910,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         break;
                     }
                 }
+                return 0;
+            }
+            if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
+                g_bulk_select_mode = !g_bulk_select_mode;
+                SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
+                                g_bulk_select_mode ? "Card Click: On" : "Card Click: Off");
                 return 0;
             }
             if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
