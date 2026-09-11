@@ -61,7 +61,7 @@
  * card's left border (444+BULK_X_SHIFT), which is what caused the
  * card's edge to look cut/incomplete at 225. */
 #define CONN_X_SHIFT 271
-#define BULK_X_SHIFT 133
+#define BULK_X_SHIFT 118
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
