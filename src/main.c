@@ -188,14 +188,10 @@ static bool g_kill_switch_tripped[MAX_CHANNELS];
 /* Bulk Actions selection - click a card's checkbox to toggle it in/out,
  * then the Bulk Actions bar applies to every selected channel at once.
  * The bar and every card's checkbox are always visible now - nothing
- * hides behind this. */
+ * hides behind this. Checkbox-only, deliberately - see
+ * card_panel_subclass_proc's comment for why a background-click
+ * alternative was tried and removed. */
 static bool g_channel_selected[MAX_CHANNELS];
-
-/* Whether clicking a card's own background (not its checkbox) also
- * toggles selection - off by default so a stray click on a card
- * doesn't silently select it. IDC_BULK_TOGGLE_BTN arms/disarms this;
- * the checkbox itself always works regardless of this flag. */
-static bool g_bulk_select_mode;
 
 /* Spectrum panel state - true shows the all-16 overview grid (the
  * default), false shows one channel's trace full-size, with
@@ -634,12 +630,22 @@ static HWND add_panel(HWND parent, int x, int y, int w, int h) {
 
 /* Rounded-corner card panel - channel index stashed in GWLP_USERDATA so
  * it can read that channel's own on/off state at paint time, same
- * live-read pattern as sensor_chip_subclass_proc. Also the Bulk Actions
- * click target: SS_NOTIFY sends STN_CLICKED to the parent on a click
- * anywhere on the card's background (not on one of the real buttons/
- * combo/gauge sitting on top of it - those get the click first, same as
- * any overlapping sibling), toggling that channel selected/deselected -
- * see the WM_COMMAND handling below and g_channel_selected. */
+ * live-read pattern as sensor_chip_subclass_proc.
+ *
+ * Deliberately NOT SS_NOTIFY, unlike a plain background-select overlay
+ * might suggest: SS_NOTIFY on this panel was tried (to send STN_CLICKED
+ * on a background click, for a "click anywhere on the card to select
+ * it" feature) and it broke every real BS_OWNERDRAW sibling sitting on
+ * top of it - Set/ON/OFF/the checkbox all silently stopped receiving
+ * their own clicks, which instead landed on this panel as id=0
+ * STN_CLICKED, no matter how correctly they were enabled/positioned/
+ * topmost in z-order (confirmed with WM_COMMAND-level tracing: the
+ * click's real target reported IsWindowEnabled()==TRUE at the exact
+ * clicked screen coordinate, and still didn't receive it). Removing
+ * SS_NOTIFY fixed all of them immediately. Selection is checkbox-only
+ * now (see channel_select_id/IDC_CH_SELECT_OFFSET) - a real, working
+ * button beats a background click that quietly breaks the rest of the
+ * card. */
 static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -701,9 +707,11 @@ static HWND add_card_panel(HWND parent, int x, int y, int w, int h, int index) {
      * straight over the title/mode label/mode combo/Set button sitting
      * on top of it, with nothing telling them to repaint themselves
      * afterward - "Unit N" and its mode row would just go blank the
-     * next time the channel turned on or off. SS_NOTIFY so it can send
-     * STN_CLICKED for Bulk Actions selection (see the proc above). */
-    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | SS_NOTIFY | WS_CLIPSIBLINGS, x, y, w, h, 0);
+     * next time the channel turned on or off.
+     *
+     * No SS_NOTIFY - see the subclass proc's own comment above for why
+     * (it silently ate every sibling button's clicks). */
+    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT | WS_CLIPSIBLINGS, x, y, w, h, 0);
     if (ctrl) {
         if (!g_panel_orig_proc) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
@@ -2458,12 +2466,10 @@ static void build_controls(HWND hwnd) {
      * buttons, and every card's selection checkbox are all visible
      * from launch; nothing here hides. Click a card's checkbox to
      * select it (lit accent border), then one of these applies to
-     * every selected channel at once - IDC_BULK_TOGGLE_BTN just
-     * arms/disarms an extra convenience (see its own comment below),
-     * it doesn't reveal anything. Same safety gating as each card's
-     * own controls: OFF always works even kill-switch-tripped, ON/Set/
-     * level skip a tripped channel. The action controls are also
-     * disabled alongside every per-channel control until RS422
+     * every selected channel at once. Same safety gating as each
+     * card's own controls: OFF always works even kill-switch-tripped,
+     * ON/Set/level skip a tripped channel. The action controls are
+     * also disabled alongside every per-channel control until RS422
      * connects - see set_channel_controls_enabled(). Two rows, same
      * row-pitch as Connection & Settings' own rows (y=36/63). */
     {
@@ -2480,26 +2486,21 @@ static void build_controls(HWND hwnd) {
          *
          * Layout is a bigger version of a channel card's own layout
          * (see add_channel_card()), not an unrelated arrangement: icon +
-         * title + a caption + a corner control on row 1 (title/mode-
-         * name/selection-checkbox there -> title/selected-count/arm-
-         * toggle button here), combo + a button on row 2 (mode combo +
+         * title + a caption on row 1 (title/mode-name there -> title/
+         * selected-count here), combo + a button on row 2 (mode combo +
          * Set, same on both), a primary on/off row on row 3, a status-
          * line row at the bottom-left on row 4 (STANDBY there -> Clear
          * here), and a right-side vertical column spanning rows 2-4 (the
          * level gauge + High/Medium/Low/Off tick labels there -> the
          * same 4 levels as actual buttons here, since bulk applies a
-         * level with a click rather than a drag). */
+         * level with a click rather than a drag). No corner control on
+         * row 1 here - a channel card's corner has its selection
+         * checkbox, but there's nothing analogous to select on Bulk
+         * Actions itself. */
         add_header_icon(hwnd, 470 + BULK_X_SHIFT, 24, ICON_LIST);
         add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
                  648 + BULK_X_SHIFT, 26, 84, 16, IDC_BULK_SELECTED_LBL);
-        /* Fixed in the row-1 corner slot, matching a Unit card's
-         * checkbox position - arms/disarms clicking a card's plain
-         * background to toggle its selection (the checkbox itself
-         * always works either way). Off by default so a stray click
-         * on a card doesn't silently select it. */
-        add_ctrl(hwnd, "BUTTON", "Card Click: Off", BS_OWNERDRAW | WS_TABSTOP,
-                 740 + BULK_X_SHIFT, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                                     470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
@@ -2891,31 +2892,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
-                return 0;
-            }
-            if (id == 0 && code == STN_CLICKED && g_bulk_select_mode) {
-                /* A card panel's background was clicked - id is 0 for
-                 * every add_panel()/add_card_panel() control, so match
-                 * by HWND against g_card_panel instead. Only live while
-                 * armed (IDC_BULK_TOGGLE_BTN) - otherwise a stray click
-                 * on a card's empty background would silently select it.
-                 * The card's own checkbox always works regardless. */
-                HWND ctl = (HWND)lParam;
-                int idx;
-                for (idx = 0; idx < MAX_CHANNELS; idx++) {
-                    if (ctl == g_card_panel[idx]) {
-                        g_channel_selected[idx] = !g_channel_selected[idx];
-                        ui_invalidate_card(idx);
-                        ui_refresh_bulk_selected_label();
-                        break;
-                    }
-                }
-                return 0;
-            }
-            if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
-                g_bulk_select_mode = !g_bulk_select_mode;
-                SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
-                                g_bulk_select_mode ? "Card Click: On" : "Card Click: Off");
                 return 0;
             }
             if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
