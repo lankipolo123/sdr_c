@@ -1594,15 +1594,10 @@ static void set_bulk_select_mode(bool on) {
     for (i = 0; i < MAX_CHANNELS; i++) {
         ShowWindow(GetDlgItem(g_hwnd, channel_select_id(i)), on ? SW_SHOW : SW_HIDE);
     }
-    SetDlgItemTextA(g_hwnd, IDC_BULK_TOGGLE_BTN, on ? "Done" : "Select Channels");
-
-    /* Collapsed, this button is the only thing in an otherwise empty
-     * card, so it sits centered in it rather than pinned to the corner.
-     * Expanded, it moves to the row-1 corner slot that matches a Unit
-     * card's checkbox position (see build_controls()'s Bulk Actions
-     * block) so the rest of the layout still mirrors a channel card. */
-    MoveWindow(GetDlgItem(g_hwnd, IDC_BULK_TOGGLE_BTN),
-               (on ? 740 : 605) + BULK_X_SHIFT, on ? 22 : 81, 138, 22, TRUE);
+    /* "Bulk Command" while expanded, not "Done" - direct request. Stays
+     * "Select Channels" collapsed, since that's still what clicking it
+     * does from there. */
+    SetDlgItemTextA(g_hwnd, IDC_BULK_TOGGLE_BTN, on ? "Bulk Command" : "Select Channels");
 }
 
 static void bulk_apply_mode(uint8_t mode) {
@@ -2532,13 +2527,11 @@ static void build_controls(HWND hwnd) {
         add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
                  648 + BULK_X_SHIFT, 26, 84, 16, IDC_BULK_SELECTED_LBL);
-        /* Starting position matches the collapsed (off) state - centered
-         * in the card, since that's all there is to look at until it's
-         * clicked. set_bulk_select_mode() moves it to the row-1 corner
-         * slot (matching a Unit card's checkbox position) once expanded,
-         * and back here when collapsed again. */
+        /* Fixed in the row-1 corner slot always (matching a Unit card's
+         * checkbox position), collapsed or expanded - no longer moves/
+         * centers when collapsed. */
         add_ctrl(hwnd, "BUTTON", "Select Channels", BS_OWNERDRAW | WS_TABSTOP,
-                 605 + BULK_X_SHIFT, 81, 138, 22, IDC_BULK_TOGGLE_BTN);
+                 740 + BULK_X_SHIFT, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                                     470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
