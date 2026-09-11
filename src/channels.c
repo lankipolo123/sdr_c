@@ -82,16 +82,46 @@ int channel_level_power_db(int level) {
     }
 }
 
-/* Each channel's real, fixed operating frequency (MHz) - Unit 1..16,
- * confirmed real values, not a shared guess like the old
- * CHANNEL_BLIND_FREQ_MHZ default this replaced. */
+/* Each channel's real, fixed operating band (Unit 1..16), given as
+ * exact low-high MHz ranges:
+ *   1: 703-803    5: 1710-1880   9: 2400-2500   13: 5150-5350
+ *   2: 824-894    6: 1920-2170  10: 3300-3450   14: 5350-5550
+ *   3: 880-960    7: 2300-2350  11: 3450-3650   15: 5550-5750
+ *   4: 1427-1512  8: 2350-2400  12: 3650-3800   16: 5750-6000
+ * CHANNEL_FREQ_MHZ is each range's center (rounded to the nearest MHz
+ * where the range is an odd width, e.g. Unit 4's 1427-1512 centers on
+ * 1469.5, sent as 1470) - confirmed real values, not a shared guess
+ * like the old CHANNEL_BLIND_FREQ_MHZ default this replaced. */
 static const int CHANNEL_FREQ_MHZ[MAX_CHANNELS] = {
-    735, 859, 920, 1469, 1795, 2041, 2325, 2375,
+    753, 859, 920, 1470, 1795, 2045, 2325, 2375,
     2450, 3375, 3550, 3725, 5250, 5450, 5650, 5875
 };
 
 int channel_freq_mhz(int index) {
     return CHANNEL_FREQ_MHZ[index];
+}
+
+/* Each channel's real bandwidth (the range widths above), rounded to
+ * the nearest of the protocol's 8 supported codes (see
+ * proto_bandwidth_code() in protocol.c) where the real width isn't
+ * exactly one of them - the hardware has no code for an arbitrary
+ * width, and proto_build_signal_control() rejects anything that
+ * doesn't match the table exactly. Units 2/3/4/5 are the ones that
+ * needed rounding:
+ *   1: 100 (exact)        5: 170 -> 150 (real range 1710-1880)
+ *   2: 70  -> 50 (real range 824-894)     6: 250 (exact)
+ *   3: 80  -> 100 (real range 880-960)    7-16: all exact
+ *   4: 85  -> 100 (real range 1427-1512)
+ * so units 2/3/4/5 transmit a band slightly narrower/wider than their
+ * true range - flagged here rather than silently rounded, since it's
+ * a real (if small) mismatch from the actual hardware band. */
+static const int CHANNEL_BANDWIDTH_MHZ[MAX_CHANNELS] = {
+    100, 50, 100, 100, 150, 250, 50, 50,
+    100, 150, 200, 150, 200, 200, 200, 250
+};
+
+int channel_bandwidth_mhz(int index) {
+    return CHANNEL_BANDWIDTH_MHZ[index];
 }
 
 static void enqueue(int index, const ProtoFrame *frame, const char *label,
@@ -160,7 +190,7 @@ void channel_set_level(int index, int level) {
     }
 
     proto_build_signal_control(&frame, ch->address, ch->mode,
-                                (uint16_t)channel_freq_mhz(index), CHANNEL_BLIND_BANDWIDTH_MHZ, power_db);
+                                (uint16_t)channel_freq_mhz(index), (uint16_t)channel_bandwidth_mhz(index), power_db);
     wsprintfA(label, "Level -> %d", level);
     enqueue(index, &frame, label, true, true, true, level, false, 0);
     ch->last_level = level;
@@ -175,7 +205,7 @@ void channel_set_mode(int index, uint8_t mode) {
     const char *mode_name;
 
     proto_build_signal_control(&frame, ch->address, mode,
-                                (uint16_t)channel_freq_mhz(index), CHANNEL_BLIND_BANDWIDTH_MHZ, power_db);
+                                (uint16_t)channel_freq_mhz(index), (uint16_t)channel_bandwidth_mhz(index), power_db);
     mode_name = proto_mode_name(mode);
     wsprintfA(label, "Mode -> %s", mode_name ? mode_name : "?");
     enqueue(index, &frame, label, false, false, false, 0, true, mode);

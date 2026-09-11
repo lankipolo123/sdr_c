@@ -12,12 +12,15 @@
  * would make the whole panel feel unresponsive for no real gain in
  * trustworthiness.
  *
- * Bandwidth is NOT a per-channel control (matching the reference apps) -
- * every Signal Control frame uses the fixed CHANNEL_BLIND_BANDWIDTH_MHZ.
- * Frequency IS real per-channel: each of the 16 channels has its own
- * actual operating frequency (see channel_freq_mhz()), not one shared
- * default - only bandwidth stays a single fixed value across all of
- * them.
+ * Frequency and bandwidth are both real per-channel values now (see
+ * channel_freq_mhz()/channel_bandwidth_mhz()) - each of the 16 channels
+ * has its own actual operating band, not one shared default for
+ * either. Bandwidth is constrained to the hardware protocol's 8
+ * supported codes (10/20/50/100/150/200/250/300 MHz - see
+ * proto_bandwidth_code() in protocol.c), so a few channels' real
+ * bandwidth is rounded to the nearest supported code rather than sent
+ * exactly - see the comment above CHANNEL_BANDWIDTH_MHZ in channels.c
+ * for exactly which ones and by how much.
  *
  * All 16 channels share one physical serial connection, so sends queue
  * through a simple FIFO - only one frame is ever in flight at a time.
@@ -30,8 +33,6 @@
 
 #define MAX_CHANNELS 16
 #define CHANNEL_SEND_SETTLE_MS 300
-
-#define CHANNEL_BLIND_BANDWIDTH_MHZ 100
 
 #define LEVEL_OFF    0
 #define LEVEL_LOW    1
@@ -70,6 +71,13 @@ int channel_level_power_db(int level);
  * Unit 1..16) - exposed for UI code that needs to show the real,
  * accurate commanded frequency. */
 int channel_freq_mhz(int index);
+
+/* Each channel's real, fixed bandwidth in MHz - like channel_freq_mhz(),
+ * exposed for UI code. Rounded to the nearest of the protocol's 8
+ * supported bandwidth codes where the real band's width isn't exactly
+ * one of them (see the comment above CHANNEL_BANDWIDTH_MHZ in
+ * channels.c). */
+int channel_bandwidth_mhz(int index);
 
 /* Call every timer tick: starts the next queued send if the bus is free,
  * and applies a settled send's state once its settle delay has passed. */
