@@ -14,18 +14,17 @@
       </requestedPrivileges>
     </security>
   </trustInfo>
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity
-        type="win32"
-        name="Microsoft.Windows.Common-Controls"
-        version="6.0.0.0"
-        processorArchitecture="*"
-        publicKeyToken="6595b64144ccf1df"
-        language="*"
-      />
-    </dependentAssembly>
-  </dependency>
+  <!-- Deliberately NOT declaring the Common-Controls v6 dependency here.
+       That switches every control to Windows' themed (visual-styles)
+       rendering, drawn directly by uxtheme.dll - including a native
+       hover/hot-track highlight on combo boxes that bypasses this
+       app's WM_CTLCOLORSTATIC-based dark theming entirely (confirmed:
+       a white hover highlight showing through on the Port combos was
+       traced back to this). Every control in this app is already
+       manually owner-drawn or re-themed by hand, so v6 gives nothing
+       here but that regression - staying on the classic (v5, unthemed)
+       common controls is the correct choice for this app specifically,
+       not an oversight. -->
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <!-- Windows 7 through 11 -->
