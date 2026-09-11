@@ -2838,19 +2838,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     g_last_client_w = new_w;
                     g_last_client_h = new_h;
                     relayout_for_size(hwnd, new_w, new_h);
-                    /* Maximizing/resizing (via the titlebar buttons,
-                     * double-click, or a drag) can leave this window not
-                     * fully holding input focus - the very next click
-                     * anywhere just reclaims it instead of reaching
-                     * whatever control is under the cursor (reported as
-                     * "Unit 1/2 don't respond" right after resizing; a
-                     * second click always worked - classic focus-not-
-                     * reclaimed symptom, not a per-card bug). Explicitly
-                     * re-asserting focus here means that first click
-                     * lands on its actual target instead of being spent
-                     * on reactivating the window. */
-                    SetForegroundWindow(hwnd);
-                    SetFocus(hwnd);
                 }
             }
             return 0;
