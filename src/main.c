@@ -3173,15 +3173,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return TRUE;
                 }
 
-                /* ON/OFF are two real, separate buttons (not one toggle) -
-                 * whichever is active gets a solid fill (green ON / red
-                 * OFF), matching the reference apps' PowerButton exactly. */
+                /* ON/OFF are two real, separate buttons (not one toggle).
+                 * Only ON gets a strong color when active (solid green) -
+                 * OFF being the channel's normal/idle state doesn't get
+                 * red anymore (that read as an alarm on every one of the
+                 * usually-many idle cards, competing with ON's green and
+                 * making it hard to tell which state a card was actually
+                 * in - reported directly). OFF-active now gets a muted
+                 * gray fill instead: still visibly "the current state",
+                 * just not shouting about it. */
                 if (offset == IDC_CH_ON_OFFSET || offset == IDC_CH_OFF_OFFSET) {
                     const ChannelState *ch = channels_get(idx);
                     bool active = (offset == IDC_CH_ON_OFFSET) ? ch->output_on : !ch->output_on;
-                    HBRUSH fill = (active && !disabled)
-                        ? (offset == IDC_CH_ON_OFFSET ? g_brush_connected : g_brush_disconnected)
-                        : g_brush_panel;
+                    HBRUSH fill = !active ? g_brush_panel
+                        : disabled ? g_brush_panel
+                        : (offset == IDC_CH_ON_OFFSET ? g_brush_connected : g_brush_level_off);
                     HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
                     HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
                     HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, fill);
