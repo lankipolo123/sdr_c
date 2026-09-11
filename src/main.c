@@ -60,8 +60,8 @@
  * ~223 its shifted right edge starts overlapping the Bulk Actions
  * card's left border (444+BULK_X_SHIFT), which is what caused the
  * card's edge to look cut/incomplete at 225. */
-#define CONN_X_SHIFT 218
-#define BULK_X_SHIFT 80
+#define CONN_X_SHIFT 271
+#define BULK_X_SHIFT 133
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -1915,13 +1915,14 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
     g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 58, 16);
-    /* Muted mode name next to the header, matching the design mockup's
-     * card title row - shows the applied mode (ch->mode), updated in
-     * WM_COMMAND when Set is clicked, not the dropdown's uncommitted
-     * selection. SS_END_ELLIPSIS since the longer mode names won't all
-     * fit in the space left before the gauge column. */
+    /* Muted mode name next to the header - kept as a real control (still
+     * updated via SetWindowTextA everywhere the applied mode changes),
+     * just hidden: direct request was to remove it from the card, and
+     * the mode is already shown in full in the combo directly below it,
+     * so the truncated "Pseudo ..." repeat here was redundant. */
     g_card_mode_lbl[index] = add_ctrl(hwnd, "STATIC", proto_mode_name(PROTO_MODE_WHITE_NOISE),
                                         SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, x + 88, y + 8, 60, 14, 0);
+    ShowWindow(g_card_mode_lbl[index], SW_HIDE);
 
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
                            x + 8, y + 24, 82, 100, channel_mode_id(index));
