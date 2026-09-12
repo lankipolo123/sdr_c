@@ -442,6 +442,13 @@ static void make_combo_readonly(HWND combo) {
     make_combo_readonly_ex(combo, NULL);
 }
 
+/* Forward declarations - both defined further down (gradient_fill_rect
+ * is shared with the gauges, draw_app_logo_mark with nothing else),
+ * but panel_subclass_proc below needs them for the header's logo
+ * badge. */
+static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool vertical);
+static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
+
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
  * with no per-item on/off state to light the border with. */
@@ -603,6 +610,50 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             SelectObject(hdc, old_brush);
         }
 
+        /* Main app logo, badge-mounted in the header's own left free
+         * space (the gap between the panel's left edge and Connection
+         * & Settings' own content, which starts around x=282 panel-
+         * relative once CONN_X_SHIFT is folded in) - direct request to
+         * put the real logo there instead of leaving it empty. A
+         * "silver bubble": a real vertical gradient (light silver at
+         * top, cooler/darker silver at bottom - the same clip-to-
+         * shape-then-GradientFill technique as paint_gradient_pill's
+         * rounded-rect pill, just clipped to a circle instead), a
+         * faked-elevation shadow underneath it like every other panel/
+         * card here, and the vector logo mark on top. */
+        if (hwnd == g_header_panel) {
+            const int bcx = 135, bcy = 90, br = 55;
+            RECT brect;
+            HRGN bubble_clip;
+
+            brect.left = bcx - br;  brect.top = bcy - br;
+            brect.right = bcx + br; brect.bottom = bcy + br;
+
+            old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
+            pen = CreatePen(PS_SOLID, 1, g_shadow_color);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            Ellipse(hdc, brect.left, brect.top, brect.right + CARD_SHADOW_PX, brect.bottom + CARD_SHADOW_PX);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+            SelectObject(hdc, old_brush);
+
+            bubble_clip = CreateEllipticRgn(brect.left, brect.top, brect.right, brect.bottom);
+            SelectClipRgn(hdc, bubble_clip);
+            gradient_fill_rect(hdc, brect, RGB(226, 228, 232), RGB(150, 154, 162), true);
+            SelectClipRgn(hdc, NULL);
+            DeleteObject(bubble_clip);
+
+            pen = CreatePen(PS_SOLID, 1, RGB(110, 113, 120));
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            Ellipse(hdc, brect.left, brect.top, brect.right, brect.bottom);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+
+            draw_app_logo_mark(hdc, bcx, bcy, 78);
+        }
+
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -737,6 +788,53 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
 #define ICON_PLUG 0
 #define ICON_WAVE 2
 #define ICON_LIST 5
+
+/* Main app logo mark - two dark "signal peak" shapes flanking a blue
+ * upward beam, matching src/app.ico (the title-bar/taskbar icon).
+ * Drawn as vector polygons rather than stretching that .ico's bitmap -
+ * it's only 16x16, which blurs badly once scaled up to badge size, so
+ * this is a faithful redraw at whatever size is needed instead. scale
+ * is in 100ths (100 = the size these base points were designed at). */
+static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
+    static const POINT LEFT_BASE[5] = {
+        { -4, -32 }, { -26, 4 }, { -30, 18 }, { -14, 34 }, { -6, 6 }
+    };
+    static const POINT BEAM_BASE[3] = {
+        { 0, -6 }, { -9, 30 }, { 9, 30 }
+    };
+    POINT left_pts[5], right_pts[5], beam_pts[3];
+    HBRUSH mark_brush, old_brush;
+    HPEN old_pen;
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        left_pts[i].x = cx + LEFT_BASE[i].x * scale / 100;
+        left_pts[i].y = cy + LEFT_BASE[i].y * scale / 100;
+        right_pts[i].x = cx - LEFT_BASE[i].x * scale / 100;
+        right_pts[i].y = cy + LEFT_BASE[i].y * scale / 100;
+    }
+    for (i = 0; i < 3; i++) {
+        beam_pts[i].x = cx + BEAM_BASE[i].x * scale / 100;
+        beam_pts[i].y = cy + BEAM_BASE[i].y * scale / 100;
+    }
+
+    old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+
+    mark_brush = CreateSolidBrush(RGB(40, 42, 46));
+    old_brush = (HBRUSH)SelectObject(hdc, mark_brush);
+    Polygon(hdc, left_pts, 5);
+    Polygon(hdc, right_pts, 5);
+    SelectObject(hdc, old_brush);
+    DeleteObject(mark_brush);
+
+    mark_brush = CreateSolidBrush(COLOR_APP_ACCENT);
+    SelectObject(hdc, mark_brush);
+    Polygon(hdc, beam_pts, 3);
+    SelectObject(hdc, old_brush);
+    DeleteObject(mark_brush);
+
+    SelectObject(hdc, old_pen);
+}
 
 static void draw_header_icon(HDC hdc, int x, int y, int type) {
     switch (type) {
