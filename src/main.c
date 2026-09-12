@@ -442,11 +442,8 @@ static void make_combo_readonly(HWND combo) {
     make_combo_readonly_ex(combo, NULL);
 }
 
-/* Forward declarations - both defined further down (gradient_fill_rect
- * is shared with the gauges, draw_app_logo_mark with nothing else),
- * but panel_subclass_proc below needs them for the header's logo
- * badge. */
-static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool vertical);
+/* Forward declaration - defined further down, but panel_subclass_proc
+ * below needs it for the header's logo mark. */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
@@ -610,48 +607,16 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             SelectObject(hdc, old_brush);
         }
 
-        /* Main app logo, badge-mounted in the header's own left free
-         * space (the gap between the panel's left edge and Connection
-         * & Settings' own content, which starts around x=282 panel-
-         * relative once CONN_X_SHIFT is folded in) - direct request to
-         * put the real logo there instead of leaving it empty. A
-         * "silver bubble": a real vertical gradient (light silver at
-         * top, cooler/darker silver at bottom - the same clip-to-
-         * shape-then-GradientFill technique as paint_gradient_pill's
-         * rounded-rect pill, just clipped to a circle instead), a
-         * faked-elevation shadow underneath it like every other panel/
-         * card here, and the vector logo mark on top. */
+        /* Main app logo, in the header's own left free space (the gap
+         * between the panel's left edge and Connection & Settings' own
+         * content, which starts around x=282 panel-relative once
+         * CONN_X_SHIFT is folded in). Just the mark itself, straight
+         * on the panel background - no badge/bubble behind it and no
+         * wordmark text, both tried first and dropped per direct
+         * request ("retain the shape and remove the background and
+         * text"). */
         if (hwnd == g_header_panel) {
-            const int bcx = 135, bcy = 90, br = 55;
-            RECT brect;
-            HRGN bubble_clip;
-
-            brect.left = bcx - br;  brect.top = bcy - br;
-            brect.right = bcx + br; brect.bottom = bcy + br;
-
-            old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
-            pen = CreatePen(PS_SOLID, 1, g_shadow_color);
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            Ellipse(hdc, brect.left, brect.top, brect.right + CARD_SHADOW_PX, brect.bottom + CARD_SHADOW_PX);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-            SelectObject(hdc, old_brush);
-
-            bubble_clip = CreateEllipticRgn(brect.left, brect.top, brect.right, brect.bottom);
-            SelectClipRgn(hdc, bubble_clip);
-            gradient_fill_rect(hdc, brect, RGB(226, 228, 232), RGB(150, 154, 162), true);
-            SelectClipRgn(hdc, NULL);
-            DeleteObject(bubble_clip);
-
-            pen = CreatePen(PS_SOLID, 1, RGB(110, 113, 120));
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            old_brush = (HBRUSH)SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            Ellipse(hdc, brect.left, brect.top, brect.right, brect.bottom);
-            SelectObject(hdc, old_brush);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-
-            draw_app_logo_mark(hdc, bcx, bcy, 78);
+            draw_app_logo_mark(hdc, 135, 90, 100);
         }
 
         EndPaint(hwnd, &ps);
@@ -820,7 +785,7 @@ static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
 
     old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
 
-    mark_brush = CreateSolidBrush(RGB(40, 42, 46));
+    mark_brush = CreateSolidBrush(COLOR_APP_TEXT);
     old_brush = (HBRUSH)SelectObject(hdc, mark_brush);
     Polygon(hdc, left_pts, 5);
     Polygon(hdc, right_pts, 5);
