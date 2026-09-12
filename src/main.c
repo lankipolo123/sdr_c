@@ -21,7 +21,14 @@
 #include "channels.h"
 #include "sensor.h"
 
-#define CLIENT_WIDTH  1343
+/* CLIENT_WIDTH must fit the grid's own minimum width (GRID_RIGHT +
+ * SIDEBAR_X's mirrored right margin, defined further down once CARD_W/
+ * GRID_LEFT exist) with some spare - the window is never allowed to
+ * shrink below this (see WM_GETMINMAXINFO), so if it's too small the
+ * grid would clip/overlap at minimum size. 1650 clears 300-wide cards'
+ * own 1626px requirement with ~24px to spare, same margin the old
+ * 1343 left over the old 224-wide design's 1322px requirement. */
+#define CLIENT_WIDTH  1650
 #define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
@@ -139,12 +146,19 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 /* --- grid layout for the 16 channel cards --- */
 #define GRID_COLS 4
 #define GRID_ROWS 4
-/* Widened a little from the previous 200-wide design (see git history
- * for why). CARD_H sizes to fit the level gauge/tick-label column now
- * - the bottom-row Bandwidth/Address statics that used to extend it
- * are gone too, removed at the same time as the temperature/humidity
- * readouts before them. */
-#define CARD_W 224
+/* Widened again (was 224, before that 200 - see git history) with
+ * 1920x1080 as the target: at that width the 4-column grid still
+ * leaves comfortable room to the right for the signal-area icon (see
+ * get_signal_area_rect()) instead of the grid feeling cramped while
+ * that whole strip sits empty. Every internal control offset in
+ * add_channel_card()/position_channel_card() was redistributed across
+ * the wider card, not just padded on the right - a plain width bump
+ * alone would've left all the content bunched on the left with a dead
+ * gap before the new edge. CARD_H sizes to fit the level gauge/tick-
+ * label column now - the bottom-row Bandwidth/Address statics that
+ * used to extend it are gone too, removed at the same time as the
+ * temperature/humidity readouts before them. */
+#define CARD_W 300
 #define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
 #define GRID_LEFT 380
@@ -2241,7 +2255,7 @@ static void add_channel_card(HWND hwnd, int index) {
     ShowWindow(g_card_mode_lbl[index], SW_HIDE);
 
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 24, 82, 100, channel_mode_id(index));
+                           x + 8, y + 24, 110, 100, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
         SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -2251,26 +2265,26 @@ static void add_channel_card(HWND hwnd, int index) {
     make_combo_readonly_ex(mode_combo, g_card_combo_overlays[index]);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 94, y + 24, 40, 18, channel_set_id(index));
+             x + 126, y + 24, 50, 18, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-             x + 8, y + 44, 60, 18, channel_on_id(index));
+             x + 8, y + 44, 80, 18, channel_on_id(index));
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-             x + 72, y + 44, 60, 18, channel_off_id(index));
+             x + 96, y + 44, 80, 18, channel_off_id(index));
 
     /* SS_NOTIFY: this label doubles as the per-unit kill-switch reset -
      * see IDC_CH_STATUS_OFFSET's comment in resource.h. */
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 8, y + 64, 130, 14, channel_status_id(index));
+             x + 8, y + 64, 170, 14, channel_status_id(index));
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
-    add_channel_gauge(hwnd, x + 148, y + 24, 22, 72, channel_track_id(index));
+    add_channel_gauge(hwnd, x + 200, y + 24, 22, 72, channel_track_id(index));
 
-    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 174, y + 24, 44, 14, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 174, y + 42, 44, 14, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 174, y + 60, 44, 14, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 174, y + 78, 44, 14, channel_lbl_off_id(index));
+    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 226, y + 24, 60, 14, channel_lbl_high_id(index));
+    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 226, y + 42, 60, 14, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 226, y + 60, 60, 14, channel_lbl_low_id(index));
+    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 226, y + 78, 60, 14, channel_lbl_off_id(index));
 
 }
 
@@ -3259,7 +3273,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(58), SY(16));
     PLACE(g_card_mode_lbl[index], x + SX(88), y + SY(8), SX(60), SY(14));
 
-    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(82), 100);
+    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(110), 100);
     /* The mode combo's readonly-theming overlays (arrow + 4 border
      * strips, see make_combo_readonly_ex) are separate sibling windows,
      * not children of the combo, so moving the combo above does NOT
@@ -3294,16 +3308,16 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
             MoveWindow(g_card_combo_overlays[index][4], crc.right - COMBO_BORDER_PX, crc.top, COMBO_BORDER_PX, ch2, FALSE);
         }
     }
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(60), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(44), SX(60), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(126), y + SY(24), SX(50), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(80), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(96), y + SY(44), SX(80), SY(18));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(170), SY(14));
 
-    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
-    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(174), y + SY(42), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(174), y + SY(60), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(174), y + SY(78), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(200), y + SY(24), SX(22), SY(72));
+    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(226), y + SY(24), SX(60), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(226), y + SY(42), SX(60), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(226), y + SY(60), SX(60), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(226), y + SY(78), SX(60), SY(14));
 
 #undef SX
 #undef SY
