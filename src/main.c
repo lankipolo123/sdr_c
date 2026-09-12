@@ -728,7 +728,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             old_extra = SetTextCharacterExtra(hdc, 3);
             SetTextColor(hdc, COLOR_APP_TEXT);
             SetBkMode(hdc, TRANSPARENT);
-            DrawTextA(hdc, "HELIXDEFENDER", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            DrawTextA(hdc, "HELIX DEFENDER", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextCharacterExtra(hdc, old_extra);
             SelectObject(hdc, old_font);
         }
