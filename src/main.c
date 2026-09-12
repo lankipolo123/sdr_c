@@ -761,20 +761,18 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
  * this is a faithful redraw at whatever size is needed instead. scale
  * is in 100ths (100 = the size these base points were designed at). */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
-    /* 4-point kite per side (top / outer / bottom / inner), not a
-     * rounded teardrop - re-derived from app.ico's actual pixel data
-     * (each shape tapers to a real point at both top AND bottom, the
-     * inner edge cuts back up close to center leaving a narrow notch
-     * for the beam, and the two dark points fall short of the very
-     * bottom - the blue beam's own base is what actually reaches the
-     * bottom edge, not the dark shapes). First attempt had this
-     * backwards (dark reaching lower than the beam) - reported as not
-     * matching the real image. */
+    /* Two plain diamonds (top/outer/bottom/inner, symmetric) with a
+     * triangle centered between them - the real logo, measured
+     * directly off the actual reference image's pixel coordinates.
+     * Each diamond's inner vertex sits exactly at center (0,0), same
+     * point as the triangle's apex; each diamond's bottom vertex lines
+     * up exactly with the triangle's base corner on that side - the
+     * three shapes share those edges with no gap and no overlap. */
     static const POINT LEFT_BASE[4] = {
-        { -3, -32 }, { -32, 8 }, { -11, 32 }, { -9, -2 }
+        { -16, -32 }, { -32, 0 }, { -16, 32 }, { 0, 0 }
     };
     static const POINT BEAM_BASE[3] = {
-        { 0, -4 }, { -13, 38 }, { 13, 38 }
+        { 0, 0 }, { -16, 32 }, { 16, 32 }
     };
     POINT left_pts[4], right_pts[4], beam_pts[3];
     HBRUSH mark_brush, old_brush;
