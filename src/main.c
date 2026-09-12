@@ -1279,6 +1279,11 @@ static void ui_show_warning(const char *message) {
  * forward-declared here so conn_on_connected_changed() can gate every
  * channel control on the RS422 link the instant it changes. */
 static void set_channel_controls_enabled(bool enabled);
+/* Also defined below (needs channel_select_id()) - the selection
+ * checkbox is gated on conn_is_connected() too (see its own comment),
+ * so a connect/disconnect has to refresh every card's checkbox the
+ * same way it refreshes every other control. */
+static void ui_update_all_select_checkbox_visibility(void);
 
 static void conn_on_connected_changed(bool connected, void *ctx) {
     (void)ctx;
@@ -1287,6 +1292,7 @@ static void conn_on_connected_changed(bool connected, void *ctx) {
     SetWindowTextA(GetDlgItem(g_hwnd, IDC_CONNECT_BTN), connected ? "Disconnect" : "Connect");
     InvalidateRect(GetDlgItem(g_hwnd, IDC_CONN_STATUS_LBL), NULL, TRUE);
     set_channel_controls_enabled(connected);
+    ui_update_all_select_checkbox_visibility();
 }
 
 static void conn_on_frame(const ProtoParsedFrame *frame, void *ctx) {
@@ -1683,23 +1689,29 @@ static void set_channel_controls_enabled(bool enabled) {
     }
 }
 
-/* Selection checkbox only makes sense to show once there's something to
- * see - either the channel is actually on, or it's already selected (a
- * background-click or Select All on an off channel needs its own
- * visible confirmation, not just the card's accent border). An
- * unselected all-STANDBY grid showing 16 empty checkboxes read as
- * clutter, which is what this was originally added to fix - it just
- * has to also cover "selected while off" or that state would have no
- * checkbox to click again to deselect it. Call this anywhere
- * g_channel_selected[index] or that channel's output_on can have
- * changed. Hiding it doesn't disable selection itself - the checkbox
- * in channel_select_id() still exists and still works, and
- * background-click selection (see g_bulk_select_mode) is untouched
- * either way. */
+/* Selection checkbox is gated on three things, all required: the RS422
+ * link is actually connected (no real "on" without a port to send it
+ * over), the channel is actually on, and the user has opted into
+ * bulk-select by arming Card Click (IDC_BULK_TOGGLE_BTN) - it shouldn't
+ * appear as an available control until they've asked for bulk
+ * selection at all. Call this anywhere any of those three can have
+ * changed: per-channel from ui_refresh_channel() (output_on),
+ * IDC_BULK_TOGGLE_BTN's handler and conn_on_connected_changed() need
+ * the all-channels form below since they affect every card at once.
+ * Hiding it doesn't disable selection itself - the checkbox in
+ * channel_select_id() still exists, and background-click selection
+ * (see g_bulk_select_mode) is separate either way. */
 static void ui_update_select_checkbox_visibility(int index) {
     const ChannelState *ch = channels_get(index);
-    bool show = ch->output_on || g_channel_selected[index];
+    bool show = g_bulk_select_mode && conn_is_connected(&g_conn) && ch->output_on;
     ShowWindow(GetDlgItem(g_hwnd, channel_select_id(index)), show ? SW_SHOW : SW_HIDE);
+}
+
+static void ui_update_all_select_checkbox_visibility(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        ui_update_select_checkbox_visibility(i);
+    }
 }
 
 /* ---- Bulk Actions ----
@@ -1726,7 +1738,6 @@ static void bulk_clear_selection(void) {
         if (g_channel_selected[i]) {
             g_channel_selected[i] = false;
             ui_invalidate_card(i);
-            ui_update_select_checkbox_visibility(i);
         }
     }
     ui_refresh_bulk_selected_label();
@@ -1742,7 +1753,6 @@ static void bulk_select_all(void) {
         if (!g_channel_selected[i]) {
             g_channel_selected[i] = true;
             ui_invalidate_card(i);
-            ui_update_select_checkbox_visibility(i);
         }
     }
     ui_refresh_bulk_selected_label();
@@ -3146,7 +3156,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     if (x >= cx && x < cx + CARD_W && y >= cy && y < cy + card_h) {
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
-                        ui_update_select_checkbox_visibility(idx);
                         ui_refresh_bulk_selected_label();
                         break;
                     }
@@ -3197,6 +3206,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_bulk_select_mode = !g_bulk_select_mode;
                 SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
                                 g_bulk_select_mode ? "Card Click: On" : "Card Click: Off");
+                ui_update_all_select_checkbox_visibility();
                 return 0;
             }
             if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
@@ -3283,7 +3293,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     } else if (offset == IDC_CH_SELECT_OFFSET && code == BN_CLICKED) {
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
-                        ui_update_select_checkbox_visibility(idx);
                         ui_refresh_bulk_selected_label();
                     }
                     return 0;
