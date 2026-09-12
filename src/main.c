@@ -610,12 +610,40 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         /* Main app logo, in the header's own left free space (the gap
          * between the panel's left edge and Connection & Settings' own
          * content, which starts around x=282 panel-relative once
-         * CONN_X_SHIFT is folded in). Just the mark itself, straight
-         * on the panel background - no badge/bubble behind it and no
-         * wordmark text, both tried first and dropped per direct
-         * request ("retain the shape and remove the background and
-         * text"). */
+         * CONN_X_SHIFT is folded in). A plain white card behind it -
+         * the real logo's own colors (dark gray + blue) are designed
+         * for a white background, same as the reference image itself;
+         * back on the dark panel straight, the dark shapes had to be
+         * lightened to stay visible at all, which isn't the real
+         * logo's actual color. White card first, then the mark drawn
+         * in its true dark-gray-on-white colors on top. */
         if (hwnd == g_header_panel) {
+            RECT lrc;
+            HBRUSH white_brush;
+
+            lrc.left = 65;  lrc.top = 20;
+            lrc.right = 205; lrc.bottom = 160;
+
+            old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
+            pen = CreatePen(PS_SOLID, 1, g_shadow_color);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            RoundRect(hdc, lrc.left, lrc.top, lrc.right, lrc.bottom,
+                      CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+            SelectObject(hdc, old_brush);
+
+            white_brush = CreateSolidBrush(RGB(255, 255, 255));
+            old_brush = (HBRUSH)SelectObject(hdc, white_brush);
+            pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            RoundRect(hdc, lrc.left, lrc.top, lrc.right - CARD_SHADOW_PX, lrc.bottom - CARD_SHADOW_PX,
+                      CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+            SelectObject(hdc, old_brush);
+            DeleteObject(white_brush);
+
             draw_app_logo_mark(hdc, 135, 90, 100);
         }
 
@@ -792,7 +820,7 @@ static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
 
     old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
 
-    mark_brush = CreateSolidBrush(COLOR_APP_TEXT);
+    mark_brush = CreateSolidBrush(RGB(66, 66, 66));
     old_brush = (HBRUSH)SelectObject(hdc, mark_brush);
     Polygon(hdc, left_pts, 4);
     Polygon(hdc, right_pts, 4);
