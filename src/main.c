@@ -1683,6 +1683,25 @@ static void set_channel_controls_enabled(bool enabled) {
     }
 }
 
+/* Selection checkbox only makes sense to show once there's something to
+ * see - either the channel is actually on, or it's already selected (a
+ * background-click or Select All on an off channel needs its own
+ * visible confirmation, not just the card's accent border). An
+ * unselected all-STANDBY grid showing 16 empty checkboxes read as
+ * clutter, which is what this was originally added to fix - it just
+ * has to also cover "selected while off" or that state would have no
+ * checkbox to click again to deselect it. Call this anywhere
+ * g_channel_selected[index] or that channel's output_on can have
+ * changed. Hiding it doesn't disable selection itself - the checkbox
+ * in channel_select_id() still exists and still works, and
+ * background-click selection (see g_bulk_select_mode) is untouched
+ * either way. */
+static void ui_update_select_checkbox_visibility(int index) {
+    const ChannelState *ch = channels_get(index);
+    bool show = ch->output_on || g_channel_selected[index];
+    ShowWindow(GetDlgItem(g_hwnd, channel_select_id(index)), show ? SW_SHOW : SW_HIDE);
+}
+
 /* ---- Bulk Actions ----
  * Click a card's background to select it (see card_panel_subclass_proc);
  * these apply to every selected channel at once. Same safety gating as
@@ -1707,6 +1726,7 @@ static void bulk_clear_selection(void) {
         if (g_channel_selected[i]) {
             g_channel_selected[i] = false;
             ui_invalidate_card(i);
+            ui_update_select_checkbox_visibility(i);
         }
     }
     ui_refresh_bulk_selected_label();
@@ -1722,6 +1742,7 @@ static void bulk_select_all(void) {
         if (!g_channel_selected[i]) {
             g_channel_selected[i] = true;
             ui_invalidate_card(i);
+            ui_update_select_checkbox_visibility(i);
         }
     }
     ui_refresh_bulk_selected_label();
@@ -2160,13 +2181,7 @@ static void ui_refresh_channel(int index) {
      * repaint can't be trusted alone to leave its siblings alone. */
     if (!cache->valid || cache->output_on != ch->output_on) {
         ui_invalidate_card(index);
-        /* Selection checkbox only makes sense to show once a channel is
-         * actually on - an all-STANDBY grid showing 16 empty checkboxes
-         * read as clutter. Hiding it doesn't disable selection itself:
-         * the checkbox in channel_select_id() still exists and still
-         * works the moment the channel turns on, and background-click
-         * selection (see g_bulk_select_mode) is untouched either way. */
-        ShowWindow(GetDlgItem(g_hwnd, channel_select_id(index)), ch->output_on ? SW_SHOW : SW_HIDE);
+        ui_update_select_checkbox_visibility(index);
     }
 
     cache->valid = true;
@@ -3131,6 +3146,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     if (x >= cx && x < cx + CARD_W && y >= cy && y < cy + card_h) {
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
+                        ui_update_select_checkbox_visibility(idx);
                         ui_refresh_bulk_selected_label();
                         break;
                     }
@@ -3267,6 +3283,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     } else if (offset == IDC_CH_SELECT_OFFSET && code == BN_CLICKED) {
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
+                        ui_update_select_checkbox_visibility(idx);
                         ui_refresh_bulk_selected_label();
                     }
                     return 0;
