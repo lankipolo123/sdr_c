@@ -1,4 +1,4 @@
-/* Digital Noise Configuration - Multi: 16-channel blind-send control panel.
+/* ECM Management System: 16-channel blind-send control panel.
  * Separate build from the single-channel app (../src) - shares the
  * protocol/connection/serial_port layer unchanged (copied in, not
  * touched), but uses its own channels.c blind-send logic instead of
@@ -728,7 +728,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             old_extra = SetTextCharacterExtra(hdc, 3);
             SetTextColor(hdc, COLOR_APP_TEXT);
             SetBkMode(hdc, TRANSPARENT);
-            DrawTextA(hdc, "HELIX DEFENDER", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            DrawTextA(hdc, "HELIX DEFENSE", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextCharacterExtra(hdc, old_extra);
             SelectObject(hdc, old_font);
         }
@@ -3946,7 +3946,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
      * overhead worse, not better (real hardware showed panels rendering
      * with all their content missing/delayed). The actual cost was
      * draw_dot_grid() below - fixed properly there instead. */
-    hwnd = CreateWindowExA(0, "DigitalNoiseConfigMultiMainWindow", "Digital Noise Configuration - Multi",
+    hwnd = CreateWindowExA(0, "DigitalNoiseConfigMultiMainWindow", "ECM Management System",
                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME,
                             CW_USEDEFAULT, CW_USEDEFAULT,
                             rect.right - rect.left, rect.bottom - rect.top,
