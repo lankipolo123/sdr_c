@@ -163,6 +163,7 @@ static HINSTANCE g_hinst;
 static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
+static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
 static WNDPROC g_panel_orig_proc;
 static WNDPROC g_combo_edit_orig_proc;
 static bool g_combo_edit_no_recurse;
@@ -619,10 +620,31 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * gray + blue) are designed for a white surface, same as the
          * reference image itself, so it still needs *some* white
          * behind it to read correctly - a full white card was tried
-         * first and swapped for this per direct request. */
+         * first and swapped for this per direct request.
+         *
+         * Shifted up from the header's vertical center (was cy=90) to
+         * leave room for the MILITRONIX wordmark underneath it. */
         if (hwnd == g_header_panel) {
-            draw_app_logo_silhouette(hdc, 135, 90, 106, RGB(255, 255, 255));
-            draw_app_logo_mark(hdc, 135, 90, 100);
+            RECT wm_rc;
+            HFONT old_font;
+            int old_extra;
+
+            draw_app_logo_silhouette(hdc, 135, 68, 106, RGB(255, 255, 255));
+            draw_app_logo_mark(hdc, 135, 68, 100);
+
+            wm_rc.left = 20; wm_rc.top = 118; wm_rc.right = 250; wm_rc.bottom = 142;
+            old_font = (HFONT)SelectObject(hdc, g_logo_font);
+            /* Letter-spacing - CreateFontA has no such parameter, this
+             * is the actual mechanism (extra px added after every
+             * glyph) - matches the reference wordmark's wide tracking,
+             * a plain default-spaced draw reads noticeably tighter/
+             * different from it. */
+            old_extra = SetTextCharacterExtra(hdc, 3);
+            SetTextColor(hdc, COLOR_APP_TEXT);
+            SetBkMode(hdc, TRANSPARENT);
+            DrawTextA(hdc, "MILITRONIX", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SetTextCharacterExtra(hdc, old_extra);
+            SelectObject(hdc, old_font);
         }
 
         EndPaint(hwnd, &ps);
@@ -2886,6 +2908,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_header_font = g_font;
             }
 
+            /* Bold + wide (FW_BLACK) for the MILITRONIX wordmark under
+             * the logo mark - the reference's own lettering reads as a
+             * heavy geometric sans, not a normal-weight label; letter-
+             * spacing is added separately at draw time via
+             * SetTextCharacterExtra, not something CreateFontA controls. */
+            g_logo_font = CreateFontA(-16, 0, 0, 0, FW_BLACK, FALSE, FALSE, FALSE,
+                                       ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                       DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            if (!g_logo_font) {
+                g_logo_font = g_header_font;
+            }
+
             build_controls(hwnd);
             refresh_port_list();
             refresh_sensor_port_list();
@@ -3360,6 +3394,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
+            if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
             /* Only delete g_font if it's the CreateFontA() result, not
              * the GetStockObject() fallback - stock objects must never
              * be passed to DeleteObject(). */
