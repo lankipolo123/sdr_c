@@ -164,12 +164,9 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 /* Right edge of the 4-column grid - GRID_LEFT plus 4 card widths and 3
  * gaps between them (no trailing gap after the last column). Anything
  * wider than this, the grid itself never uses (see CARD_H_MAX's
- * comment on why cards don't grow sideways) - g_signal_panel fills
- * that space instead, appearing once there's SIGNAL_PANEL_MIN_W of it
- * to work with and staying hidden below that rather than rendering as
- * a cramped sliver. */
+ * comment on why cards don't grow sideways) - see
+ * get_signal_area_rect() for what fills that space instead. */
 #define GRID_RIGHT (GRID_LEFT + GRID_COLS * (CARD_W + CARD_GAP) - CARD_GAP)
-#define SIGNAL_PANEL_MIN_W 100
 #define SIGNAL_TICKS_PER_STEP 3 /* 300ms per pulse step at ID_POLL_TIMER's 100ms */
 
 #define SIDEBAR_X 10
@@ -256,20 +253,11 @@ static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the sidebar's static labels these need
                                  * their own handle to reposition. */
 static HWND g_log_header_lbl;
-/* Sits in the dead space to the right of the channel grid on any
- * window wider than the grid's fixed width - the grid itself never
- * stretches (see relayout_for_size()'s comment on why), so that space
- * would otherwise just stay empty background. Shows the MILITRONIX
- * mark with animated signal-wave arcs above it, but only while the
- * link is actually connected AND at least one channel is on (see
- * g_signal_wave_phase and any_channel_on()) - otherwise it paints
- * nothing, same as the empty space it replaces. Hidden entirely (not
- * just blank) when the window isn't wide enough to fit it without
- * looking cramped - see relayout_for_size(). */
-static HWND g_signal_panel;
-static int g_signal_wave_phase; /* advances every SIGNAL_TICKS_PER_STEP
-                                   * ticks of ID_POLL_TIMER while active -
-                                   * see WM_TIMER's handling below */
+/* Drives the signal-wave pulse drawn in the dead space right of the
+ * grid (see get_signal_area_rect()) - advances every
+ * SIGNAL_TICKS_PER_STEP ticks of ID_POLL_TIMER while active, see
+ * WM_TIMER's handling below. */
+static int g_signal_wave_phase;
 static int g_signal_tick_counter;
 static bool g_signal_active_prev; /* so WM_TIMER can repaint once, not every
                                     * tick, on the transition to inactive */
@@ -511,9 +499,8 @@ static void make_combo_readonly(HWND combo) {
     make_combo_readonly_ex(combo, NULL);
 }
 
-/* Used by g_signal_panel's paint (is there anything to show a "signal"
- * for?) and WM_TIMER's animation gating - defined this early since
- * panel_subclass_proc below needs it. */
+/* Used by the signal-wave draw (is there anything to show a "signal"
+ * for?) and WM_TIMER's animation gating. */
 static bool any_channel_on(void) {
     int i;
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -546,30 +533,6 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
-
-        /* g_signal_panel skips every bit of the shared border/shadow/
-         * card chrome below - a bordered empty box sitting in otherwise
-         * plain background read as a stray, broken card when nothing
-         * was active in it (direct feedback: "why is there a card
-         * here"). Flat-fills with the same base tone the page's dot
-         * pattern itself is built on (see build_dot_pattern_brush() -
-         * its tile is g_brush_page underneath the dots), so it blends
-         * into the surrounding background rather than announcing
-         * itself as a panel - the logo+waves then read as floating
-         * there directly, with no outline, once there's something
-         * real to show. */
-        if (hwnd == g_signal_panel) {
-            FillRect(hdc, &rc, g_brush_page);
-            if (conn_is_connected(&g_conn) && any_channel_on()) {
-                int cx = (rc.left + rc.right) / 2;
-                int cy = rc.top + (rc.bottom - rc.top) * 3 / 5;
-                draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
-                draw_app_logo_mark(hdc, cx, cy, 100);
-                draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
-            }
-            EndPaint(hwnd, &ps);
-            return 0;
-        }
 
         /* Faked elevation: a dark shadow shape filling the whole rect,
          * then the real panel body drawn shrunk into its top-left,
@@ -3092,11 +3055,6 @@ static void build_controls(HWND hwnd) {
         add_channel_card(hwnd, idx);
     }
 
-    /* Placeholder rect - real position/size (and whether it's shown at
-     * all) is set by relayout_for_size() once the actual client width
-     * is known, same as every other panel that depends on window size. */
-    g_signal_panel = add_panel(hwnd, GRID_LEFT, CONTENT_TOP, 1, 1);
-
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
         char label[16];
         wsprintfA(label, "%d", BAUD_OPTIONS[i]);
@@ -3232,6 +3190,34 @@ static int log_panel_y_for(int card_h) {
     return CONTENT_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H;
 }
 
+/* Where the MILITRONIX mark + signal-wave pulse draw, in the dead
+ * space right of the grid (see CARD_H_MAX's comment on why the grid
+ * itself never widens to fill it) - drawn straight onto the main
+ * window's own background in WM_ERASEBKGND, not a separate child
+ * window/panel: an earlier version used a child window there and even
+ * borderless it still read as a distinct box sitting in the
+ * background (direct feedback: "why is there a card here"), because
+ * its own fill could never quite be the SAME paint call as the
+ * surrounding dot pattern. Drawing inline after that same fill has no
+ * seam to see, because there isn't a second rect at all. Returns false
+ * (nothing to draw) when there isn't SIGNAL_AREA_MIN_W of room, using
+ * the last size relayout_for_size() actually ran for. */
+#define SIGNAL_AREA_MIN_W 100
+static bool get_signal_area_rect(RECT *out) {
+    int card_h = channel_card_height(g_last_client_h);
+    int log_y = log_panel_y_for(card_h);
+    int x = GRID_RIGHT + CARD_GAP;
+    int w = g_last_client_w - SIDEBAR_X - x;
+    if (w < SIGNAL_AREA_MIN_W) {
+        return false;
+    }
+    out->left = x;
+    out->top = CONTENT_TOP;
+    out->right = x + w;
+    out->bottom = log_y + LOG_PANEL_H;
+    return true;
+}
+
 /* Recomputes the whole layout for a new client size: the header bar
  * stretches horizontally to fill the wider client area, and the 16
  * cards grow TALLER (never wider - see CARD_H_MAX's comment on why
@@ -3268,23 +3254,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int card_x = GRID_LEFT + col * (CARD_W + CARD_GAP);
         int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
         position_channel_card(hwnd, i, card_x, card_y, CARD_W, card_h);
-    }
-
-    /* Dead space to the right of the grid - width is whatever's left
-     * between the grid's right edge and the same margin SIDEBAR_X
-     * mirrors on the left; height matches the sidebar/grid exactly
-     * (log_y + LOG_PANEL_H - CONTENT_TOP, the same expression used for
-     * g_sidebar_panel just above). Hidden outright below
-     * SIGNAL_PANEL_MIN_W rather than shown too narrow to read. */
-    {
-        int sig_x = GRID_RIGHT + CARD_GAP;
-        int sig_w = client_w - SIDEBAR_X - sig_x;
-        if (sig_w >= SIGNAL_PANEL_MIN_W) {
-            MoveWindow(g_signal_panel, sig_x, CONTENT_TOP, sig_w, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
-            ShowWindow(g_signal_panel, SW_SHOWNA);
-        } else {
-            ShowWindow(g_signal_panel, SW_HIDE);
-        }
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -3406,6 +3375,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         case WM_TIMER:
             if (wParam == ID_POLL_TIMER) {
                 bool signal_active;
+                RECT sig_rc;
 
                 conn_poll(&g_conn);
                 channels_poll();
@@ -3416,22 +3386,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ui_refresh_kill_switch();
                 InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
 
-                /* g_signal_panel's wave pulse - stepped every
-                 * SIGNAL_TICKS_PER_STEP ticks (slower than the 100ms
-                 * poll itself would give a distractingly fast flicker),
-                 * plus one extra repaint on the active->inactive edge
-                 * so the panel actually clears instead of freezing on
-                 * its last frame. */
+                /* Signal-wave pulse - stepped every SIGNAL_TICKS_PER_STEP
+                 * ticks (slower than the 100ms poll itself would give a
+                 * distractingly fast flicker), plus one extra repaint on
+                 * the active->inactive edge so it actually clears back
+                 * to plain background instead of freezing on its last
+                 * frame. Only that one small rect is invalidated (with
+                 * erase, so WM_ERASEBKGND's draw actually reruns), not
+                 * the whole window. */
                 signal_active = conn_is_connected(&g_conn) && any_channel_on();
                 if (signal_active) {
                     g_signal_tick_counter++;
                     if (g_signal_tick_counter >= SIGNAL_TICKS_PER_STEP) {
                         g_signal_tick_counter = 0;
                         g_signal_wave_phase++;
-                        InvalidateRect(g_signal_panel, NULL, FALSE);
+                        if (get_signal_area_rect(&sig_rc)) {
+                            InvalidateRect(hwnd, &sig_rc, TRUE);
+                        }
                     }
                 } else if (g_signal_active_prev) {
-                    InvalidateRect(g_signal_panel, NULL, FALSE);
+                    if (get_signal_area_rect(&sig_rc)) {
+                        InvalidateRect(hwnd, &sig_rc, TRUE);
+                    }
                 }
                 g_signal_active_prev = signal_active;
             }
@@ -3479,6 +3455,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             /* Pattern brush already encodes the page background color
              * in its tile - no separate full-rect FillRect needed. */
             FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
+
+            /* MILITRONIX mark + signal-wave pulse, straight over the
+             * dot pattern just filled above - see
+             * get_signal_area_rect()'s comment for why this is drawn
+             * inline here rather than as a separate window. */
+            if (conn_is_connected(&g_conn) && any_channel_on()) {
+                RECT sig_rc;
+                if (get_signal_area_rect(&sig_rc)) {
+                    int cx = (sig_rc.left + sig_rc.right) / 2;
+                    int cy = sig_rc.top + (sig_rc.bottom - sig_rc.top) * 3 / 5;
+                    draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
+                    draw_app_logo_mark(hdc, cx, cy, 100);
+                    draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
+                }
+            }
             return 1;
         }
 
