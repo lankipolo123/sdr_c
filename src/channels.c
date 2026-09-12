@@ -27,6 +27,24 @@ static bool g_inflight;
 static DWORD g_settle_deadline;
 static SendRequest g_inflight_req;
 
+/* What the last thing actually QUEUED for each channel asked for -
+ * distinct from ChannelState's own output_on/level, which only update
+ * once a queued send has gone out and settled (see CHANNEL_SEND_SETTLE_MS),
+ * up to 300ms behind. channel_set_level()/channel_turn_output_on()/
+ * channel_turn_output_off() use this to skip re-enqueueing a request
+ * that's already the last one queued for that channel - without it,
+ * the gauge's drag handler (which calls channel_set_level() on every
+ * single WM_MOUSEMOVE tick, dozens of times a second) floods the one-
+ * at-a-time 300ms-per-item queue with duplicates of the exact same
+ * command, and the UI feels stuck "catching up" for seconds after you
+ * let go. -1 (unknown) until the first real send for that channel this
+ * run - a value restored from .ini via channel_restore_saved() is
+ * deliberately NOT reflected here, since that's remembered UI state,
+ * not something actually sent to the hardware yet (see that function's
+ * comment). */
+static int g_last_queued_output[MAX_CHANNELS]; /* -1 unknown, 0 off, 1 on */
+static int g_last_queued_level[MAX_CHANNELS];  /* -1 unknown, else LEVEL_* */
+
 void channels_init(Connection *conn) {
     int i;
     g_conn = conn;
@@ -43,6 +61,8 @@ void channels_init(Connection *conn) {
         g_channels[i].busy = false;
         g_channels[i].unconfirmed = false;
         lstrcpynA(g_channels[i].last_command, "-", (int)sizeof(g_channels[i].last_command));
+        g_last_queued_output[i] = -1;
+        g_last_queued_level[i] = -1;
     }
 }
 
@@ -153,15 +173,25 @@ static void enqueue(int index, const ProtoFrame *frame, const char *label,
 void channel_turn_output_on(int index) {
     ProtoFrame frame;
     ChannelState *ch = &g_channels[index];
+    if (g_last_queued_output[index] == 1 && g_last_queued_level[index] == ch->last_level) {
+        return; /* already the last thing queued for this channel */
+    }
     proto_build_output_switch(&frame, ch->address, true);
     enqueue(index, &frame, "Output ON", true, true, true, ch->last_level, false, 0);
+    g_last_queued_output[index] = 1;
+    g_last_queued_level[index] = ch->last_level;
 }
 
 void channel_turn_output_off(int index) {
     ProtoFrame frame;
     ChannelState *ch = &g_channels[index];
+    if (g_last_queued_output[index] == 0) {
+        return; /* already the last thing queued for this channel */
+    }
     proto_build_output_switch(&frame, ch->address, false);
     enqueue(index, &frame, "Output OFF", true, false, true, LEVEL_OFF, false, 0);
+    g_last_queued_output[index] = 0;
+    g_last_queued_level[index] = LEVEL_OFF;
 }
 
 void channel_set_level(int index, int level) {
@@ -176,17 +206,24 @@ void channel_set_level(int index, int level) {
         return;
     }
 
+    if (g_last_queued_output[index] == 1 && g_last_queued_level[index] == level) {
+        return; /* already the last thing queued - see g_last_queued_output's
+                  * comment: without this, dragging the gauge re-enqueues the
+                  * exact same command on every WM_MOUSEMOVE tick. */
+    }
+
     power_db = channel_level_power_db(level);
     power_code = proto_power_code(power_db);
     (void)power_code; /* proto_build_signal_control re-derives this itself */
 
-    if (!ch->output_on) {
+    if (g_last_queued_output[index] != 1) {
         /* Signal Control alone doesn't re-enable RF output on this
          * hardware (confirmed in the reference app) - queue an explicit
          * Output ON first, same bus, same order. */
         ProtoFrame on_frame;
         proto_build_output_switch(&on_frame, ch->address, true);
         enqueue(index, &on_frame, "Output ON (resume)", true, true, false, 0, false, 0);
+        g_last_queued_output[index] = 1;
     }
 
     proto_build_signal_control(&frame, ch->address, ch->mode,
@@ -194,6 +231,7 @@ void channel_set_level(int index, int level) {
     wsprintfA(label, "Level -> %d", level);
     enqueue(index, &frame, label, true, true, true, level, false, 0);
     ch->last_level = level;
+    g_last_queued_level[index] = level;
 }
 
 void channel_set_mode(int index, uint8_t mode) {
