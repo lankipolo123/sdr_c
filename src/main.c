@@ -1060,23 +1060,27 @@ static void draw_wave_arc(HDC hdc, int cx, int apex_y, int r, COLORREF color) {
  * How many rings show scales with active_count (how many of the 16
  * channels are actually ON, from count_channels_on()) rather than
  * always drawing the same fixed set - a handful of live channels
- * reads as a small blip, the whole rack going up reads as a bigger
- * broadcast. Capped by bounds (the reserved signal area - see
+ * still reads as a real broadcast (not a single lonely ring - that
+ * read as broken, not "just started"), the whole rack going up reads
+ * as a bigger one. Capped by bounds (the reserved signal area - see
  * get_signal_area_rect()) so a narrow/short window never grows rings
  * out past the space actually reserved for them. */
-#define SIGNAL_WAVE_MAX_RINGS 5
+#define SIGNAL_WAVE_MIN_RINGS 3
+#define SIGNAL_WAVE_MAX_RINGS 8
 static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase, int active_count, const RECT *bounds) {
-    static const int base_r[SIGNAL_WAVE_MAX_RINGS] = { 16, 28, 40, 52, 64 };
+    static const int base_r[SIGNAL_WAVE_MAX_RINGS] = { 16, 28, 40, 52, 64, 76, 88, 100 };
     int apex_y = cy - (32 * scale / 100);
     int margin = 6;
     int max_r_h = (bounds->right - bounds->left) / 2 - margin;
     int max_r_v = apex_y - bounds->top - margin;
     int max_r = max_r_h < max_r_v ? max_r_h : max_r_v;
-    int want = (active_count * SIGNAL_WAVE_MAX_RINGS + MAX_CHANNELS - 1) / MAX_CHANNELS;
+    int span = SIGNAL_WAVE_MAX_RINGS - SIGNAL_WAVE_MIN_RINGS;
+    int want = SIGNAL_WAVE_MIN_RINGS
+        + ((active_count - 1) * span + (MAX_CHANNELS - 2)) / (MAX_CHANNELS - 1);
     int n = 0, i;
 
-    if (want < 1) {
-        want = 1;
+    if (want < SIGNAL_WAVE_MIN_RINGS) {
+        want = SIGNAL_WAVE_MIN_RINGS;
     } else if (want > SIGNAL_WAVE_MAX_RINGS) {
         want = SIGNAL_WAVE_MAX_RINGS;
     }
