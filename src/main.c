@@ -191,6 +191,11 @@ static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
  * get_branding_bmp_path()'s comment for why the file lives at a fixed
  * name rather than wherever the user originally picked it from. */
 static HBITMAP g_custom_logo_bmp;
+/* Taskbar/title-bar/alt-tab icons derived from g_custom_logo_bmp - see
+ * apply_custom_app_icon(). NULL means the window is still showing the
+ * icon it was created with (the embedded IDI_APP_ICON resource). */
+static HICON g_custom_icon_big;
+static HICON g_custom_icon_small;
 static WNDPROC g_panel_orig_proc;
 static WNDPROC g_combo_edit_orig_proc;
 static bool g_combo_edit_no_recurse;
@@ -957,6 +962,45 @@ static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
     DeleteObject(mark_brush);
 
     SelectObject(hdc, old_pen);
+}
+
+/* Faded/idle rendering of the logo mark (halo + mark, no signal-wave
+ * arcs) - used in the dead-space area when nothing's actually
+ * transmitting, so that spot always shows something rather than
+ * flipping between "the icon" and "totally blank". True per-pixel
+ * alpha isn't available here (no PNG/32bpp-alpha pipeline in this
+ * app), so this fakes constant-opacity fade the standard GDI way:
+ * snapshot the real background into an off-screen bitmap, draw the
+ * normal opaque mark on top of that snapshot, then AlphaBlend the
+ * WHOLE snapshot back over the same spot at partial alpha. Pixels
+ * that are just background blend with themselves (no visible change);
+ * only the mark's own pixels actually fade in - which is what makes
+ * this work without a real alpha channel. */
+static void draw_app_logo_faded(HDC hdc, int cx, int cy, int scale, BYTE alpha) {
+    const int size = 100;
+    int ox = cx - size / 2;
+    int oy = cy - size / 2;
+    HDC mem_dc;
+    HBITMAP mem_bmp, old_bmp;
+    BLENDFUNCTION bf;
+
+    mem_dc = CreateCompatibleDC(hdc);
+    mem_bmp = CreateCompatibleBitmap(hdc, size, size);
+    old_bmp = (HBITMAP)SelectObject(mem_dc, mem_bmp);
+
+    BitBlt(mem_dc, 0, 0, size, size, hdc, ox, oy, SRCCOPY);
+    draw_app_logo_silhouette(mem_dc, size / 2, size / 2, scale * 106 / 100, RGB(255, 255, 255));
+    draw_app_logo_mark(mem_dc, size / 2, size / 2, scale);
+
+    bf.BlendOp = AC_SRC_OVER;
+    bf.BlendFlags = 0;
+    bf.SourceConstantAlpha = alpha;
+    bf.AlphaFormat = 0;
+    AlphaBlend(hdc, ox, oy, size, size, mem_dc, 0, 0, size, size, bf);
+
+    SelectObject(mem_dc, old_bmp);
+    DeleteObject(mem_bmp);
+    DeleteDC(mem_dc);
 }
 
 /* Unit-circle points for a 0deg-180deg sweep (west -> north -> east),
@@ -2640,6 +2684,107 @@ static void load_custom_logo(void) {
     g_custom_logo_bmp = (HBITMAP)LoadImageA(NULL, path, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
 }
 
+/* Builds an icon_size x icon_size HICON from g_custom_logo_bmp - scaled
+ * to fit preserving aspect ratio and centered on a solid
+ * COLOR_APP_PANEL_BG square (same footprint math as the header's own
+ * StretchBlt), so the taskbar/title-bar icon can match a custom logo
+ * too, not just the header. NULL if g_custom_logo_bmp isn't set or a
+ * GDI call along the way fails - caller falls back to leaving whatever
+ * icon is already showing. The mask is a plain all-opaque monochrome
+ * bitmap (no transparency - this app has no real alpha pipeline), so
+ * the icon reads as a small solid square, same as any other app icon
+ * with a filled background. */
+static HICON build_custom_app_icon(int icon_size) {
+    BITMAP bm;
+    HDC screen_dc, mem_dc, src_dc, mask_dc;
+    HBITMAP color_bmp, mask_bmp, old_mem, old_src, old_mask;
+    HBRUSH bg_brush;
+    RECT rc;
+    ICONINFO ii;
+    HICON icon;
+
+    if (!g_custom_logo_bmp || !GetObject(g_custom_logo_bmp, sizeof(bm), &bm) ||
+        bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+        return NULL;
+    }
+
+    screen_dc = GetDC(NULL);
+    mem_dc = CreateCompatibleDC(screen_dc);
+    color_bmp = CreateCompatibleBitmap(screen_dc, icon_size, icon_size);
+    old_mem = (HBITMAP)SelectObject(mem_dc, color_bmp);
+
+    rc.left = 0; rc.top = 0; rc.right = icon_size; rc.bottom = icon_size;
+    bg_brush = CreateSolidBrush(COLOR_APP_PANEL_BG);
+    FillRect(mem_dc, &rc, bg_brush);
+    DeleteObject(bg_brush);
+
+    {
+        double sx = (double)icon_size / bm.bmWidth;
+        double sy = (double)icon_size / bm.bmHeight;
+        double s = sx < sy ? sx : sy;
+        int dw = (int)(bm.bmWidth * s + 0.5);
+        int dh = (int)(bm.bmHeight * s + 0.5);
+        src_dc = CreateCompatibleDC(screen_dc);
+        old_src = (HBITMAP)SelectObject(src_dc, g_custom_logo_bmp);
+        StretchBlt(mem_dc, (icon_size - dw) / 2, (icon_size - dh) / 2, dw, dh,
+                   src_dc, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+        SelectObject(src_dc, old_src);
+        DeleteDC(src_dc);
+    }
+    SelectObject(mem_dc, old_mem);
+    DeleteDC(mem_dc);
+    ReleaseDC(NULL, screen_dc);
+
+    mask_bmp = CreateBitmap(icon_size, icon_size, 1, 1, NULL);
+    mask_dc = CreateCompatibleDC(NULL);
+    old_mask = (HBITMAP)SelectObject(mask_dc, mask_bmp);
+    FillRect(mask_dc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH)); /* AND-mask 0 = opaque everywhere */
+    SelectObject(mask_dc, old_mask);
+    DeleteDC(mask_dc);
+
+    ii.fIcon = TRUE;
+    ii.xHotspot = 0;
+    ii.yHotspot = 0;
+    ii.hbmMask = mask_bmp;
+    ii.hbmColor = color_bmp;
+    icon = CreateIconIndirect(&ii);
+
+    DeleteObject(color_bmp);
+    DeleteObject(mask_bmp);
+    return icon;
+}
+
+/* Swaps the window's title-bar/taskbar/alt-tab icons (WM_SETICON, not
+ * the window CLASS icon - this app only ever has the one window, so a
+ * per-window icon is simpler than touching the class) to match
+ * g_custom_logo_bmp. No-op if it isn't set - the window keeps showing
+ * whatever icon it already has (the embedded resource one at first
+ * launch). Call after g_custom_logo_bmp changes: load_custom_logo() at
+ * startup and browse_and_set_logo() after a pick. */
+static void apply_custom_app_icon(HWND hwnd) {
+    HICON big, small;
+
+    if (!g_custom_logo_bmp) {
+        return;
+    }
+    big = build_custom_app_icon(32);
+    if (big) {
+        SendMessageA(hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
+        if (g_custom_icon_big) {
+            DestroyIcon(g_custom_icon_big);
+        }
+        g_custom_icon_big = big;
+    }
+    small = build_custom_app_icon(16);
+    if (small) {
+        SendMessageA(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small);
+        if (g_custom_icon_small) {
+            DestroyIcon(g_custom_icon_small);
+        }
+        g_custom_icon_small = small;
+    }
+}
+
 /* IDC_CHANGE_LOGO_BTN's handler - browse for a .bmp, copy it to
  * branding.bmp (see that function's comment for why a copy, not just
  * remembering the path), reload it, and record the originally-picked
@@ -2685,6 +2830,7 @@ static void browse_and_set_logo(HWND hwnd) {
         DeleteObject(g_custom_logo_bmp);
     }
     g_custom_logo_bmp = loaded;
+    apply_custom_app_icon(hwnd);
 
     {
         const char *base = strrchr(picked, '\\');
@@ -3311,6 +3457,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             refresh_sensor_port_list();
             load_settings();
             load_custom_logo();
+            apply_custom_app_icon(hwnd);
 
             memset(&ccb, 0, sizeof(ccb));
             ccb.on_connected_changed = conn_on_connected_changed;
@@ -3388,16 +3535,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
                 /* Signal-wave pulse - stepped every SIGNAL_TICKS_PER_STEP
                  * ticks (slower than the 100ms poll itself would give a
-                 * distractingly fast flicker), plus one extra repaint on
-                 * the active->inactive edge so it actually clears back
-                 * to plain background instead of freezing on its last
-                 * frame. Only that one small rect is invalidated (with
-                 * erase, so WM_ERASEBKGND's draw actually reruns), not
-                 * the whole window. */
+                 * distractingly fast flicker), plus one extra repaint
+                 * right on any active<->inactive edge (in either
+                 * direction) so the switch between the dim idle icon
+                 * and the full lit-up mark+arcs is immediate instead of
+                 * waiting up to SIGNAL_TICKS_PER_STEP ticks. Only that
+                 * one small rect is invalidated (with erase, so
+                 * WM_ERASEBKGND's draw actually reruns), not the whole
+                 * window. */
                 signal_active = conn_is_connected(&g_conn) && any_channel_on();
                 if (signal_active) {
                     g_signal_tick_counter++;
-                    if (g_signal_tick_counter >= SIGNAL_TICKS_PER_STEP) {
+                    if (!g_signal_active_prev || g_signal_tick_counter >= SIGNAL_TICKS_PER_STEP) {
                         g_signal_tick_counter = 0;
                         g_signal_wave_phase++;
                         if (get_signal_area_rect(&sig_rc)) {
@@ -3459,15 +3608,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             /* HelixDefender mark + signal-wave pulse, straight over the
              * dot pattern just filled above - see
              * get_signal_area_rect()'s comment for why this is drawn
-             * inline here rather than as a separate window. */
-            if (conn_is_connected(&g_conn) && any_channel_on()) {
+             * inline here rather than as a separate window. Always
+             * shows the mark itself (so that spot isn't just blank
+             * background) - full brightness with the pulsing arcs
+             * while actually connected and transmitting, faded to a
+             * dim idle icon (no arcs - nothing to show a signal for)
+             * otherwise. */
+            {
                 RECT sig_rc;
                 if (get_signal_area_rect(&sig_rc)) {
                     int cx = (sig_rc.left + sig_rc.right) / 2;
                     int cy = sig_rc.top + (sig_rc.bottom - sig_rc.top) * 3 / 5;
-                    draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
-                    draw_app_logo_mark(hdc, cx, cy, 100);
-                    draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
+                    if (conn_is_connected(&g_conn) && any_channel_on()) {
+                        draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
+                        draw_app_logo_mark(hdc, cx, cy, 100);
+                        draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
+                    } else {
+                        draw_app_logo_faded(hdc, cx, cy, 100, 110); /* ~43% opacity */
+                    }
                 }
             }
             return 1;
@@ -3873,6 +4031,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
             if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
+            if (g_custom_icon_big) DestroyIcon(g_custom_icon_big);
+            if (g_custom_icon_small) DestroyIcon(g_custom_icon_small);
             /* Only delete g_font if it's the CreateFontA() result, not
              * the GetStockObject() fallback - stock objects must never
              * be passed to DeleteObject(). */
