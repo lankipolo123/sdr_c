@@ -2831,16 +2831,115 @@ static void apply_custom_app_icon(HWND hwnd) {
     }
 }
 
-/* IDC_CHANGE_LOGO_BTN's handler - browse for a .bmp, copy it to
- * branding.bmp (see that function's comment for why a copy, not just
- * remembering the path), reload it, and record the originally-picked
- * filename in the .ini purely for display/reference (SourceFile is
- * never read back to decide what to load - branding.bmp's own
+/* Writes an HBITMAP out as a plain 24-bit BMP file - lets a picked
+ * .ico (see load_icon_as_bitmap() below) land on disk through the
+ * exact same branding.bmp path/format load_custom_logo() already
+ * knows how to read at startup, no change needed anywhere else. */
+static bool save_hbitmap_as_bmp(HBITMAP bmp, const char *path) {
+    BITMAP bm;
+    BITMAPFILEHEADER bfh;
+    BITMAPINFOHEADER bih;
+    HDC hdc;
+    void *bits;
+    DWORD row_bytes, image_size, written;
+    HANDLE file;
+    bool ok = false;
+
+    if (!GetObject(bmp, sizeof(bm), &bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0) {
+        return false;
+    }
+
+    row_bytes = ((DWORD)bm.bmWidth * 3 + 3) & ~3u; /* 24bpp, DWORD-aligned rows */
+    image_size = row_bytes * (DWORD)bm.bmHeight;
+    bits = malloc(image_size);
+    if (!bits) {
+        return false;
+    }
+
+    ZeroMemory(&bih, sizeof(bih));
+    bih.biSize = sizeof(bih);
+    bih.biWidth = bm.bmWidth;
+    bih.biHeight = bm.bmHeight; /* bottom-up, standard BMP */
+    bih.biPlanes = 1;
+    bih.biBitCount = 24;
+    bih.biCompression = BI_RGB;
+    bih.biSizeImage = image_size;
+
+    hdc = GetDC(NULL);
+    if (GetDIBits(hdc, bmp, 0, (UINT)bm.bmHeight, bits, (BITMAPINFO *)&bih, DIB_RGB_COLORS) == 0) {
+        ReleaseDC(NULL, hdc);
+        free(bits);
+        return false;
+    }
+    ReleaseDC(NULL, hdc);
+
+    ZeroMemory(&bfh, sizeof(bfh));
+    bfh.bfType = 0x4D42; /* 'BM' */
+    bfh.bfOffBits = sizeof(bfh) + sizeof(bih);
+    bfh.bfSize = bfh.bfOffBits + image_size;
+
+    file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        if (WriteFile(file, &bfh, sizeof(bfh), &written, NULL) &&
+            WriteFile(file, &bih, sizeof(bih), &written, NULL) &&
+            WriteFile(file, bits, image_size, &written, NULL)) {
+            ok = true;
+        }
+        CloseHandle(file);
+    }
+    free(bits);
+    return ok;
+}
+
+/* Loads a .ico file through Windows' own icon loader and pulls out its
+ * color bitmap - the same trick app.ico itself relies on (see that
+ * file's comment): the OS icon loader already decodes a PNG-compressed
+ * frame if the .ico has one, so this gets PNG-sourced logos working
+ * without linking GDI+ or another image library just for this one
+ * picker. Tries progressively smaller requested sizes since an .ico
+ * missing a frame at one size isn't a hard failure - LoadImageA just
+ * picks its closest match. Returns NULL (caller reports a load error)
+ * if nothing usable comes back at any size. */
+static HBITMAP load_icon_as_bitmap(const char *path) {
+    static const int sizes[] = { 256, 128, 64, 48, 32, 16 };
+    size_t i;
+    for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        HICON icon = (HICON)LoadImageA(NULL, path, IMAGE_ICON, sizes[i], sizes[i], LR_LOADFROMFILE);
+        if (icon) {
+            ICONINFO ii;
+            HBITMAP color = NULL;
+            if (GetIconInfo(icon, &ii)) {
+                color = ii.hbmColor;
+                if (ii.hbmMask) {
+                    DeleteObject(ii.hbmMask);
+                }
+            }
+            DestroyIcon(icon);
+            if (color) {
+                return color;
+            }
+        }
+    }
+    return NULL;
+}
+
+static bool has_extension(const char *path, const char *ext) {
+    const char *dot = strrchr(path, '.');
+    return dot && lstrcmpiA(dot, ext) == 0;
+}
+
+/* IDC_CHANGE_LOGO_BTN's handler - browse for a .bmp or .ico, land it
+ * as branding.bmp (see that function's comment for why a copy, not
+ * just remembering the path), reload it, and record the originally-
+ * picked filename in the .ini purely for display/reference (SourceFile
+ * is never read back to decide what to load - branding.bmp's own
  * presence is the one thing that decides that, so the two can never
- * disagree with each other). BMP only, deliberately - this app links
+ * disagree with each other). Only these two formats: this app links
  * nothing beyond gdi32/user32/msimg32/comdlg32, and decoding PNG/JPEG
- * would mean adding GDI+ (or another image library) just for this;
- * BMP loads directly through LoadImageA with no new dependency. */
+ * directly would mean adding GDI+ (or another image library) just for
+ * this. .ico gets PNG-sourced logos in anyway (see
+ * load_icon_as_bitmap()) without that - a raw standalone .png file
+ * still needs converting to one of these two first. */
 static void browse_and_set_logo(HWND hwnd) {
     char picked[MAX_PATH];
     char branding_path[MAX_PATH + 16];
@@ -2851,10 +2950,10 @@ static void browse_and_set_logo(HWND hwnd) {
     memset(&ofn, 0, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = "Bitmap Files (*.bmp)\0*.bmp\0All Files\0*.*\0";
+    ofn.lpstrFilter = "Image Files (*.bmp;*.ico)\0*.bmp;*.ico\0All Files\0*.*\0";
     ofn.lpstrFile = picked;
     ofn.nMaxFile = sizeof(picked);
-    ofn.lpstrTitle = "Choose a Logo (BMP)";
+    ofn.lpstrTitle = "Choose a Logo (BMP or ICO)";
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
 
     if (!GetOpenFileNameA(&ofn)) {
@@ -2862,7 +2961,17 @@ static void browse_and_set_logo(HWND hwnd) {
     }
 
     get_branding_bmp_path(branding_path);
-    if (!CopyFileA(picked, branding_path, FALSE)) {
+    if (has_extension(picked, ".ico")) {
+        HBITMAP extracted = load_icon_as_bitmap(picked);
+        bool saved = extracted && save_hbitmap_as_bmp(extracted, branding_path);
+        if (extracted) {
+            DeleteObject(extracted);
+        }
+        if (!saved) {
+            ui_show_warning("Could not read that .ico file");
+            return;
+        }
+    } else if (!CopyFileA(picked, branding_path, FALSE)) {
         ui_show_warning("Could not copy the selected file to branding.bmp");
         return;
     }
