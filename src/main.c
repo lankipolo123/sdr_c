@@ -6,12 +6,15 @@
  *
  * No Qt, no pywebview, no vendor DLL - just user32/gdi32/kernel32/advapi32,
  * same as the single-channel app (plus msimg32 for GradientFill, used by
- * the temperature gauge).
+ * the temperature gauge, and gdiplus for decoding a picked PNG/JPEG logo -
+ * see load_image_as_bitmap_gdiplus() - both are Windows-shipped DLLs, not
+ * bundled files).
  */
 #define _WIN32_WINNT 0x0600 /* Vista+ - needed so windows.h declares
                               * GradientFill/TRIVERTEX/GRADIENT_RECT */
 #include <windows.h>
 #include <commdlg.h> /* GetOpenFileNameA, for the custom-logo file picker */
+#include <gdiplus.h> /* GdipCreateBitmapFromFile etc. - see load_image_as_bitmap_gdiplus() */
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -2928,18 +2931,64 @@ static bool has_extension(const char *path, const char *ext) {
     return dot && lstrcmpiA(dot, ext) == 0;
 }
 
-/* IDC_CHANGE_LOGO_BTN's handler - browse for a .bmp or .ico, land it
- * as branding.bmp (see that function's comment for why a copy, not
- * just remembering the path), reload it, and record the originally-
- * picked filename in the .ini purely for display/reference (SourceFile
- * is never read back to decide what to load - branding.bmp's own
- * presence is the one thing that decides that, so the two can never
- * disagree with each other). Only these two formats: this app links
- * nothing beyond gdi32/user32/msimg32/comdlg32, and decoding PNG/JPEG
- * directly would mean adding GDI+ (or another image library) just for
- * this. .ico gets PNG-sourced logos in anyway (see
- * load_icon_as_bitmap()) without that - a raw standalone .png file
- * still needs converting to one of these two first. */
+/* Loads a .png/.jpg/.jpeg through GDI+ (gdiplus.dll, shipped with
+ * Windows since XP - a system DLL this links against, same as
+ * user32/gdi32, not a file this app has to bundle) and returns its
+ * color bitmap, ready for save_hbitmap_as_bmp() exactly like
+ * load_icon_as_bitmap()'s result above. Starts/stops GDI+ around just
+ * this one call rather than keeping it running for the app's whole
+ * lifetime, since logo-picking is the only thing that ever needs it.
+ * Composited onto COLOR_APP_PANEL_BG while decoding - this app has no
+ * real alpha-blit pipeline for a logo bitmap once loaded (see
+ * draw_app_logo_faded()'s comment on why that's a special-cased
+ * exception, not the norm), so a transparent PNG needs to flatten onto
+ * *something* now rather than go solid black. Returns NULL (caller
+ * reports a load error) on any failure - unrecognized/corrupt file,
+ * GDI+ missing, whatever. */
+static HBITMAP load_image_as_bitmap_gdiplus(const char *path) {
+    ULONG_PTR token;
+    GdiplusStartupInput input;
+    GpBitmap *image = NULL;
+    HBITMAP hbmp = NULL;
+    WCHAR wpath[MAX_PATH];
+    ARGB bg;
+
+    if (MultiByteToWideChar(CP_ACP, 0, path, -1, wpath, MAX_PATH) == 0) {
+        return NULL;
+    }
+
+    ZeroMemory(&input, sizeof(input));
+    input.GdiplusVersion = 1;
+    if (GdiplusStartup(&token, &input, NULL) != Ok) {
+        return NULL;
+    }
+
+    bg = 0xFF000000u
+        | ((ARGB)GetRValue(COLOR_APP_PANEL_BG) << 16)
+        | ((ARGB)GetGValue(COLOR_APP_PANEL_BG) << 8)
+        | (ARGB)GetBValue(COLOR_APP_PANEL_BG);
+
+    if (GdipCreateBitmapFromFile(wpath, &image) == Ok && image) {
+        GdipCreateHBITMAPFromBitmap(image, &hbmp, bg);
+        GdipDisposeImage((GpImage *)image);
+    }
+
+    GdiplusShutdown(token);
+    return hbmp;
+}
+
+/* IDC_CHANGE_LOGO_BTN's handler - browse for a .bmp/.ico/.png/.jpg,
+ * land it as branding.bmp (see that function's comment for why a
+ * copy, not just remembering the path), reload it, and record the
+ * originally-picked filename in the .ini purely for display/reference
+ * (SourceFile is never read back to decide what to load -
+ * branding.bmp's own presence is the one thing that decides that, so
+ * the two can never disagree with each other). .bmp copies straight
+ * through; .ico and .png/.jpg both get decoded first (via
+ * load_icon_as_bitmap()/load_image_as_bitmap_gdiplus() above) and
+ * re-saved as branding.bmp, so load_custom_logo() at next startup
+ * never needs to know or care which format the user originally
+ * picked. */
 static void browse_and_set_logo(HWND hwnd) {
     char picked[MAX_PATH];
     char branding_path[MAX_PATH + 16];
@@ -2950,10 +2999,10 @@ static void browse_and_set_logo(HWND hwnd) {
     memset(&ofn, 0, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = "Image Files (*.bmp;*.ico)\0*.bmp;*.ico\0All Files\0*.*\0";
+    ofn.lpstrFilter = "Image Files (*.bmp;*.ico;*.png;*.jpg;*.jpeg)\0*.bmp;*.ico;*.png;*.jpg;*.jpeg\0All Files\0*.*\0";
     ofn.lpstrFile = picked;
     ofn.nMaxFile = sizeof(picked);
-    ofn.lpstrTitle = "Choose a Logo (BMP or ICO)";
+    ofn.lpstrTitle = "Choose a Logo";
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
 
     if (!GetOpenFileNameA(&ofn)) {
@@ -2969,6 +3018,16 @@ static void browse_and_set_logo(HWND hwnd) {
         }
         if (!saved) {
             ui_show_warning("Could not read that .ico file");
+            return;
+        }
+    } else if (has_extension(picked, ".png") || has_extension(picked, ".jpg") || has_extension(picked, ".jpeg")) {
+        HBITMAP extracted = load_image_as_bitmap_gdiplus(picked);
+        bool saved = extracted && save_hbitmap_as_bmp(extracted, branding_path);
+        if (extracted) {
+            DeleteObject(extracted);
+        }
+        if (!saved) {
+            ui_show_warning("Could not read that image file");
             return;
         }
     } else if (!CopyFileA(picked, branding_path, FALSE)) {
