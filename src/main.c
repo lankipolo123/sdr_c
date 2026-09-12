@@ -761,18 +761,27 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
  * this is a faithful redraw at whatever size is needed instead. scale
  * is in 100ths (100 = the size these base points were designed at). */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
-    static const POINT LEFT_BASE[5] = {
-        { -4, -32 }, { -26, 4 }, { -30, 18 }, { -14, 34 }, { -6, 6 }
+    /* 4-point kite per side (top / outer / bottom / inner), not a
+     * rounded teardrop - re-derived from app.ico's actual pixel data
+     * (each shape tapers to a real point at both top AND bottom, the
+     * inner edge cuts back up close to center leaving a narrow notch
+     * for the beam, and the two dark points fall short of the very
+     * bottom - the blue beam's own base is what actually reaches the
+     * bottom edge, not the dark shapes). First attempt had this
+     * backwards (dark reaching lower than the beam) - reported as not
+     * matching the real image. */
+    static const POINT LEFT_BASE[4] = {
+        { -3, -32 }, { -32, 8 }, { -11, 32 }, { -9, -2 }
     };
     static const POINT BEAM_BASE[3] = {
-        { 0, -6 }, { -9, 30 }, { 9, 30 }
+        { 0, -4 }, { -13, 38 }, { 13, 38 }
     };
-    POINT left_pts[5], right_pts[5], beam_pts[3];
+    POINT left_pts[4], right_pts[4], beam_pts[3];
     HBRUSH mark_brush, old_brush;
     HPEN old_pen;
     int i;
 
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 4; i++) {
         left_pts[i].x = cx + LEFT_BASE[i].x * scale / 100;
         left_pts[i].y = cy + LEFT_BASE[i].y * scale / 100;
         right_pts[i].x = cx - LEFT_BASE[i].x * scale / 100;
@@ -787,8 +796,8 @@ static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
 
     mark_brush = CreateSolidBrush(COLOR_APP_TEXT);
     old_brush = (HBRUSH)SelectObject(hdc, mark_brush);
-    Polygon(hdc, left_pts, 5);
-    Polygon(hdc, right_pts, 5);
+    Polygon(hdc, left_pts, 4);
+    Polygon(hdc, right_pts, 4);
     SelectObject(hdc, old_brush);
     DeleteObject(mark_brush);
 
