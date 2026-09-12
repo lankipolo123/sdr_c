@@ -149,6 +149,17 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define GRID_LEFT 380
 #define GRID_TOP CONTENT_TOP
 
+/* Cards used to stay fixed at CARD_W x CARD_H no matter how tall the
+ * window got, leaving a dead strip below row 4 on anything taller than
+ * the designed minimum (see relayout_for_size()) - growing them to fill
+ * that space was tried once before and reverted because it scaled BOTH
+ * dimensions, which looked oversized at fullscreen. This time only
+ * height grows (card_w is always passed as CARD_W - see
+ * relayout_for_size()); CARD_H_MAX caps it so a very tall window
+ * doesn't turn each card into an absurd strip. */
+#define CARD_H_MAX 220
+#define GRID_BOTTOM_MARGIN 20 /* matches the visual weight of CONTENT_TOP's own top margin */
+
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
 
@@ -219,6 +230,13 @@ static int g_spectrum_unit;
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
+static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
+                                 * the Spectrum plot at a Y that moves with
+                                 * the grid's actual height (see
+                                 * log_panel_y_for()), so unlike most of
+                                 * the sidebar's static labels these need
+                                 * their own handle to reposition. */
+static HWND g_log_header_lbl;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -2142,6 +2160,13 @@ static void ui_refresh_channel(int index) {
      * repaint can't be trusted alone to leave its siblings alone. */
     if (!cache->valid || cache->output_on != ch->output_on) {
         ui_invalidate_card(index);
+        /* Selection checkbox only makes sense to show once a channel is
+         * actually on - an all-STANDBY grid showing 16 empty checkboxes
+         * read as clutter. Hiding it doesn't disable selection itself:
+         * the checkbox in channel_select_id() still exists and still
+         * works the moment the channel turns on, and background-click
+         * selection (see g_bulk_select_mode) is untouched either way. */
+        ShowWindow(GetDlgItem(g_hwnd, channel_select_id(index)), ch->output_on ? SW_SHOW : SW_HIDE);
     }
 
     cache->valid = true;
@@ -2763,8 +2788,8 @@ static void build_controls(HWND hwnd) {
         SendMessageA(combo, CB_SETCURSEL, (WPARAM)g_spectrum_unit, 0);
     }
 
-    add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
-    add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
+    g_log_header_icon = add_header_icon(hwnd, 22, LOG_PANEL_Y + 10, ICON_LIST);
+    g_log_header_lbl = add_header(hwnd, "Activity Log", 40, LOG_PANEL_Y + 10, 200, 18);
     /* Right edge of both the Clear button and the listbox is pinned to
      * the same margin (12px in from the panel's own right edge,
      * matching the 12px left margin: content starts at x=22, panel at
@@ -2813,6 +2838,9 @@ static void build_controls(HWND hwnd) {
  * scales. Every offset here must match add_channel_card()'s creation
  * offsets exactly - keep the two in sync if either changes.
  *
+ * card_w is always passed as CARD_W (sx is always 1.0 in practice) -
+ * see CARD_H_MAX's comment for why only card_h actually varies.
+ *
  * Plain MoveWindow with bRepaint=FALSE - relayout_for_size() does one
  * InvalidateRect over the whole window after moving everything, so
  * Windows coalesces it into a single WM_PAINT pass instead of each
@@ -2835,6 +2863,40 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(g_card_mode_lbl[index], x + SX(88), y + SY(8), SX(60), SY(14));
 
     PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(82), 100);
+    /* The mode combo's readonly-theming overlays (arrow + 4 border
+     * strips, see make_combo_readonly_ex) are separate sibling windows,
+     * not children of the combo, so moving the combo above does NOT
+     * move them - left in place, they'd sit at the combo's OLD rect
+     * while the real (undecorated) combo shows through at the new one.
+     * Re-derive their rect from the combo's own post-move GetWindowRect
+     * rather than re-deriving via SX/SY here too, since MoveWindow's
+     * closed-box height isn't simply SY(18) - it's whatever the font
+     * actually renders, same as make_combo_readonly_ex's own math. */
+    {
+        HWND combo = GetDlgItem(hwnd, channel_mode_id(index));
+        RECT crc;
+        int cw, ch2, arrow_w;
+        GetWindowRect(combo, &crc);
+        MapWindowPoints(HWND_DESKTOP, hwnd, (POINT *)&crc, 2);
+        cw = crc.right - crc.left;
+        ch2 = crc.bottom - crc.top;
+        arrow_w = GetSystemMetrics(SM_CXVSCROLL) + ARROW_OVERLAY_PAD_PX;
+        if (g_card_combo_overlays[index][0]) {
+            MoveWindow(g_card_combo_overlays[index][0], crc.right - arrow_w, crc.top, arrow_w, ch2, FALSE);
+        }
+        if (g_card_combo_overlays[index][1]) {
+            MoveWindow(g_card_combo_overlays[index][1], crc.left, crc.top, cw, COMBO_BORDER_PX, FALSE);
+        }
+        if (g_card_combo_overlays[index][2]) {
+            MoveWindow(g_card_combo_overlays[index][2], crc.left, crc.bottom - COMBO_BORDER_PX, cw, COMBO_BORDER_PX, FALSE);
+        }
+        if (g_card_combo_overlays[index][3]) {
+            MoveWindow(g_card_combo_overlays[index][3], crc.left, crc.top, COMBO_BORDER_PX, ch2, FALSE);
+        }
+        if (g_card_combo_overlays[index][4]) {
+            MoveWindow(g_card_combo_overlays[index][4], crc.right - COMBO_BORDER_PX, crc.top, COMBO_BORDER_PX, ch2, FALSE);
+        }
+    }
     PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(18));
     PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(60), SY(18));
     PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(44), SX(60), SY(18));
@@ -2851,44 +2913,68 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 #undef PLACE
 }
 
-/* Recomputes the whole layout for a new client size: only the header
- * bar and sidebar panel stretch horizontally to fill the wider client
- * area - the 16 cards stay fixed at the designed CARD_W x CARD_H no
- * matter how big the window gets (maximized/fullscreen included).
- * Extra window space just stays empty background rather than growing
- * the cards - keeps the grid compact and readable on a large monitor
- * instead of every card ballooning to fill it. (Cards used to grow to
- * fill the available space; that's what was making them look oversized
- * at fullscreen - removed.) Never shrinks below the designed CARD_W x
- * CARD_H (see WM_GETMINMAXINFO, which stops the window itself getting
- * that small). */
+/* How tall a channel card should be to make the 4-row grid's bottom
+ * edge land GRID_BOTTOM_MARGIN above the client area's bottom, for a
+ * given client height - clamped to [CARD_H, CARD_H_MAX] (see that
+ * constant's comment for why growth is capped, and card_w is never
+ * varied alongside it). */
+static int channel_card_height(int client_h) {
+    int avail = client_h - CONTENT_TOP - GRID_BOTTOM_MARGIN - (GRID_ROWS - 1) * CARD_GAP;
+    int h = avail / GRID_ROWS;
+    if (h < CARD_H) {
+        h = CARD_H;
+    } else if (h > CARD_H_MAX) {
+        h = CARD_H_MAX;
+    }
+    return h;
+}
+
+/* LOG_PANEL_Y's own formula (CONTENT_TOP + GRID_ROWS*CARD_H + ... -
+ * LOG_PANEL_H), parameterized on the actual card height instead of the
+ * fixed design CARD_H - so the sidebar's bottom edge keeps landing
+ * exactly on the grid's bottom edge (see LOG_PANEL_H's comment on why
+ * that alignment matters) even once the grid grows taller than its
+ * designed size. */
+static int log_panel_y_for(int card_h) {
+    return CONTENT_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H;
+}
+
+/* Recomputes the whole layout for a new client size: the header bar
+ * stretches horizontally to fill the wider client area, and the 16
+ * cards grow TALLER (never wider - see CARD_H_MAX's comment on why
+ * only height varies) to use up vertical space instead of leaving it
+ * empty below row 4. The sidebar (Spectrum + Activity Log) grows to
+ * match, its bottom edge tracking the grid's via log_panel_y_for() the
+ * same way it always has against the fixed design height. Never
+ * shrinks below the designed CARD_W x CARD_H (see WM_GETMINMAXINFO,
+ * which stops the window itself getting that small). */
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int i;
-    (void)client_h; /* cards no longer grow to fill vertical space, so the
-                      * new client height doesn't factor into this layout -
-                      * kept as a parameter since callers still have it and
-                      * WM_SIZE's (w, h) pairing reads naturally at call sites. */
+    int card_h = channel_card_height(client_h);
+    int log_y = log_panel_y_for(card_h);
 
     if (!g_layout_ready) {
         return;
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP, FALSE);
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, FALSE);
+    MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
+    MoveWindow(g_log_header_lbl, 40, log_y + 10, 200, 18, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, log_y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, log_y + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO), 236, CONTENT_TOP + 8, 56, 140, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
-               SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34), FALSE);
+               SIDEBAR_W + SIDEBAR_X - 34, log_y - 12 - (CONTENT_TOP + 34), FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
         int card_x = GRID_LEFT + col * (CARD_W + CARD_GAP);
-        int card_y = CONTENT_TOP + row * (CARD_H + CARD_GAP);
-        position_channel_card(hwnd, i, card_x, card_y, CARD_W, CARD_H);
+        int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
+        position_channel_card(hwnd, i, card_x, card_y, CARD_W, card_h);
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -2972,9 +3058,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         case WM_GETMINMAXINFO: {
             /* Never let the window shrink below its designed layout size -
-             * relayout_for_size() only ever grows gaps to fill extra space,
-             * never shrinks cards, so a smaller client area would start
-             * overlapping them. */
+             * relayout_for_size() only ever grows cards/gaps to fill extra
+             * space, never shrinks them, so a smaller client area would
+             * start overlapping them. */
             MINMAXINFO *mmi = (MINMAXINFO *)lParam;
             RECT rect;
             rect.left = 0;
@@ -3030,13 +3116,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_bulk_select_mode) {
                 int x = (short)LOWORD(lParam);
                 int y = (short)HIWORD(lParam);
+                /* Cards can be taller than the designed CARD_H now (see
+                 * channel_card_height()) - reuse the same actual height
+                 * relayout_for_size() last computed, not the fixed
+                 * design constant, or clicks on any row past the first
+                 * would hit-test against the wrong rect. */
+                int card_h = channel_card_height(g_last_client_h);
                 int idx;
                 for (idx = 0; idx < MAX_CHANNELS; idx++) {
                     int col = idx % GRID_COLS;
                     int row = idx / GRID_COLS;
                     int cx = GRID_LEFT + col * (CARD_W + CARD_GAP);
-                    int cy = CONTENT_TOP + row * (CARD_H + CARD_GAP);
-                    if (x >= cx && x < cx + CARD_W && y >= cy && y < cy + CARD_H) {
+                    int cy = CONTENT_TOP + row * (card_h + CARD_GAP);
+                    if (x >= cx && x < cx + CARD_W && y >= cy && y < cy + card_h) {
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
                         ui_refresh_bulk_selected_label();
