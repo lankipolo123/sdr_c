@@ -3038,8 +3038,17 @@ static void build_controls(HWND hwnd) {
     /* Always visible ("Kill Switch: Armed" until something trips it) -
      * see ui_refresh_kill_switch()'s comment. Only the Reset button
      * hides while armed, since there's nothing to reset yet. */
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 174, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 172, 80, 22, IDC_KILL_RESET_BTN);
+    /* y=157/155 - the old y=174/172 was left over from when this line
+     * was hidden almost all the time (only shown on an actual trip),
+     * so nobody noticed it sat 10-14px below the panel's own visible
+     * border (HEADER_H=180, but the real border draws at
+     * HEADER_H-PANEL_SHADOW_PX=175 - see panel_subclass_proc). Now that
+     * it's always visible, that overflow read as the text being cut
+     * off by the border. Moved up to fit inside it, right below the
+     * BAY sensor chip grid (2 rows starting y=88, each 32 tall with a
+     * 4px gap - bottom lands at 156). */
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 157, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 155, 80, 18, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
