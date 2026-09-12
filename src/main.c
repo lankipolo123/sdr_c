@@ -445,6 +445,7 @@ static void make_combo_readonly(HWND combo) {
 /* Forward declaration - defined further down, but panel_subclass_proc
  * below needs it for the header's logo mark. */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
+static void draw_app_logo_silhouette(HDC hdc, int cx, int cy, int scale, COLORREF color);
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
@@ -610,40 +611,17 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         /* Main app logo, in the header's own left free space (the gap
          * between the panel's left edge and Connection & Settings' own
          * content, which starts around x=282 panel-relative once
-         * CONN_X_SHIFT is folded in). A plain white card behind it -
-         * the real logo's own colors (dark gray + blue) are designed
-         * for a white background, same as the reference image itself;
-         * back on the dark panel straight, the dark shapes had to be
-         * lightened to stay visible at all, which isn't the real
-         * logo's actual color. White card first, then the mark drawn
-         * in its true dark-gray-on-white colors on top. */
+         * CONN_X_SHIFT is folded in). A white halo hugging the mark's
+         * own edges, not a separate card/box: the same silhouette
+         * drawn once, solid white, slightly larger (106%) and directly
+         * behind the real mark - reads as a white outline/shadow right
+         * at the shape's boundary. The real mark's own colors (dark
+         * gray + blue) are designed for a white surface, same as the
+         * reference image itself, so it still needs *some* white
+         * behind it to read correctly - a full white card was tried
+         * first and swapped for this per direct request. */
         if (hwnd == g_header_panel) {
-            RECT lrc;
-            HBRUSH white_brush;
-
-            lrc.left = 65;  lrc.top = 20;
-            lrc.right = 205; lrc.bottom = 160;
-
-            old_brush = (HBRUSH)SelectObject(hdc, g_brush_shadow);
-            pen = CreatePen(PS_SOLID, 1, g_shadow_color);
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            RoundRect(hdc, lrc.left, lrc.top, lrc.right, lrc.bottom,
-                      CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-            SelectObject(hdc, old_brush);
-
-            white_brush = CreateSolidBrush(RGB(255, 255, 255));
-            old_brush = (HBRUSH)SelectObject(hdc, white_brush);
-            pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            RoundRect(hdc, lrc.left, lrc.top, lrc.right - CARD_SHADOW_PX, lrc.bottom - CARD_SHADOW_PX,
-                      CARD_CORNER_DIAMETER, CARD_CORNER_DIAMETER);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-            SelectObject(hdc, old_brush);
-            DeleteObject(white_brush);
-
+            draw_app_logo_silhouette(hdc, 135, 90, 106, RGB(255, 255, 255));
             draw_app_logo_mark(hdc, 135, 90, 100);
         }
 
@@ -782,6 +760,60 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
 #define ICON_WAVE 2
 #define ICON_LIST 5
 
+/* Two plain diamonds (top/outer/bottom/inner, symmetric) with a
+ * triangle centered between them - the real logo mark, measured
+ * directly off the actual reference image's pixel coordinates. Each
+ * diamond's inner vertex sits exactly at center (0,0), same point as
+ * the triangle's apex; each diamond's bottom vertex lines up exactly
+ * with the triangle's base corner on that side - the three shapes
+ * share those edges with no gap and no overlap. File-scope so both
+ * draw_app_logo_mark() and its white-halo pass below use the same
+ * points. */
+static const POINT LOGO_LEFT_BASE[4] = {
+    { -16, -32 }, { -32, 0 }, { -16, 32 }, { 0, 0 }
+};
+static const POINT LOGO_BEAM_BASE[3] = {
+    { 0, 0 }, { -16, 32 }, { 16, 32 }
+};
+
+static void logo_points(int cx, int cy, int scale, POINT left_pts[4], POINT right_pts[4], POINT beam_pts[3]) {
+    int i;
+    for (i = 0; i < 4; i++) {
+        left_pts[i].x = cx + LOGO_LEFT_BASE[i].x * scale / 100;
+        left_pts[i].y = cy + LOGO_LEFT_BASE[i].y * scale / 100;
+        right_pts[i].x = cx - LOGO_LEFT_BASE[i].x * scale / 100;
+        right_pts[i].y = cy + LOGO_LEFT_BASE[i].y * scale / 100;
+    }
+    for (i = 0; i < 3; i++) {
+        beam_pts[i].x = cx + LOGO_BEAM_BASE[i].x * scale / 100;
+        beam_pts[i].y = cy + LOGO_BEAM_BASE[i].y * scale / 100;
+    }
+}
+
+/* A single-color silhouette of the whole mark (both diamonds + the
+ * triangle, all filled the same color) - drawn once, slightly larger
+ * than the real mark and directly behind it, so it reads as a white
+ * halo hugging the shape's own edges rather than a separate card/box.
+ * Direct request: "a white shadow or box within the logo's edges", as
+ * an alternative to the white card tried first. */
+static void draw_app_logo_silhouette(HDC hdc, int cx, int cy, int scale, COLORREF color) {
+    POINT left_pts[4], right_pts[4], beam_pts[3];
+    HBRUSH brush, old_brush;
+    HPEN old_pen;
+
+    logo_points(cx, cy, scale, left_pts, right_pts, beam_pts);
+
+    old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
+    brush = CreateSolidBrush(color);
+    old_brush = (HBRUSH)SelectObject(hdc, brush);
+    Polygon(hdc, left_pts, 4);
+    Polygon(hdc, right_pts, 4);
+    Polygon(hdc, beam_pts, 3);
+    SelectObject(hdc, old_brush);
+    DeleteObject(brush);
+    SelectObject(hdc, old_pen);
+}
+
 /* Main app logo mark - two dark "signal peak" shapes flanking a blue
  * upward beam, matching src/app.ico (the title-bar/taskbar icon).
  * Drawn as vector polygons rather than stretching that .ico's bitmap -
@@ -789,34 +821,11 @@ static HWND add_header(HWND parent, LPCSTR text, int x, int y, int w, int h) {
  * this is a faithful redraw at whatever size is needed instead. scale
  * is in 100ths (100 = the size these base points were designed at). */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
-    /* Two plain diamonds (top/outer/bottom/inner, symmetric) with a
-     * triangle centered between them - the real logo, measured
-     * directly off the actual reference image's pixel coordinates.
-     * Each diamond's inner vertex sits exactly at center (0,0), same
-     * point as the triangle's apex; each diamond's bottom vertex lines
-     * up exactly with the triangle's base corner on that side - the
-     * three shapes share those edges with no gap and no overlap. */
-    static const POINT LEFT_BASE[4] = {
-        { -16, -32 }, { -32, 0 }, { -16, 32 }, { 0, 0 }
-    };
-    static const POINT BEAM_BASE[3] = {
-        { 0, 0 }, { -16, 32 }, { 16, 32 }
-    };
     POINT left_pts[4], right_pts[4], beam_pts[3];
     HBRUSH mark_brush, old_brush;
     HPEN old_pen;
-    int i;
 
-    for (i = 0; i < 4; i++) {
-        left_pts[i].x = cx + LEFT_BASE[i].x * scale / 100;
-        left_pts[i].y = cy + LEFT_BASE[i].y * scale / 100;
-        right_pts[i].x = cx - LEFT_BASE[i].x * scale / 100;
-        right_pts[i].y = cy + LEFT_BASE[i].y * scale / 100;
-    }
-    for (i = 0; i < 3; i++) {
-        beam_pts[i].x = cx + BEAM_BASE[i].x * scale / 100;
-        beam_pts[i].y = cy + BEAM_BASE[i].y * scale / 100;
-    }
+    logo_points(cx, cy, scale, left_pts, right_pts, beam_pts);
 
     old_pen = (HPEN)SelectObject(hdc, GetStockObject(NULL_PEN));
 
