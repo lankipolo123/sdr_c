@@ -11,6 +11,7 @@
 #define _WIN32_WINNT 0x0600 /* Vista+ - needed so windows.h declares
                               * GradientFill/TRIVERTEX/GRADIENT_RECT */
 #include <windows.h>
+#include <commdlg.h> /* GetOpenFileNameA, for the custom-logo file picker */
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -186,6 +187,13 @@ static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
 static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
+/* NULL = draw the built-in vector MILITRONIX mark (the normal case).
+ * Set by load_custom_logo() at startup (if branding.bmp exists next to
+ * the .exe) or by browse_and_set_logo() (IDC_CHANGE_LOGO_BTN) - either
+ * way, once non-NULL, the header paints this bitmap instead. See
+ * get_branding_bmp_path()'s comment for why the file lives at a fixed
+ * name rather than wherever the user originally picked it from. */
+static HBITMAP g_custom_logo_bmp;
 static WNDPROC g_panel_orig_proc;
 static WNDPROC g_combo_edit_orig_proc;
 static bool g_combo_edit_no_recurse;
@@ -697,8 +705,31 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             HFONT old_font;
             int old_extra;
 
-            draw_app_logo_silhouette(hdc, 135, 68, 106, RGB(255, 255, 255));
-            draw_app_logo_mark(hdc, 135, 68, 100);
+            /* g_custom_logo_bmp overrides the vector mark once set (see
+             * browse_and_set_logo()) - scaled to fit within a fixed
+             * box, aspect ratio preserved (never stretched to a square
+             * regardless of the source image's own shape), centered on
+             * the same (135, 68) point the vector mark uses. */
+            if (g_custom_logo_bmp) {
+                BITMAP bm;
+                if (GetObject(g_custom_logo_bmp, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
+                    const int box = 96;
+                    double sx = (double)box / bm.bmWidth;
+                    double sy = (double)box / bm.bmHeight;
+                    double s = sx < sy ? sx : sy;
+                    int dw = (int)(bm.bmWidth * s + 0.5);
+                    int dh = (int)(bm.bmHeight * s + 0.5);
+                    HDC mem_dc = CreateCompatibleDC(hdc);
+                    HBITMAP old_bmp = (HBITMAP)SelectObject(mem_dc, g_custom_logo_bmp);
+                    StretchBlt(hdc, 135 - dw / 2, 68 - dh / 2, dw, dh,
+                               mem_dc, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+                    SelectObject(mem_dc, old_bmp);
+                    DeleteDC(mem_dc);
+                }
+            } else {
+                draw_app_logo_silhouette(hdc, 135, 68, 106, RGB(255, 255, 255));
+                draw_app_logo_mark(hdc, 135, 68, 100);
+            }
 
             wm_rc.left = 20; wm_rc.top = 118; wm_rc.right = 250; wm_rc.bottom = 142;
             old_font = (HFONT)SelectObject(hdc, g_logo_font);
@@ -1605,6 +1636,11 @@ static int count_kill_switch_tripped(void) {
     return n;
 }
 
+/* The status label is always visible now - "Kill Switch: Armed" (green)
+ * normally, switching to the red TRIPPED message once something trips
+ * it. Only the Reset button hides/shows, since there's nothing to
+ * reset while armed. WM_CTLCOLORSTATIC picks the label's color off the
+ * same count_kill_switch_tripped() check this uses. */
 static void ui_refresh_kill_switch(void) {
     int tripped_count = count_kill_switch_tripped();
     bool any_tripped = tripped_count > 0;
@@ -1623,12 +1659,12 @@ static void ui_refresh_kill_switch(void) {
             wsprintfA(text, "KILL SWITCH TRIPPED - %d unit%s", tripped_count, tripped_count == 1 ? "" : "s");
         }
         SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, text);
-        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), SW_SHOW);
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_SHOW);
     } else {
-        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
+        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "Kill Switch: Armed");
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
     }
+    InvalidateRect(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), NULL, FALSE);
     g_kill_ui_valid = true;
     g_kill_ui_tripped_count = tripped_count;
 }
@@ -2602,6 +2638,98 @@ static void get_ini_path(char *path /* at least MAX_PATH + 8 bytes */) {
     lstrcatA(path, ".ini");
 }
 
+/* branding.bmp, sibling to the .exe and .ini - a fixed name/location,
+ * not the user's originally-picked file's own path. Copying into a
+ * name this app owns (rather than just remembering their path) means
+ * the logo doesn't silently revert to default the next time they move,
+ * rename, or delete whatever they picked it from - same portable,
+ * no-installer reasoning as get_ini_path(). */
+static void get_branding_bmp_path(char *path /* at least MAX_PATH + 12 bytes */) {
+    char *dot;
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    dot = strrchr(path, '\\');
+    if (dot) {
+        dot[1] = '\0';
+    } else {
+        path[0] = '\0';
+    }
+    lstrcatA(path, "branding.bmp");
+}
+
+/* Called once at startup - if a previous browse_and_set_logo() left a
+ * branding.bmp behind, load it so the custom logo survives a restart.
+ * Silently falls back to the built-in vector mark (g_custom_logo_bmp
+ * stays NULL) if the file's missing or LoadImageA can't read it - a
+ * corrupt/foreign file here should never be a startup error, just a
+ * reason to fall back. */
+static void load_custom_logo(void) {
+    char path[MAX_PATH + 16];
+    get_branding_bmp_path(path);
+    g_custom_logo_bmp = (HBITMAP)LoadImageA(NULL, path, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+}
+
+/* IDC_CHANGE_LOGO_BTN's handler - browse for a .bmp, copy it to
+ * branding.bmp (see that function's comment for why a copy, not just
+ * remembering the path), reload it, and record the originally-picked
+ * filename in the .ini purely for display/reference (SourceFile is
+ * never read back to decide what to load - branding.bmp's own
+ * presence is the one thing that decides that, so the two can never
+ * disagree with each other). BMP only, deliberately - this app links
+ * nothing beyond gdi32/user32/msimg32/comdlg32, and decoding PNG/JPEG
+ * would mean adding GDI+ (or another image library) just for this;
+ * BMP loads directly through LoadImageA with no new dependency. */
+static void browse_and_set_logo(HWND hwnd) {
+    char picked[MAX_PATH];
+    char branding_path[MAX_PATH + 16];
+    OPENFILENAMEA ofn;
+    HBITMAP loaded;
+
+    picked[0] = '\0';
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = "Bitmap Files (*.bmp)\0*.bmp\0All Files\0*.*\0";
+    ofn.lpstrFile = picked;
+    ofn.nMaxFile = sizeof(picked);
+    ofn.lpstrTitle = "Choose a Logo (BMP)";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+
+    if (!GetOpenFileNameA(&ofn)) {
+        return; /* cancelled - no error, nothing to do */
+    }
+
+    get_branding_bmp_path(branding_path);
+    if (!CopyFileA(picked, branding_path, FALSE)) {
+        ui_show_warning("Could not copy the selected file to branding.bmp");
+        return;
+    }
+
+    loaded = (HBITMAP)LoadImageA(NULL, branding_path, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
+    if (!loaded) {
+        ui_show_warning("That file isn't a loadable BMP");
+        return;
+    }
+    if (g_custom_logo_bmp) {
+        DeleteObject(g_custom_logo_bmp);
+    }
+    g_custom_logo_bmp = loaded;
+
+    {
+        const char *base = strrchr(picked, '\\');
+        char ini_path[MAX_PATH + 8];
+        get_ini_path(ini_path);
+        WritePrivateProfileStringA("Branding", "SourceFile", base ? base + 1 : picked, ini_path);
+    }
+
+    /* Plain InvalidateRect(g_header_panel, ...) was tried first here and
+     * left every sibling control in the header (Connection & Settings,
+     * Bulk Actions, Ambient Temperature) blank until it next happened
+     * to repaint on its own - same failure relayout_for_size() already
+     * documents needing RDW_ALLCHILDREN for. Match that fix: invalidate
+     * the whole window, not just this one panel. */
+    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
+}
+
 static void select_combo_by_text(HWND combo, const char *text) {
     int idx = (int)SendMessageA(combo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)text);
     if (idx != CB_ERR) {
@@ -2728,6 +2856,13 @@ static void build_controls(HWND hwnd) {
      * other panel-to-panel spacing below) - the content just doesn't
      * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
+
+    /* Sits under the MILITRONIX wordmark (drawn inline in
+     * panel_subclass_proc, not a real control - this button is,
+     * because it needs a click). Centered under the logo mark's own
+     * cx=135 - see browse_and_set_logo(). */
+    add_ctrl(hwnd, "BUTTON", "Change Logo", BS_OWNERDRAW | WS_TABSTOP,
+             60, 148, 150, 20, IDC_CHANGE_LOGO_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -2891,9 +3026,11 @@ static void build_controls(HWND hwnd) {
             g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 84, 32, chip);
         }
     }
-    add_ctrl(hwnd, "STATIC", "", SS_LEFT | SS_NOPREFIX, 1033, 174, 190, 16, IDC_KILL_STATUS_LBL);
+    /* Always visible ("Kill Switch: Armed" until something trips it) -
+     * see ui_refresh_kill_switch()'s comment. Only the Reset button
+     * hides while armed, since there's nothing to reset yet. */
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 174, 190, 16, IDC_KILL_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 172, 80, 22, IDC_KILL_RESET_BTN);
-    ShowWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
@@ -3186,6 +3323,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             refresh_port_list();
             refresh_sensor_port_list();
             load_settings();
+            load_custom_logo();
 
             memset(&ccb, 0, sizeof(ccb));
             ccb.on_connected_changed = conn_on_connected_changed;
@@ -3208,6 +3346,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             set_channel_controls_enabled(false);
             ui_refresh_all_channels();
             ui_refresh_sensor();
+            ui_refresh_kill_switch();
             return 0;
         }
 
@@ -3353,6 +3492,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
                 return 0;
             }
+            if (id == IDC_CHANGE_LOGO_BTN && code == BN_CLICKED) {
+                browse_and_set_logo(hwnd);
+                return 0;
+            }
             if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
                 g_bulk_select_mode = !g_bulk_select_mode;
                 SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
@@ -3477,7 +3620,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return (LRESULT)g_brush_panel;
             }
             if (ctl == GetDlgItem(hwnd, IDC_KILL_STATUS_LBL)) {
-                SetTextColor(hdc, COLOR_APP_DISCONNECTED);
+                SetTextColor(hdc, count_kill_switch_tripped() > 0 ? COLOR_APP_DISCONNECTED : COLOR_APP_CONNECTED);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
@@ -3720,6 +3863,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
+            if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
             /* Only delete g_font if it's the CreateFontA() result, not
              * the GetStockObject() fallback - stock objects must never
              * be passed to DeleteObject(). */

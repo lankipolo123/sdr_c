@@ -21,6 +21,14 @@
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 
+/* Lets the user swap the header's MILITRONIX mark for their own .bmp -
+ * see load_custom_logo()/save_custom_logo() in main.c. The picked file
+ * is copied to branding.bmp next to the .exe (not referenced by its
+ * original path, which could move/disappear) - the .ini only records
+ * the original filename picked, for display/reference, not as the
+ * thing actually loaded on startup. */
+#define IDC_CHANGE_LOGO_BTN  1022
+
 /* Bulk Actions bar, above the channel grid - click a card's checkbox to
  * select it (lit accent border), then one of these applies to every
  * selected channel at once instead of clicking through cards one at a

@@ -3,6 +3,11 @@
 *.obj
 *.ini
 
+# User-picked custom logo (see browse_and_set_logo() in main.c) -
+# copied here at runtime, same portable/no-installer reasoning as the
+# .ini above, not something to ship a default value for.
+branding.bmp
+
 # Transit.dll is a proprietary vendor DLL, never committed - same rule
 # sdr_app's .gitignore follows for it.
 dll/
