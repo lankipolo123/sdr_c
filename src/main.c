@@ -100,7 +100,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
  * the sensor at WM_CREATE via sensor_set_unit_address(). */
 static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 
-/* MILITRONIX Dark palette - same as the single-channel app. */
+/* HelixDefender Dark palette - same as the single-channel app. */
 #define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
 #define COLOR_APP_PANEL_BG  RGB(43, 45, 49)
 #define COLOR_APP_TEXT      RGB(232, 233, 234)
@@ -184,7 +184,7 @@ static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
 static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
-/* NULL = draw the built-in vector MILITRONIX mark (the normal case).
+/* NULL = draw the built-in vector HelixDefender mark (the normal case).
  * Set by load_custom_logo() at startup (if branding.bmp exists next to
  * the .exe) or by browse_and_set_logo() (IDC_CHANGE_LOGO_BTN) - either
  * way, once non-NULL, the header paints this bitmap instead. See
@@ -686,7 +686,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * first and swapped for this per direct request.
          *
          * Shifted up from the header's vertical center (was cy=90) to
-         * leave room for the MILITRONIX wordmark underneath it. */
+         * leave room for the HelixDefender wordmark underneath it. */
         if (hwnd == g_header_panel) {
             RECT wm_rc;
             HFONT old_font;
@@ -728,7 +728,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             old_extra = SetTextCharacterExtra(hdc, 3);
             SetTextColor(hdc, COLOR_APP_TEXT);
             SetBkMode(hdc, TRANSPARENT);
-            DrawTextA(hdc, "MILITRONIX", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            DrawTextA(hdc, "HELIXDEFENDER", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextCharacterExtra(hdc, old_extra);
             SelectObject(hdc, old_font);
         }
@@ -2829,7 +2829,7 @@ static void build_controls(HWND hwnd) {
      * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
-    /* Sits under the MILITRONIX wordmark (drawn inline in
+    /* Sits under the HelixDefender wordmark (drawn inline in
      * panel_subclass_proc, not a real control - this button is,
      * because it needs a click). Centered under the logo mark's own
      * cx=135 - see browse_and_set_logo(). */
@@ -3190,7 +3190,7 @@ static int log_panel_y_for(int card_h) {
     return CONTENT_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H;
 }
 
-/* Where the MILITRONIX mark + signal-wave pulse draw, in the dead
+/* Where the HelixDefender mark + signal-wave pulse draw, in the dead
  * space right of the grid (see CARD_H_MAX's comment on why the grid
  * itself never widens to fill it) - drawn straight onto the main
  * window's own background in WM_ERASEBKGND, not a separate child
@@ -3294,7 +3294,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_header_font = g_font;
             }
 
-            /* Bold + wide (FW_BLACK) for the MILITRONIX wordmark under
+            /* Bold + wide (FW_BLACK) for the HelixDefender wordmark under
              * the logo mark - the reference's own lettering reads as a
              * heavy geometric sans, not a normal-weight label; letter-
              * spacing is added separately at draw time via
@@ -3456,7 +3456,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
              * in its tile - no separate full-rect FillRect needed. */
             FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
 
-            /* MILITRONIX mark + signal-wave pulse, straight over the
+            /* HelixDefender mark + signal-wave pulse, straight over the
              * dot pattern just filled above - see
              * get_signal_area_rect()'s comment for why this is drawn
              * inline here rather than as a separate window. */

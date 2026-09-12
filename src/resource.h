@@ -21,7 +21,7 @@
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 
-/* Lets the user swap the header's MILITRONIX mark for their own .bmp -
+/* Lets the user swap the header's HelixDefender mark for their own .bmp -
  * see load_custom_logo()/save_custom_logo() in main.c. The picked file
  * is copied to branding.bmp next to the .exe (not referenced by its
  * original path, which could move/disappear) - the .ini only records
