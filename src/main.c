@@ -494,10 +494,9 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
          * ARC (not the sharp rectangular corner point the panel's
          * RoundRect calls never actually draw into) so it reads as a
          * notch cut into the bar's rounded edge, the way a die-cut hole
-         * in a real card/ticket corner would - filled with the actual
-         * tiled dot-pattern brush (not a flat color) so the page's own
-         * dot texture visibly continues behind the hole, rather than a
-         * plain disc sitting on top of the bar.
+         * in a real card/ticket corner would - filled solid silver
+         * (like a rivet/bolt head), not the tiled dot-pattern brush
+         * used before - direct request.
          *
          * Centering it exactly on the sharp corner (rc.left, rc.top
          * etc.) was tried first and was wrong two ways: visually, most
@@ -533,34 +532,29 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             const int r = 6;
             const int inset = PANEL_CORNER_DIAMETER / 2; /* = 12 */
             POINT corners[4];
-            POINT old_org;
             int ci;
             corners[0].x = rc.left + inset;  corners[0].y = rc.top + inset;
             corners[1].x = rc.right - PANEL_SHADOW_PX - inset;  corners[1].y = rc.top + inset;
             corners[2].x = rc.left + inset;  corners[2].y = rc.bottom - PANEL_SHADOW_PX - inset;
             corners[3].x = rc.right - PANEL_SHADOW_PX - inset;  corners[3].y = rc.bottom - PANEL_SHADOW_PX - inset;
 
-            /* This panel's own client (0,0) sits at (SIDEBAR_X, 6) in
-             * the main window - phase-align the pattern brush to that
-             * offset so the dots inside each hole are continuous with
-             * the real background dots just outside the panel, instead
-             * of the tile restarting at this window's own (0,0) and
-             * visibly seaming against the surrounding pattern. */
-            SetBrushOrgEx(hdc, -(SIDEBAR_X % DOT_GRID_SPACING), -(6 % DOT_GRID_SPACING), &old_org);
-            old_brush = (HBRUSH)SelectObject(hdc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
-            /* A visible ring around the hole (not NULL_PEN/borderless) -
-             * a real die-cut hole has a defined edge, not just a patch
-             * of texture with no boundary. */
-            pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            for (ci = 0; ci < 4; ci++) {
-                Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
-                        corners[ci].x + r, corners[ci].y + r);
+            {
+                HBRUSH silver_brush = CreateSolidBrush(RGB(196, 199, 204));
+                old_brush = (HBRUSH)SelectObject(hdc, silver_brush);
+                /* A visible ring around the hole (not NULL_PEN/borderless) -
+                 * a real die-cut hole has a defined edge, not just a patch
+                 * of texture with no boundary. */
+                pen = CreatePen(PS_SOLID, 1, RGB(120, 123, 129));
+                old_pen = (HPEN)SelectObject(hdc, pen);
+                for (ci = 0; ci < 4; ci++) {
+                    Ellipse(hdc, corners[ci].x - r, corners[ci].y - r,
+                            corners[ci].x + r, corners[ci].y + r);
+                }
+                SelectObject(hdc, old_pen);
+                DeleteObject(pen);
+                SelectObject(hdc, old_brush);
+                DeleteObject(silver_brush);
             }
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-            SelectObject(hdc, old_brush);
-            SetBrushOrgEx(hdc, old_org.x, old_org.y, NULL);
         }
 
         /* Bulk Actions gets its own inset card within this same header
