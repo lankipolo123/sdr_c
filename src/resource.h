@@ -26,10 +26,15 @@
  * selected channel at once instead of clicking through cards one at a
  * time. Same gating as each card's own controls: OFF always works even
  * kill-switch-tripped, ON/Set/level skip a tripped channel. Always
- * expanded - no toggle/collapse. Checkbox-only selection - see
- * card_panel_subclass_proc's comment in main.c for why a background-
- * click alternative was tried and removed (it broke every other
- * button on the card). */
+ * expanded - no toggle/collapse.
+ *
+ * IDC_BULK_TOGGLE_BTN does NOT hide anything - it arms/disarms
+ * clicking a card's plain background as a second way to select it
+ * (off by default; the checkbox itself always works regardless). It's
+ * wired through WM_LBUTTONDOWN coordinate math on the main window, not
+ * the card panel's own click handling - see g_bulk_select_mode's
+ * comment in main.c for why. */
+#define IDC_BULK_TOGGLE_BTN     1039
 #define IDC_BULK_SELECTED_LBL   1040
 #define IDC_BULK_CLEAR_BTN      1041
 #define IDC_BULK_MODE_COMBO     1042
