@@ -516,11 +516,24 @@ static bool any_channel_on(void) {
     return false;
 }
 
+/* How many of the 16 channels are actually transmitting right now -
+ * feeds the ring count in draw_signal_waves() so the icon reads as
+ * "how much is live", not just "something is live". */
+static int count_channels_on(void) {
+    int i, n = 0;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (channels_get(i)->output_on) {
+            n++;
+        }
+    }
+    return n;
+}
+
 /* Forward declaration - defined further down, but panel_subclass_proc
  * below needs it for the header's logo mark. */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
 static void draw_app_logo_silhouette(HDC hdc, int cx, int cy, int scale, COLORREF color);
-static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase);
+static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase, int active_count, const RECT *bounds);
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
@@ -1035,21 +1048,50 @@ static void draw_wave_arc(HDC hdc, int cx, int apex_y, int r, COLORREF color) {
     DeleteObject(pen);
 }
 
-/* Three concentric "broadcast" arcs above the logo mark's own top
- * vertex (see logo_points()/LOGO_LEFT_BASE - the mark's highest point
- * is (cx, cy - 32*scale/100)), one lit blue at a time cycling outward
- * with phase - a traveling pulse rather than all three static, since a
- * static trio reads as decoration while the animation reads as "this
+/* Concentric "broadcast" arcs above the logo mark's own top vertex
+ * (see logo_points()/LOGO_LEFT_BASE - the mark's highest point is
+ * (cx, cy - 32*scale/100)), one lit blue at a time cycling outward
+ * with phase - a traveling pulse rather than all rings static, since a
+ * static set reads as decoration while the animation reads as "this
  * is live". Dim gray (RGB(90,93,98), roughly mid-way between the
- * panel background and the diamonds' own dark gray) for the other two
- * so they're still visible as context, not just gone. */
-static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase) {
-    const int base_r[3] = { 16, 28, 40 };
+ * panel background and the diamonds' own dark gray) for the rest so
+ * they're still visible as context, not just gone.
+ *
+ * How many rings show scales with active_count (how many of the 16
+ * channels are actually ON, from count_channels_on()) rather than
+ * always drawing the same fixed set - a handful of live channels
+ * reads as a small blip, the whole rack going up reads as a bigger
+ * broadcast. Capped by bounds (the reserved signal area - see
+ * get_signal_area_rect()) so a narrow/short window never grows rings
+ * out past the space actually reserved for them. */
+#define SIGNAL_WAVE_MAX_RINGS 5
+static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase, int active_count, const RECT *bounds) {
+    static const int base_r[SIGNAL_WAVE_MAX_RINGS] = { 16, 28, 40, 52, 64 };
     int apex_y = cy - (32 * scale / 100);
-    int i;
-    for (i = 0; i < 3; i++) {
+    int margin = 6;
+    int max_r_h = (bounds->right - bounds->left) / 2 - margin;
+    int max_r_v = apex_y - bounds->top - margin;
+    int max_r = max_r_h < max_r_v ? max_r_h : max_r_v;
+    int want = (active_count * SIGNAL_WAVE_MAX_RINGS + MAX_CHANNELS - 1) / MAX_CHANNELS;
+    int n = 0, i;
+
+    if (want < 1) {
+        want = 1;
+    } else if (want > SIGNAL_WAVE_MAX_RINGS) {
+        want = SIGNAL_WAVE_MAX_RINGS;
+    }
+    for (i = 0; i < want; i++) {
+        if (base_r[i] * scale / 100 > max_r) {
+            break;
+        }
+        n++;
+    }
+    if (n == 0) {
+        n = 1; /* still show the innermost ring even in a cramped area */
+    }
+    for (i = 0; i < n; i++) {
         int r = base_r[i] * scale / 100;
-        bool lit = (phase % 3) == i;
+        bool lit = (phase % n) == i;
         draw_wave_arc(hdc, cx, apex_y, r, lit ? COLOR_APP_ACCENT : RGB(90, 93, 98));
     }
 }
@@ -3622,7 +3664,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
                         draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
                         draw_app_logo_mark(hdc, cx, cy, 100);
-                        draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
+                        draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase, count_channels_on(), &sig_rc);
                     } else {
                         draw_app_logo_faded(hdc, cx, cy, 100, 110); /* ~43% opacity */
                     }
