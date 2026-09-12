@@ -160,6 +160,17 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
 #define CARD_H_MAX 220
 #define GRID_BOTTOM_MARGIN 20 /* matches the visual weight of CONTENT_TOP's own top margin */
 
+/* Right edge of the 4-column grid - GRID_LEFT plus 4 card widths and 3
+ * gaps between them (no trailing gap after the last column). Anything
+ * wider than this, the grid itself never uses (see CARD_H_MAX's
+ * comment on why cards don't grow sideways) - g_signal_panel fills
+ * that space instead, appearing once there's SIGNAL_PANEL_MIN_W of it
+ * to work with and staying hidden below that rather than rendering as
+ * a cramped sliver. */
+#define GRID_RIGHT (GRID_LEFT + GRID_COLS * (CARD_W + CARD_GAP) - CARD_GAP)
+#define SIGNAL_PANEL_MIN_W 100
+#define SIGNAL_TICKS_PER_STEP 3 /* 300ms per pulse step at ID_POLL_TIMER's 100ms */
+
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
 
@@ -237,6 +248,23 @@ static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the sidebar's static labels these need
                                  * their own handle to reposition. */
 static HWND g_log_header_lbl;
+/* Sits in the dead space to the right of the channel grid on any
+ * window wider than the grid's fixed width - the grid itself never
+ * stretches (see relayout_for_size()'s comment on why), so that space
+ * would otherwise just stay empty background. Shows the MILITRONIX
+ * mark with animated signal-wave arcs above it, but only while the
+ * link is actually connected AND at least one channel is on (see
+ * g_signal_wave_phase and any_channel_on()) - otherwise it paints
+ * nothing, same as the empty space it replaces. Hidden entirely (not
+ * just blank) when the window isn't wide enough to fit it without
+ * looking cramped - see relayout_for_size(). */
+static HWND g_signal_panel;
+static int g_signal_wave_phase; /* advances every SIGNAL_TICKS_PER_STEP
+                                   * ticks of ID_POLL_TIMER while active -
+                                   * see WM_TIMER's handling below */
+static int g_signal_tick_counter;
+static bool g_signal_active_prev; /* so WM_TIMER can repaint once, not every
+                                    * tick, on the transition to inactive */
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -475,10 +503,24 @@ static void make_combo_readonly(HWND combo) {
     make_combo_readonly_ex(combo, NULL);
 }
 
+/* Used by g_signal_panel's paint (is there anything to show a "signal"
+ * for?) and WM_TIMER's animation gating - defined this early since
+ * panel_subclass_proc below needs it. */
+static bool any_channel_on(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (channels_get(i)->output_on) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Forward declaration - defined further down, but panel_subclass_proc
  * below needs it for the header's logo mark. */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
 static void draw_app_logo_silhouette(HDC hdc, int cx, int cy, int scale, COLORREF color);
+static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase);
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
@@ -671,6 +713,21 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             DrawTextA(hdc, "MILITRONIX", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextCharacterExtra(hdc, old_extra);
             SelectObject(hdc, old_font);
+        }
+
+        /* Fills the dead space to the right of the channel grid (see
+         * g_signal_panel's own comment) - only draws anything while
+         * the link is connected and at least one channel is actually
+         * on, matching the same "real power" gating the selection
+         * checkbox uses. Otherwise this panel just sits there as
+         * empty background, same as the space it replaced. */
+        if (hwnd == g_signal_panel && conn_is_connected(&g_conn) && any_channel_on()) {
+            int cx = (rc.left + rc.right - PANEL_SHADOW_PX) / 2;
+            int cy = rc.top + (rc.bottom - rc.top) * 3 / 5;
+
+            draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
+            draw_app_logo_mark(hdc, cx, cy, 100);
+            draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
         }
 
         EndPaint(hwnd, &ps);
@@ -897,6 +954,57 @@ static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
     DeleteObject(mark_brush);
 
     SelectObject(hdc, old_pen);
+}
+
+/* Unit-circle points for a 0deg-180deg sweep (west -> north -> east),
+ * 15deg apart - a lookup table instead of calling sin()/cos() at
+ * paint time, since nothing else in this file links libm and this
+ * avoids being the first thing that needs to. Used to trace an upward-
+ * opening "signal wave" arc above the logo mark: y is subtracted (not
+ * added) because screen Y increases downward, so "north" needs to
+ * read as smaller y. */
+static const double WAVE_ARC_COS[13] = {
+    1.0, 0.966, 0.866, 0.707, 0.5, 0.259, 0.0,
+    -0.259, -0.5, -0.707, -0.866, -0.966, -1.0
+};
+static const double WAVE_ARC_SIN[13] = {
+    0.0, 0.259, 0.5, 0.707, 0.866, 0.966, 1.0,
+    0.966, 0.866, 0.707, 0.5, 0.259, 0.0
+};
+
+static void draw_wave_arc(HDC hdc, int cx, int apex_y, int r, COLORREF color) {
+    POINT pts[13];
+    HPEN pen, old_pen;
+    int i;
+
+    for (i = 0; i < 13; i++) {
+        pts[i].x = cx - (int)(r * WAVE_ARC_COS[i] + 0.5);
+        pts[i].y = apex_y - (int)(r * WAVE_ARC_SIN[i] + 0.5);
+    }
+    pen = CreatePen(PS_SOLID, 2, color);
+    old_pen = (HPEN)SelectObject(hdc, pen);
+    Polyline(hdc, pts, 13);
+    SelectObject(hdc, old_pen);
+    DeleteObject(pen);
+}
+
+/* Three concentric "broadcast" arcs above the logo mark's own top
+ * vertex (see logo_points()/LOGO_LEFT_BASE - the mark's highest point
+ * is (cx, cy - 32*scale/100)), one lit blue at a time cycling outward
+ * with phase - a traveling pulse rather than all three static, since a
+ * static trio reads as decoration while the animation reads as "this
+ * is live". Dim gray (RGB(90,93,98), roughly mid-way between the
+ * panel background and the diamonds' own dark gray) for the other two
+ * so they're still visible as context, not just gone. */
+static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase) {
+    const int base_r[3] = { 16, 28, 40 };
+    int apex_y = cy - (32 * scale / 100);
+    int i;
+    for (i = 0; i < 3; i++) {
+        int r = base_r[i] * scale / 100;
+        bool lit = (phase % 3) == i;
+        draw_wave_arc(hdc, cx, apex_y, r, lit ? COLOR_APP_ACCENT : RGB(90, 93, 98));
+    }
 }
 
 static void draw_header_icon(HDC hdc, int x, int y, int type) {
@@ -2829,6 +2937,11 @@ static void build_controls(HWND hwnd) {
         add_channel_card(hwnd, idx);
     }
 
+    /* Placeholder rect - real position/size (and whether it's shown at
+     * all) is set by relayout_for_size() once the actual client width
+     * is known, same as every other panel that depends on window size. */
+    g_signal_panel = add_panel(hwnd, GRID_LEFT, CONTENT_TOP, 1, 1);
+
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
         char label[16];
         wsprintfA(label, "%d", BAUD_OPTIONS[i]);
@@ -3002,6 +3115,23 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         position_channel_card(hwnd, i, card_x, card_y, CARD_W, card_h);
     }
 
+    /* Dead space to the right of the grid - width is whatever's left
+     * between the grid's right edge and the same margin SIDEBAR_X
+     * mirrors on the left; height matches the sidebar/grid exactly
+     * (log_y + LOG_PANEL_H - CONTENT_TOP, the same expression used for
+     * g_sidebar_panel just above). Hidden outright below
+     * SIGNAL_PANEL_MIN_W rather than shown too narrow to read. */
+    {
+        int sig_x = GRID_RIGHT + CARD_GAP;
+        int sig_w = client_w - SIDEBAR_X - sig_x;
+        if (sig_w >= SIGNAL_PANEL_MIN_W) {
+            MoveWindow(g_signal_panel, sig_x, CONTENT_TOP, sig_w, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
+            ShowWindow(g_signal_panel, SW_SHOWNA);
+        } else {
+            ShowWindow(g_signal_panel, SW_HIDE);
+        }
+    }
+
     /* One coalesced repaint for the whole window AND every child control
      * in it, instead of each of the ~240 moved controls repainting
      * itself individually (that's what made resizing feel unresponsive
@@ -3118,6 +3248,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         case WM_TIMER:
             if (wParam == ID_POLL_TIMER) {
+                bool signal_active;
+
                 conn_poll(&g_conn);
                 channels_poll();
                 ui_refresh_all_channels();
@@ -3126,6 +3258,25 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 check_kill_switch();
                 ui_refresh_kill_switch();
                 InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
+
+                /* g_signal_panel's wave pulse - stepped every
+                 * SIGNAL_TICKS_PER_STEP ticks (slower than the 100ms
+                 * poll itself would give a distractingly fast flicker),
+                 * plus one extra repaint on the active->inactive edge
+                 * so the panel actually clears instead of freezing on
+                 * its last frame. */
+                signal_active = conn_is_connected(&g_conn) && any_channel_on();
+                if (signal_active) {
+                    g_signal_tick_counter++;
+                    if (g_signal_tick_counter >= SIGNAL_TICKS_PER_STEP) {
+                        g_signal_tick_counter = 0;
+                        g_signal_wave_phase++;
+                        InvalidateRect(g_signal_panel, NULL, FALSE);
+                    }
+                } else if (g_signal_active_prev) {
+                    InvalidateRect(g_signal_panel, NULL, FALSE);
+                }
+                g_signal_active_prev = signal_active;
             }
             return 0;
 
