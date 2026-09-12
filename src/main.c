@@ -547,6 +547,30 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
+        /* g_signal_panel skips every bit of the shared border/shadow/
+         * card chrome below - a bordered empty box sitting in otherwise
+         * plain background read as a stray, broken card when nothing
+         * was active in it (direct feedback: "why is there a card
+         * here"). Flat-fills with the same base tone the page's dot
+         * pattern itself is built on (see build_dot_pattern_brush() -
+         * its tile is g_brush_page underneath the dots), so it blends
+         * into the surrounding background rather than announcing
+         * itself as a panel - the logo+waves then read as floating
+         * there directly, with no outline, once there's something
+         * real to show. */
+        if (hwnd == g_signal_panel) {
+            FillRect(hdc, &rc, g_brush_page);
+            if (conn_is_connected(&g_conn) && any_channel_on()) {
+                int cx = (rc.left + rc.right) / 2;
+                int cy = rc.top + (rc.bottom - rc.top) * 3 / 5;
+                draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
+                draw_app_logo_mark(hdc, cx, cy, 100);
+                draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
         /* Faked elevation: a dark shadow shape filling the whole rect,
          * then the real panel body drawn shrunk into its top-left,
          * leaving a few px of shadow showing along the bottom-right -
@@ -744,21 +768,6 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             DrawTextA(hdc, "MILITRONIX", -1, &wm_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextCharacterExtra(hdc, old_extra);
             SelectObject(hdc, old_font);
-        }
-
-        /* Fills the dead space to the right of the channel grid (see
-         * g_signal_panel's own comment) - only draws anything while
-         * the link is connected and at least one channel is actually
-         * on, matching the same "real power" gating the selection
-         * checkbox uses. Otherwise this panel just sits there as
-         * empty background, same as the space it replaced. */
-        if (hwnd == g_signal_panel && conn_is_connected(&g_conn) && any_channel_on()) {
-            int cx = (rc.left + rc.right - PANEL_SHADOW_PX) / 2;
-            int cy = rc.top + (rc.bottom - rc.top) * 3 / 5;
-
-            draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
-            draw_app_logo_mark(hdc, cx, cy, 100);
-            draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase);
         }
 
         EndPaint(hwnd, &ps);
