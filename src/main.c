@@ -101,7 +101,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
  * Defaults to the unit number, 1-indexed - edit this table once the real
  * wiring is known, since it's very likely not sequential. Pushed into
  * the sensor at WM_CREATE via sensor_set_unit_address(). */
-static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4, 5, 6 };
+static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
 
 /* HelixDefender Dark palette - same as the single-channel app. */
 #define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
@@ -3357,12 +3357,12 @@ static void build_controls(HWND hwnd) {
     make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
-    /* 6 physical sensors scanning the rack area, each at its own
+    /* 4 physical sensors scanning the rack area, each at its own
      * address (see UNIT_TEMP_ADDR) - not one per RF channel. Status and
-     * the rack-wide average (across whichever of the 6 currently have a
+     * the rack-wide average (across whichever of the 4 currently have a
      * reading) are one aligned row of two gradient pills instead of two
-     * stacked plain-text lines - width matches the chip grid below (88
-     * *3 + 6*2 = 276) so the whole column reads as one aligned block. */
+     * stacked plain-text lines - width matches the chip grid below so
+     * the whole column reads as one aligned block. */
     /* Plain text, not a pill - only the temperature reading gets that
      * treatment. Still on the same row/aligned with the Avg pill next
      * to it, just left-aligned status text like every other connection
@@ -3371,24 +3371,26 @@ static void build_controls(HWND hwnd) {
      * the card zone, not flush left/right against its edges. */
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60, 100, 16, IDC_SENSOR_STATUS_LBL);
     add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
-    /* Address + reading per physical sensor unit, 3 columns x 2 rows -
-     * plain text (no box), see sensor_chip_subclass_proc(). Chip height
-     * trimmed 38 -> 32: the value text draws with DT_NOCLIP now (see
+    /* Address + reading per physical sensor unit, 2 columns x 2 rows
+     * (was 3x2 for 6 units - see SENSOR_MAX_UNITS) - plain text (no
+     * box), see sensor_chip_subclass_proc(). Chip height trimmed 38 ->
+     * 32: the value text draws with DT_NOCLIP now (see
      * sensor_chip_subclass_proc), which is what actually fixed the old
      * decimal-point clipping bug, not the taller box - DT_NOCLIP draws
      * outside a short rect instead of cutting the glyphs off, so the
-     * box itself can shrink safely. Width also trimmed 88 -> 84 and
-     * the column gap 6 -> 4 so the grid fits inside the card zone's
-     * narrower right margin. Centered within the zone (start x=1026,
-     * not flush against 1023). */
+     * box itself can shrink safely. Chip width widened 84 -> 126 (gap
+     * 4 -> 6) so 2 columns still fill the same ~260px span the old 3-
+     * column grid used, keeping this aligned with the Avg pill above it
+     * instead of leaving a dead gap on the right. Centered within the
+     * zone (start x=1026, not flush against 1023). */
     {
         int chip;
         for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
-            int col = chip % 3;
-            int row = chip / 3;
-            int cx = 1026 + col * (84 + 4);
+            int col = chip % 2;
+            int row = chip / 2;
+            int cx = 1026 + col * (126 + 6);
             int cy = 88 + row * (32 + 4);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 84, 32, chip);
+            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 126, 32, chip);
         }
     }
     /* Always visible ("Kill Switch: Armed" until something trips it) -

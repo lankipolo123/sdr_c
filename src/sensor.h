@@ -2,11 +2,11 @@
  * COM port completely independent of the RS-422 channel control
  * connection.
  *
- * NOT one sensor per RF channel - there are 6 physical sensor units
+ * NOT one sensor per RF channel - there are 4 physical sensor units
  * total, scanning the rack area collectively, independent of the 16 RF
  * channels (SENSOR_MAX_UNITS is deliberately its own constant, not tied
- * to MAX_CHANNELS). Each of the 6 has its own configured Modbus address
- * (defaults to unit number 1-6, but real wiring may not be sequential -
+ * to MAX_CHANNELS). Each of the 4 has its own configured Modbus address
+ * (defaults to unit number 1-4, but real wiring may not be sequential -
  * see sensor_set_unit_address()). Every unit's slot holds only its own
  * reading, polled round-robin.
  *
@@ -19,7 +19,7 @@
  *
  * Settings confirmed against the real hardware via QModMaster (see
  * PLAN_temp_sensor.md) - not guessed: function 0x04, register 1, count
- * 2, both raw/10. The slave address for per-unit mode (1-6) has not
+ * 2, both raw/10. The slave address for per-unit mode (1-4) has not
  * itself been confirmed against real per-unit hardware - only the
  * single-sensor-at-address-1 case has been.
  */
@@ -27,7 +27,7 @@
 #include "serial_port.h"
 #include <stdbool.h>
 
-#define SENSOR_MAX_UNITS 6 /* 6 physical sensors scanning the rack area -
+#define SENSOR_MAX_UNITS 4 /* 4 physical sensors scanning the rack area -
                              * independent of MAX_CHANNELS (16 RF
                              * channels), not one-to-one with them */
 /* QModMaster's status bar showed "Base Addr: 1" throughout - its Start
@@ -74,7 +74,7 @@ bool sensor_connect(Sensor *s, const char *port_name, DWORD baud, char parity, u
 void sensor_disconnect(Sensor *s);
 bool sensor_is_connected(const Sensor *s);
 
-/* unit_index is 0-based (0..SENSOR_MAX_UNITS-1) - one of the 6 physical
+/* unit_index is 0-based (0..SENSOR_MAX_UNITS-1) - one of the 4 physical
  * sensor units, not an RF channel index. */
 const SensorState *sensor_get_state(const Sensor *s, int unit_index);
 
