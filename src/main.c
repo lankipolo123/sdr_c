@@ -24,7 +24,13 @@
 #include "channels.h"
 #include "sensor.h"
 
-#define CLIENT_WIDTH  1343
+/* Widened by ROW_LABEL_STRIP_W (defined below) + a little breathing
+ * room - the new row labels sat right at this window's own minimum
+ * width and got clipped by it otherwise (the signal-wave mark's own
+ * area was already marginal at this exact size before that, sub-
+ * SIGNAL_AREA_MIN_W and so not drawn at all - unchanged; the row
+ * labels are the part that actually needs to never be clipped). */
+#define CLIENT_WIDTH  1403
 #define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
@@ -177,6 +183,15 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * get_signal_area_rect() for what fills that space instead. */
 #define GRID_RIGHT (GRID_LEFT + GRID_COLS * (CARD_W + CARD_GAP) - CARD_GAP)
 #define SIGNAL_TICKS_PER_STEP 3 /* 300ms per pulse step at ID_POLL_TIMER's 100ms */
+
+/* A vertical strip carved out of the dead space right of the grid (see
+ * GRID_RIGHT's comment), for the 1st/2nd/3rd/4th row labels
+ * (IDC_GRID_ROW_LBL_1..4) - one per grid row, so it's obvious which row
+ * IDC_BULK_ROWSELECT_COMBO's "1st Row" etc. actually picks. The
+ * signal-wave mark (get_signal_area_rect()) is shifted right by this
+ * same width and drawn a little smaller to make room, rather than the
+ * strip eating into its existing space. */
+#define ROW_LABEL_STRIP_W 52
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
@@ -1906,6 +1921,14 @@ static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 static int channel_uptime_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_UPTIME_OFFSET; }
 
+/* row is 0..GRID_ROWS-1, matching bulk_select_row()'s own row numbering. */
+static int grid_row_lbl_id(int row) {
+    static const int ids[GRID_ROWS] = {
+        IDC_GRID_ROW_LBL_1, IDC_GRID_ROW_LBL_2, IDC_GRID_ROW_LBL_3, IDC_GRID_ROW_LBL_4
+    };
+    return ids[row];
+}
+
 /* Invalidates a card's background panel AND every one of its own
  * foreground siblings (title, mode label, mode combo, Set, ON, OFF,
  * status, gauge, tick labels) together, every time. WS_CLIPSIBLINGS on
@@ -2132,6 +2155,22 @@ static void bulk_select_all(void) {
     for (i = 0; i < MAX_CHANNELS; i++) {
         if (!g_channel_selected[i]) {
             g_channel_selected[i] = true;
+            ui_invalidate_card(i);
+        }
+    }
+    ui_refresh_bulk_selected_label();
+}
+
+/* IDC_BULK_ROWSELECT_COMBO's "1st/2nd/3rd/4th Row" options - replaces
+ * the whole selection with exactly that row of the 4x4 grid (row 0 =
+ * Units 1-4, row 1 = Units 5-8, ...), same as picking a fresh set by
+ * hand would, not additive on top of whatever was already selected. */
+static void bulk_select_row(int row) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        bool want = (i / GRID_COLS) == row;
+        if (g_channel_selected[i] != want) {
+            g_channel_selected[i] = want;
             ui_invalidate_card(i);
         }
     }
@@ -3647,7 +3686,12 @@ static void build_controls(HWND hwnd) {
      * row-pitch as Connection & Settings' own rows (y=36/63). */
     {
         HWND bulk_mode_combo;
+        HWND row_select_combo;
         int mi;
+        int ri;
+        static const char *const row_select_items[] = {
+            "1st Row", "2nd Row", "3rd Row", "4th Row", "Select All", "Custom"
+        };
 
         /* Bulk Actions' own inset card border/shadow is drawn by
          * panel_subclass_proc itself (see the hwnd == g_header_panel
@@ -3703,6 +3747,21 @@ static void build_controls(HWND hwnd) {
          * 12+ individual checkboxes by hand. */
         add_ctrl(hwnd, "BUTTON", "Select All", BS_OWNERDRAW | WS_TABSTOP,
                  568 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_SELECT_ALL_BTN);
+
+        /* Quick-select presets - see bulk_select_row() and
+         * IDC_BULK_ROWSELECT_COMBO's comment in resource.h. Applies
+         * immediately on CBN_SELCHANGE, same as the Spectrum unit
+         * combo does - no separate Set step needed for a pick this
+         * simple. Starts on "Custom" (last item) so it doesn't fire a
+         * selection change the instant the window opens. */
+        row_select_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
+                                     470 + BULK_X_SHIFT, 140, 188, 120, IDC_BULK_ROWSELECT_COMBO);
+        for (ri = 0; ri < (int)(sizeof(row_select_items) / sizeof(row_select_items[0])); ri++) {
+            SendMessageA(row_select_combo, CB_ADDSTRING, 0, (LPARAM)row_select_items[ri]);
+        }
+        SendMessageA(row_select_combo, CB_SETCURSEL,
+                     (WPARAM)(sizeof(row_select_items) / sizeof(row_select_items[0]) - 1), 0);
+        make_combo_readonly(row_select_combo);
 
         add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
                  790 + BULK_X_SHIFT, 54, 84, 18, IDC_BULK_HIGH_BTN);
@@ -3825,6 +3884,21 @@ static void build_controls(HWND hwnd) {
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
+    }
+
+    /* Row labels - see ROW_LABEL_STRIP_W's comment. Design-time
+     * positions (card_h == CARD_H); relayout_for_size() repositions
+     * these alongside the cards themselves as the window resizes. */
+    {
+        static const char *const row_lbl_text[GRID_ROWS] = {
+            "1st row", "2nd row", "3rd row", "4th row"
+        };
+        int row;
+        for (row = 0; row < GRID_ROWS; row++) {
+            int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
+            add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
+                     GRID_RIGHT + CARD_GAP, row_cy - 8, ROW_LABEL_STRIP_W, 16, grid_row_lbl_id(row));
+        }
     }
 
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
@@ -3979,7 +4053,10 @@ static int log_panel_y_for(int card_h) {
 static bool get_signal_area_rect(RECT *out) {
     int card_h = channel_card_height(g_last_client_h);
     int log_y = log_panel_y_for(card_h);
-    int x = GRID_RIGHT + CARD_GAP;
+    /* Shifted right by ROW_LABEL_STRIP_W to leave room for the row
+     * labels sitting between the grid and this area - see that
+     * constant's comment. */
+    int x = GRID_RIGHT + CARD_GAP + ROW_LABEL_STRIP_W;
     int w = g_last_client_w - SIDEBAR_X - x;
     if (w < SIGNAL_AREA_MIN_W) {
         return false;
@@ -4027,6 +4104,12 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int card_x = GRID_LEFT + col * (CARD_W + CARD_GAP);
         int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
         position_channel_card(hwnd, i, card_x, card_y, CARD_W, card_h);
+    }
+
+    for (i = 0; i < GRID_ROWS; i++) {
+        int row_cy = CONTENT_TOP + i * (card_h + CARD_GAP) + card_h / 2;
+        MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)), GRID_RIGHT + CARD_GAP, row_cy - 8,
+                   ROW_LABEL_STRIP_W, 16, FALSE);
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -4283,14 +4366,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             {
                 RECT sig_rc;
                 if (get_signal_area_rect(&sig_rc)) {
+                    /* Direct request: a little smaller, a little to the
+                     * right of where it used to sit - the rightward part
+                     * comes from get_signal_area_rect() itself now
+                     * starting ROW_LABEL_STRIP_W further right; this
+                     * 100->80 scale is the "smaller" part (silhouette/
+                     * waves scaled down to match, same ~6% halo ratio
+                     * as before). */
                     int cx = (sig_rc.left + sig_rc.right) / 2;
                     int cy = sig_rc.top + (sig_rc.bottom - sig_rc.top) * 3 / 5;
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
-                        draw_app_logo_silhouette(hdc, cx, cy, 106, RGB(255, 255, 255));
-                        draw_app_logo_mark(hdc, cx, cy, 100);
-                        draw_signal_waves(hdc, cx, cy, 100, g_signal_wave_phase, count_channels_on(), &sig_rc);
+                        draw_app_logo_silhouette(hdc, cx, cy, 85, RGB(255, 255, 255));
+                        draw_app_logo_mark(hdc, cx, cy, 80);
+                        draw_signal_waves(hdc, cx, cy, 80, g_signal_wave_phase, count_channels_on(), &sig_rc);
                     } else {
-                        draw_app_logo_faded(hdc, cx, cy, 100, 110); /* ~43% opacity */
+                        draw_app_logo_faded(hdc, cx, cy, 80, 110); /* ~43% opacity */
                     }
                 }
             }
@@ -4371,6 +4461,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_BULK_SELECT_ALL_BTN && code == BN_CLICKED) {
                 bulk_select_all();
+                return 0;
+            }
+            if (id == IDC_BULK_ROWSELECT_COMBO && code == CBN_SELCHANGE) {
+                int sel = (int)SendDlgItemMessageA(hwnd, IDC_BULK_ROWSELECT_COMBO, CB_GETCURSEL, 0, 0);
+                if (sel >= 0 && sel < GRID_ROWS) {
+                    bulk_select_row(sel);
+                } else if (sel == GRID_ROWS) {
+                    bulk_select_all();
+                }
+                /* sel == GRID_ROWS+1 is "Custom" - a deliberate no-op,
+                 * leaves the current selection exactly as it was. */
                 return 0;
             }
             if (id == IDC_BULK_SET_BTN && code == BN_CLICKED) {

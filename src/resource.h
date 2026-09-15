@@ -65,6 +65,13 @@
 #define IDC_BULK_LOW_BTN        1048
 #define IDC_BULK_LEVEL_OFF_BTN  1049
 #define IDC_BULK_SELECT_ALL_BTN 1050
+/* Quick-select presets - 1st/2nd/3rd/4th Row (matching the 4x4 channel
+ * grid's own rows), Select All (same effect as IDC_BULK_SELECT_ALL_BTN),
+ * and Custom (a no-op - leaves whatever's currently selected alone, for
+ * picking channels by hand via checkbox/Card Click). Applies on
+ * CBN_SELCHANGE, no separate Set step - see bulk_select_row() in
+ * main.c. */
+#define IDC_BULK_ROWSELECT_COMBO 1038
 
 /* Modal password prompt gating Continuous Wave mode - see unlock_cw()
  * and cw_password_dlg_proc() in main.c. The real password comes from
@@ -72,6 +79,16 @@
  * up itself. */
 #define IDD_CW_PASSWORD      1051
 #define IDC_CW_PW_EDIT       1052
+
+/* "1st row".."4th row" - one label per grid row, in the strip carved
+ * out of the signal-wave mark's dead space (see ROW_LABEL_STRIP_W in
+ * main.c) so it's obvious which row IDC_BULK_ROWSELECT_COMBO's "1st
+ * Row" etc. actually selects. Repositioned alongside the cards
+ * themselves in relayout_for_size() as the window resizes. */
+#define IDC_GRID_ROW_LBL_1   1060
+#define IDC_GRID_ROW_LBL_2   1061
+#define IDC_GRID_ROW_LBL_3   1062
+#define IDC_GRID_ROW_LBL_4   1063
 
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the
