@@ -3561,20 +3561,25 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), SW_HIDE);
 
-    /* The lock badge itself - just outside the logo's own box (mark is
-     * centered at (135,68), a 96x96 box spanning x:87-183/y:20-116), not
-     * overlapping it: a custom logo can fill that whole box edge-to-edge
-     * (no built-in margin to tuck a badge into, unlike the vector mark's
-     * own negative space), so sitting ON TOP of it covers real image
-     * content - reported directly. Sits at the box's bottom-right
-     * corner instead of mid-height beside it (the conventional spot for
-     * a profile-picture edit badge - also reported directly, the
-     * mid-height placement read as randomly floating rather than
-     * belonging to the logo) - just clear of the box's own edge and
-     * with a few px of margin above the wordmark text starting at
-     * y=118. */
+    /* The lock badge itself - just outside the logo's own box.
+     *
+     * CAUTION, the actual bug the last two placements had: the logo
+     * mark/wordmark are drawn inline in panel_subclass_proc using
+     * coordinates relative to g_header_panel's OWN client area (mark
+     * centered at (135,68), a 96x96 box spanning x:87-183/y:20-116;
+     * wordmark at y:118-142) - but this button, like every other control
+     * in build_controls(), is a child of hwnd (the MAIN window, passed
+     * into build_controls() - see its call in WM_CREATE), parented via
+     * add_ctrl(hwnd, ...), so ITS x/y are main-window-client-relative,
+     * NOT panel-relative. g_header_panel itself sits at (SIDEBAR_X, 6).
+     * Reusing the panel-relative box numbers directly (as both earlier
+     * placements did) put the badge ~(10,6) short of where it needed to
+     * be - close enough to look plausible in a quick check, but actually
+     * overlapping the box's true bottom-right corner. The real box in
+     * THIS button's coordinate space is x:97-193/y:26-122, wordmark
+     * y:124-148 - the numbers below are converted (+10,+6) accordingly. */
     add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP,
-             183, 90, 24, 24, IDC_LOGO_LOCK_BTN);
+             196, 94, 24, 24, IDC_LOGO_LOCK_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
