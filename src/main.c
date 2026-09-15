@@ -109,7 +109,13 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
 #define COLOR_APP_TEXT      RGB(232, 233, 234)
 #define COLOR_APP_MUTED     RGB(154, 156, 160)
 #define COLOR_APP_ACCENT    RGB(26, 133, 184)
-#define COLOR_APP_ACCENT_DIS RGB(58, 74, 82)
+/* Was RGB(58,74,82) - close enough in hue to COLOR_APP_ACCENT's blue
+ * that a disabled/muted button and an enabled one read as "the same
+ * color" at a glance (reported directly, re: Bulk Actions at 0
+ * selected). A flat neutral gray, no blue tint at all, actually
+ * contrasts against every accent color this app uses instead of just
+ * being a darker shade of one of them. */
+#define COLOR_APP_ACCENT_DIS RGB(90, 90, 94)
 #define COLOR_APP_HEADER    RGB(58, 168, 221)
 #define COLOR_APP_FIELD_BG  RGB(23, 24, 26)
 #define COLOR_APP_CONNECTED RGB(58, 181, 94)
@@ -3556,15 +3562,19 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), SW_HIDE);
 
     /* The lock badge itself - just outside the logo's own box (mark is
-     * centered at (135,68), a 96x96 box, so its right edge lands at
-     * x=183), not overlapping it: a custom logo can fill that whole box
-     * edge-to-edge (no built-in margin to tuck a badge into, unlike the
-     * vector mark's own negative space), so sitting ON TOP of it covers
-     * real image content - reported directly. Vertically centered on
-     * the mark, in the free gap before Connection & Settings' own
-     * content starts (~x=282). */
+     * centered at (135,68), a 96x96 box spanning x:87-183/y:20-116), not
+     * overlapping it: a custom logo can fill that whole box edge-to-edge
+     * (no built-in margin to tuck a badge into, unlike the vector mark's
+     * own negative space), so sitting ON TOP of it covers real image
+     * content - reported directly. Sits at the box's bottom-right
+     * corner instead of mid-height beside it (the conventional spot for
+     * a profile-picture edit badge - also reported directly, the
+     * mid-height placement read as randomly floating rather than
+     * belonging to the logo) - just clear of the box's own edge and
+     * with a few px of margin above the wordmark text starting at
+     * y=118. */
     add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP,
-             191, 57, 22, 22, IDC_LOGO_LOCK_BTN);
+             183, 90, 24, 24, IDC_LOGO_LOCK_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -4718,7 +4728,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         DeleteObject(hl_pen);
                     }
                 }
-                SetTextColor(dis->hDC, RGB(255, 255, 255));
+                /* Dimmed text on top of the dimmed fill - white text on
+                 * a gray disabled button still read as "basically the
+                 * same brightness" as white text on a bright enabled
+                 * one from a few feet away. */
+                SetTextColor(dis->hDC, disabled ? COLOR_APP_MUTED : RGB(255, 255, 255));
                 SetBkMode(dis->hDC, TRANSPARENT);
                 GetWindowTextA(dis->hwndItem, text, sizeof(text));
                 DrawTextA(dis->hDC, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
