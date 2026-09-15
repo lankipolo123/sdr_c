@@ -3183,7 +3183,16 @@ static void load_settings(void) {
  * GetPrivateProfileIntA's own default (-1) means "key missing", so a
  * channel with no saved entry is left exactly as channels_init() set it.
  * Output defaults to 0 (off) when missing - an .ini saved before this
- * field existed should not suddenly claim a channel is transmitting. */
+ * field existed should not suddenly claim a channel is transmitting.
+ *
+ * Restored level is capped to LEVEL_LOW, never MEDIUM/HIGH - a channel
+ * that was left running at High before the app closed used to reopen
+ * showing "HIGH" (lit green border, right there on launch) which reads
+ * as the rack coming up at full power the instant you open the app,
+ * even though nothing is actually (re-)transmitted by this (see
+ * channel_restore_saved()'s own comment - restoring state is never the
+ * same as re-arming RF). Direct request: every card should default to
+ * LOW on open, never a level that looks alarming at a glance. */
 static void load_channel_settings(void) {
     char path[MAX_PATH + 8];
     char section[8];
@@ -3199,6 +3208,9 @@ static void load_channel_settings(void) {
         output_on = GetPrivateProfileIntA(section, "Output", 0, path);
         if (mode < 0 || level < 0) {
             continue;
+        }
+        if (level > LEVEL_LOW) {
+            level = LEVEL_LOW;
         }
         channel_restore_saved(i, (uint8_t)mode, level, output_on != 0);
         SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
