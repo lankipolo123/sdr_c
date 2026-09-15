@@ -1477,6 +1477,33 @@ static void ui_show_warning(const char *message) {
     log_add(line);
 }
 
+/* Same as ui_show_warning(), but appends the real Win32 reason
+ * (GetLastError(), via FormatMessageA) in parens when there is one -
+ * "Could not copy..." alone doesn't say WHY (permissions? sharing
+ * violation? something else?), and that's exactly what's needed to
+ * tell "app folder isn't writable" apart from anything else. Must be
+ * called right after the failing API, before any other call can
+ * clobber GetLastError(). */
+static void ui_show_warning_with_last_error(const char *prefix) {
+    char msg[200];
+    DWORD err = GetLastError();
+    lstrcpynA(msg, prefix, (int)sizeof(msg));
+    if (err != 0) {
+        char errbuf[128];
+        if (FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, err,
+                            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), errbuf, sizeof(errbuf), NULL) > 0) {
+            int len = lstrlenA(errbuf);
+            while (len > 0 && (errbuf[len - 1] == '\n' || errbuf[len - 1] == '\r')) {
+                errbuf[--len] = '\0';
+            }
+            if (len > 0) {
+                wsprintfA(msg + lstrlenA(msg), " (%s)", errbuf);
+            }
+        }
+    }
+    ui_show_warning(msg);
+}
+
 /* ---- connection -> UI callbacks ---- */
 
 /* Defined below, once channel_mode_id()/channel_set_id()/etc. exist -
@@ -3010,14 +3037,20 @@ static void browse_and_set_logo(HWND hwnd) {
     }
 
     get_branding_bmp_path(branding_path);
-    if (has_extension(picked, ".ico")) {
+    /* Re-picking the file that's already branding.bmp itself (the .ini's
+     * "SourceFile" display invites exactly that) needs to be a no-op,
+     * not a copy - CopyFileA(x, x, ...) fails outright when source and
+     * destination are literally the same file. */
+    if (lstrcmpiA(picked, branding_path) == 0) {
+        /* already in place */
+    } else if (has_extension(picked, ".ico")) {
         HBITMAP extracted = load_icon_as_bitmap(picked);
         bool saved = extracted && save_hbitmap_as_bmp(extracted, branding_path);
         if (extracted) {
             DeleteObject(extracted);
         }
         if (!saved) {
-            ui_show_warning("Could not read that .ico file");
+            ui_show_warning_with_last_error("Could not read that .ico file");
             return;
         }
     } else if (has_extension(picked, ".png") || has_extension(picked, ".jpg") || has_extension(picked, ".jpeg")) {
@@ -3027,11 +3060,11 @@ static void browse_and_set_logo(HWND hwnd) {
             DeleteObject(extracted);
         }
         if (!saved) {
-            ui_show_warning("Could not read that image file");
+            ui_show_warning_with_last_error("Could not read that image file");
             return;
         }
     } else if (!CopyFileA(picked, branding_path, FALSE)) {
-        ui_show_warning("Could not copy the selected file to branding.bmp");
+        ui_show_warning_with_last_error("Could not copy the selected file to branding.bmp");
         return;
     }
 
