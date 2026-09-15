@@ -192,21 +192,12 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * same width and drawn a little smaller to make room, rather than the
  * strip eating into its existing space. */
 #define ROW_LABEL_STRIP_W 52
-/* The control itself is narrow-and-tall - "vertical" here means one
- * character per line (upright, not rotated), e.g.
- *   1
- *   s
- *   t
- *
- *   r
- *   o
- *   w
- * built by inserting '\n' between every character (see row_lbl_text[]
- * in build_controls()) and letting a plain multi-line STATIC wrap
- * them - no custom drawing needed, unlike a rotated-glyph approach. 7
- * lines (3 + a blank for the word gap + 3) at the normal UI font. */
-#define ROW_LABEL_W 24
-#define ROW_LABEL_H 100
+/* Back to plain single-line horizontal text ("1st"/"2nd"/"3rd"/"4th",
+ * not spelling out "row" each time) once a "Rows" heading (see
+ * build_controls()) sits above the whole column making that
+ * redundant - direct correction after two swings at literal rotated/
+ * stacked "vertical" text that both missed what was actually wanted. */
+#define ROW_LABEL_H 16
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
@@ -3902,21 +3893,22 @@ static void build_controls(HWND hwnd) {
         add_channel_card(hwnd, idx);
     }
 
-    /* Row labels - see ROW_LABEL_STRIP_W/ROW_LABEL_W's comments for
-     * what "vertical" means here (one upright character per line, not
-     * rotated glyphs). Design-time positions (card_h == CARD_H);
-     * relayout_for_size() repositions these alongside the cards
-     * themselves as the window resizes. */
+    /* "Rows" heading above the column, then a plain "1st"/"2nd"/"3rd"/
+     * "4th" per row - the heading makes spelling "row" out on every
+     * one of them redundant. Design-time positions (card_h == CARD_H);
+     * relayout_for_size() repositions the four ordinal labels (not the
+     * heading - it isn't tied to any one row, no need to move it)
+     * alongside the cards themselves as the window resizes. */
+    add_ctrl(hwnd, "STATIC", "Rows", SS_CENTER | SS_NOPREFIX,
+             GRID_RIGHT + CARD_GAP, CONTENT_TOP + 4, ROW_LABEL_STRIP_W, 16, 0);
     {
-        static const char *const row_lbl_text[GRID_ROWS] = {
-            "1\ns\nt\n\nr\no\nw", "2\nn\nd\n\nr\no\nw", "3\nr\nd\n\nr\no\nw", "4\nt\nh\n\nr\no\nw"
-        };
+        static const char *const row_lbl_text[GRID_ROWS] = { "1st", "2nd", "3rd", "4th" };
         int row;
         for (row = 0; row < GRID_ROWS; row++) {
             int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
             add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
-                     GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2,
-                     row_cy - ROW_LABEL_H / 2, ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
+                     GRID_RIGHT + CARD_GAP, row_cy - ROW_LABEL_H / 2,
+                     ROW_LABEL_STRIP_W, ROW_LABEL_H, grid_row_lbl_id(row));
         }
     }
 
@@ -4127,9 +4119,8 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
 
     for (i = 0; i < GRID_ROWS; i++) {
         int row_cy = CONTENT_TOP + i * (card_h + CARD_GAP) + card_h / 2;
-        MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)),
-                   GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2, row_cy - ROW_LABEL_H / 2,
-                   ROW_LABEL_W, ROW_LABEL_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)), GRID_RIGHT + CARD_GAP, row_cy - ROW_LABEL_H / 2,
+                   ROW_LABEL_STRIP_W, ROW_LABEL_H, FALSE);
     }
 
     /* One coalesced repaint for the whole window AND every child control
