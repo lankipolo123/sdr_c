@@ -8,16 +8,24 @@
  * DisconnectSDR, CommandTokens, SendCommandToSDR - all (char* buf, long
  * len[, char* outBuf]) -> long.
  *
- * A newer DLL build (2026-09) adds five more exports with no header and
- * no confirmed signature: DevTemp, GetCachedDevTemp,
- * StartBackgroundTempPolling, StopBackgroundTempPolling, GetDllPassword -
- * looks like the vendor's own built-in replacement for this app's
- * hand-rolled raw-Modbus temp/humidity sensor polling (sensor.c/modbus.c).
- * Calling an unconfirmed export with the wrong argument shape is
- * undefined behavior on a real FARPROC cast, not a catchable exception
- * like ctypes gives Python - see transit_probe.c, which calls these
- * candidate shapes wrapped in SEH (__try/__except) specifically so a
- * wrong guess reports a failure instead of crashing the process.
+ * A newer DLL build (2026-09) adds five more exports with no header:
+ * DevTemp, GetCachedDevTemp, StartBackgroundTempPolling,
+ * StopBackgroundTempPolling, GetDllPassword - looks like the vendor's
+ * own built-in replacement for this app's hand-rolled raw-Modbus
+ * temp/humidity sensor polling (sensor.c/modbus.c). Calling an
+ * unconfirmed export with the wrong argument shape is undefined behavior
+ * on a real FARPROC cast, not a catchable exception like ctypes gives
+ * Python - see transit_probe.c, which calls these candidate shapes
+ * wrapped in SEH (__try/__except) specifically so a wrong guess reports
+ * a failure instead of crashing the process.
+ *
+ * GetDllPassword's shape IS now confirmed (probed directly under Wine -
+ * it never touches the dongle, so no real hardware was needed): takes no
+ * arguments and returns a pointer to a static string literal baked into
+ * the DLL binary ("millawave888" in the 2026-09 build) - not a status
+ * code, not hardware/connection-state dependent. Used to gate
+ * Continuous Wave mode - see unlock_cw() in main.c. The other four
+ * (DevTemp etc.) are still unconfirmed.
  */
 #pragma once
 #include <windows.h>
@@ -26,6 +34,7 @@
 typedef long (*TransitStatusFn)(char *buf, long buf_size);              /* AutoConnectSDR / CheckConnection / DisconnectSDR shape */
 typedef long (*TransitCommandTokensFn)(char *cmd, char *out_buf, long buf_size);
 typedef long (*TransitSendCommandFn)(char *cmd, long len);
+typedef const char *(*TransitGetPasswordFn)(void);
 
 typedef struct {
     HMODULE handle;
@@ -36,6 +45,7 @@ typedef struct {
     TransitStatusFn disconnect_sdr;
     TransitCommandTokensFn command_tokens;
     TransitSendCommandFn send_command_to_sdr;
+    TransitGetPasswordFn get_dll_password; /* NULL on a DLL build that doesn't export it */
 
     /* Unconfirmed shape - raw pointers only. Do not call directly; go
      * through transit_probe.c's SEH-guarded attempts until one is
@@ -46,7 +56,6 @@ typedef struct {
     FARPROC get_cached_dev_temp;
     FARPROC start_background_temp_polling;
     FARPROC stop_background_temp_polling;
-    FARPROC get_dll_password;
 } TransitDll;
 
 /* dll_path e.g. "dll\\Transit.dll" or "Transit.dll" if it's already on

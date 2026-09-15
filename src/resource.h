@@ -58,6 +58,13 @@
 #define IDC_BULK_LEVEL_OFF_BTN  1049
 #define IDC_BULK_SELECT_ALL_BTN 1050
 
+/* Modal password prompt gating Continuous Wave mode - see unlock_cw()
+ * and cw_password_dlg_proc() in main.c. The real password comes from
+ * the vendor DLL's GetDllPassword export, not anything this app makes
+ * up itself. */
+#define IDD_CW_PASSWORD      1051
+#define IDC_CW_PW_EDIT       1052
+
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the
  * comment above g_sidebar_panel's creation in main.c). Not a capture -

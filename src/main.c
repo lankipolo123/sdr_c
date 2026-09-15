@@ -205,6 +205,30 @@ static HICON g_custom_icon_small;
  * restore the original icon, not just stop showing a custom one. */
 static HICON g_default_icon_big;
 static HICON g_default_icon_small;
+
+/* Continuous Wave (CW) is a fixed, undithered carrier - the one mode
+ * this app gates behind a password before it can be armed (a channel's
+ * own Set, or Bulk Set). The real password comes from the vendor DLL
+ * itself (Transit.dll's GetDllPassword export - confirmed to take no
+ * arguments and return a pointer to a static string it already has
+ * baked in, not anything hardware/dongle-dependent - see
+ * transit_dll.h's header comment), never anything this app invents or
+ * stores on its own. Authorized once per run - every card's Set and
+ * Bulk Set share this flag instead of re-prompting per click. See
+ * unlock_cw(). */
+static bool g_cw_authorized;
+static char g_cw_pw_input[64]; /* transient scratch for cw_password_dlg_proc() */
+
+/* Cumulative seconds the app has been running, across every session -
+ * loaded from the .ini in load_settings(), ticked every WM_TIMER firing,
+ * shown live in the window title, and saved back periodically (not just
+ * at WM_DESTROY) so a crash only loses a few seconds of credit. Uses
+ * GetTickCount64() rather than GetTickCount() so a session running past
+ * ~49.7 days doesn't wrap around into a garbage elapsed time. */
+static ULONGLONG g_uptime_base_seconds;
+static ULONGLONG g_uptime_session_start_ms;
+static int g_uptime_tick_counter;
+
 static WNDPROC g_panel_orig_proc;
 static WNDPROC g_combo_edit_orig_proc;
 static bool g_combo_edit_no_recurse;
@@ -3189,6 +3213,37 @@ static void select_combo_by_text(HWND combo, const char *text) {
     }
 }
 
+/* 'Xd HH:MM:SS' past a day, else plain 'HH:MM:SS' - see the uptime
+ * globals' comment. out must be at least 20 bytes (wsprintfA itself has
+ * no length limit to pass through, so that's on the caller). */
+static void format_uptime(char *out, ULONGLONG total_seconds) {
+    ULONGLONG days = total_seconds / 86400;
+    unsigned hours = (unsigned)((total_seconds % 86400) / 3600);
+    unsigned minutes = (unsigned)((total_seconds % 3600) / 60);
+    unsigned seconds = (unsigned)(total_seconds % 60);
+    if (days > 0) {
+        wsprintfA(out, "%ud %02u:%02u:%02u", (unsigned)days, hours, minutes, seconds);
+    } else {
+        wsprintfA(out, "%02u:%02u:%02u", hours, minutes, seconds);
+    }
+}
+
+static ULONGLONG current_uptime_seconds(void) {
+    return g_uptime_base_seconds + (GetTickCount64() - g_uptime_session_start_ms) / 1000;
+}
+
+/* Persists just the uptime key, not the whole settings file - called
+ * periodically from WM_TIMER (see g_uptime_tick_counter) as well as from
+ * save_settings() at shutdown, so a crash mid-session only loses a few
+ * seconds of credit instead of the whole run. */
+static void save_uptime(void) {
+    char path[MAX_PATH + 8];
+    char buf[32];
+    get_ini_path(path);
+    wsprintfA(buf, "%lu", (unsigned long)current_uptime_seconds());
+    WritePrivateProfileStringA("App", "TotalUptimeSeconds", buf, path);
+}
+
 static void save_settings(void) {
     char path[MAX_PATH + 8];
     char buf[32];
@@ -3229,6 +3284,8 @@ static void save_settings(void) {
             WritePrivateProfileStringA(section, "Output", buf, path);
         }
     }
+
+    save_uptime();
 }
 
 /* Call after build_controls() has populated every combo's item list -
@@ -3256,6 +3313,9 @@ static void load_settings(void) {
     if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) > 0) {
         select_combo_by_text(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), buf);
     }
+
+    g_uptime_base_seconds = (ULONGLONG)(unsigned long)GetPrivateProfileIntA("App", "TotalUptimeSeconds", 0, path);
+    g_uptime_session_start_ms = GetTickCount64();
 }
 
 /* Must run AFTER channels_init() (which sets every channel back to its
@@ -3303,6 +3363,76 @@ static void load_channel_settings(void) {
         SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
         SetWindowTextA(g_card_mode_lbl[i], proto_mode_name((uint8_t)mode));
     }
+}
+
+/* IDD_CW_PASSWORD's DLGPROC - just collects whatever was typed into
+ * IDC_CW_PW_EDIT on OK, leaves g_cw_pw_input untouched on Cancel (caller
+ * checks the DialogBoxParamA return value to tell the two apart). */
+static INT_PTR CALLBACK cw_password_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    (void)lParam;
+    switch (msg) {
+        case WM_INITDIALOG:
+            SendDlgItemMessageA(hDlg, IDC_CW_PW_EDIT, EM_LIMITTEXT, sizeof(g_cw_pw_input) - 1, 0);
+            return TRUE; /* let the dialog manager focus the first tab stop (the edit box) */
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDOK) {
+                GetDlgItemTextA(hDlg, IDC_CW_PW_EDIT, g_cw_pw_input, sizeof(g_cw_pw_input));
+                EndDialog(hDlg, IDOK);
+                return TRUE;
+            }
+            if (LOWORD(wParam) == IDCANCEL) {
+                EndDialog(hDlg, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
+/* Continuous Wave is a fixed, undithered carrier - the one mode this app
+ * gates behind a password before a channel's Set (or Bulk Set) can
+ * actually arm it. Checked against the real password Transit.dll itself
+ * reports via GetDllPassword (see transit_dll.h) - not anything this app
+ * invents or stores. Authorized once per run: every card and Bulk Set
+ * share g_cw_authorized instead of re-prompting per click. */
+static bool unlock_cw(HWND hwnd) {
+    const char *real_password;
+    INT_PTR result;
+
+    if (g_cw_authorized) {
+        return true;
+    }
+
+    if (!transit_dll_is_loaded(&g_conn.dll) || g_conn.dll.get_dll_password == NULL) {
+        ui_show_warning("Continuous Wave needs Transit.dll's password check, but it "
+                         "isn't loaded or this build doesn't export GetDllPassword.");
+        return false;
+    }
+
+    real_password = g_conn.dll.get_dll_password();
+    if (real_password == NULL || real_password[0] == '\0') {
+        ui_show_warning("Continuous Wave password check failed - GetDllPassword returned nothing.");
+        return false;
+    }
+
+    g_cw_pw_input[0] = '\0';
+    result = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CW_PASSWORD), hwnd, cw_password_dlg_proc, 0);
+    if (result != IDOK) {
+        return false; /* cancelled */
+    }
+
+    if (lstrcmpA(g_cw_pw_input, real_password) != 0) {
+        ui_show_warning("Wrong password - Continuous Wave was not armed.");
+        SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
+        return false;
+    }
+
+    SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
+    g_cw_authorized = true;
+    log_add("Continuous Wave unlocked for this session.");
+    return true;
 }
 
 /* ---- layout ---- */
@@ -3890,6 +4020,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ui_refresh_sensor();
                 check_kill_switch();
                 ui_refresh_kill_switch();
+
+                /* Uptime - ID_POLL_TIMER fires every 100ms, so every 10th
+                 * tick is ~1s (title update) and every 300th is ~30s
+                 * (persist to the .ini - see save_uptime()'s comment on
+                 * why this doesn't just wait for WM_DESTROY). */
+                g_uptime_tick_counter++;
+                if (g_uptime_tick_counter % 10 == 0) {
+                    char uptime_str[20];
+                    char title[64];
+                    format_uptime(uptime_str, current_uptime_seconds());
+                    wsprintfA(title, "ECM Management System - Uptime %s", uptime_str);
+                    SetWindowTextA(hwnd, title);
+                }
+                if (g_uptime_tick_counter >= 300) {
+                    g_uptime_tick_counter = 0;
+                    save_uptime();
+                }
+
                 InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
 
                 /* Signal-wave pulse - stepped every SIGNAL_TICKS_PER_STEP
@@ -4043,7 +4191,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_BULK_SET_BTN && code == BN_CLICKED) {
                 int sel = (int)SendDlgItemMessageA(hwnd, IDC_BULK_MODE_COMBO, CB_GETCURSEL, 0, 0);
-                if (sel >= 0) {
+                if (sel >= 0 && (sel != PROTO_MODE_SINGLE || unlock_cw(hwnd))) {
                     bulk_apply_mode((uint8_t)sel);
                 }
                 return 0;
@@ -4101,7 +4249,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     if (offset == IDC_CH_SET_OFFSET && code == BN_CLICKED) {
                         if (!g_kill_switch_tripped[idx]) {
                             int sel = (int)SendDlgItemMessageA(hwnd, channel_mode_id(idx), CB_GETCURSEL, 0, 0);
-                            if (sel >= 0) {
+                            if (sel >= 0 && (sel != PROTO_MODE_SINGLE || unlock_cw(hwnd))) {
                                 channel_set_mode(idx, (uint8_t)sel);
                                 SetWindowTextA(g_card_mode_lbl[idx], proto_mode_name((uint8_t)sel));
                             }

@@ -42,3 +42,18 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
+
+/* Modal prompt gating Continuous Wave mode - see unlock_cw() in main.c.
+ * DS_CENTER centers it on screen (this app has no other dialog to
+ * center it relative to besides the main window, and centering on the
+ * main window vs. the screen looks the same in practice at this size). */
+IDD_CW_PASSWORD DIALOGEX 0, 0, 200, 86
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Continuous Wave Password"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LTEXT           "Enter the Continuous Wave password to arm CW mode:", -1, 7, 7, 186, 18
+    EDITTEXT        IDC_CW_PW_EDIT, 7, 28, 186, 14, ES_PASSWORD | ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK", IDOK, 63, 62, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 117, 62, 50, 14
+END

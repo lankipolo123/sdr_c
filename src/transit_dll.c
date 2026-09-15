@@ -28,11 +28,11 @@ bool transit_dll_load(TransitDll *dll, const char *dll_path) {
     }
 
     /* Newer-build-only exports - fine if missing (NULL), see transit_dll.h. */
-    dll->dev_temp                       = GetProcAddress(dll->handle, "DevTemp");
-    dll->get_cached_dev_temp            = GetProcAddress(dll->handle, "GetCachedDevTemp");
-    dll->start_background_temp_polling  = GetProcAddress(dll->handle, "StartBackgroundTempPolling");
-    dll->stop_background_temp_polling   = GetProcAddress(dll->handle, "StopBackgroundTempPolling");
-    dll->get_dll_password               = GetProcAddress(dll->handle, "GetDllPassword");
+    dll->get_dll_password                = (TransitGetPasswordFn)GetProcAddress(dll->handle, "GetDllPassword");
+    dll->dev_temp                        = GetProcAddress(dll->handle, "DevTemp");
+    dll->get_cached_dev_temp             = GetProcAddress(dll->handle, "GetCachedDevTemp");
+    dll->start_background_temp_polling   = GetProcAddress(dll->handle, "StartBackgroundTempPolling");
+    dll->stop_background_temp_polling    = GetProcAddress(dll->handle, "StopBackgroundTempPolling");
 
     return true;
 }
