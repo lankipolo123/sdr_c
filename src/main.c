@@ -3551,12 +3551,16 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), SW_HIDE);
 
-    /* The lock badge itself - overlapping the logo mark's own
-     * bottom-right corner (mark is centered at (135,68), 96x96 box, so
-     * the corner lands around (183,116)); same idea as a profile
-     * picture's small round edit badge. */
+    /* The lock badge itself - just outside the logo's own box (mark is
+     * centered at (135,68), a 96x96 box, so its right edge lands at
+     * x=183), not overlapping it: a custom logo can fill that whole box
+     * edge-to-edge (no built-in margin to tuck a badge into, unlike the
+     * vector mark's own negative space), so sitting ON TOP of it covers
+     * real image content - reported directly. Vertically centered on
+     * the mark, in the free gap before Connection & Settings' own
+     * content starts (~x=282). */
     add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP,
-             167, 97, 22, 22, IDC_LOGO_LOCK_BTN);
+             191, 57, 22, 22, IDC_LOGO_LOCK_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
