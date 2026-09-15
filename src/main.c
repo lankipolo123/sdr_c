@@ -219,14 +219,25 @@ static HICON g_default_icon_small;
 static bool g_cw_authorized;
 static char g_cw_pw_input[64]; /* transient scratch for cw_password_dlg_proc() */
 
-/* Cumulative seconds the app has been running, across every session -
- * loaded from the .ini in load_settings(), ticked every WM_TIMER firing,
- * shown live in the window title, and saved back periodically (not just
- * at WM_DESTROY) so a crash only loses a few seconds of credit. Uses
- * GetTickCount64() rather than GetTickCount() so a session running past
- * ~49.7 days doesn't wrap around into a garbage elapsed time. */
-static ULONGLONG g_uptime_base_seconds;
-static ULONGLONG g_uptime_session_start_ms;
+/* Per-channel cumulative ON-time - an odometer, not an app-uptime
+ * counter: each of the 16 channels tracks its OWN time actually
+ * transmitting, not how long the app process itself has been open.
+ * Loaded from the .ini per channel (alongside Mode/Level/Output) in
+ * load_channel_settings(), ticked every WM_TIMER firing, shown live on
+ * each card, and saved back periodically (not just at WM_DESTROY) so a
+ * crash only loses a few seconds of credit. Uses GetTickCount64() rather
+ * than GetTickCount() so a channel run spanning ~49.7 days doesn't wrap
+ * around into a garbage elapsed time.
+ *
+ * g_channel_uptime_base_seconds[i] is everything accumulated BEFORE the
+ * channel's current ON period (or the whole total, while it's off);
+ * g_channel_on_since_ms[i] is when the current ON period started
+ * (meaningful only while output_on); g_channel_on_prev[i] is last tick's
+ * output_on, used only to detect the OFF->ON/ON->OFF edge. See
+ * channel_uptime_seconds() and WM_TIMER's per-tick accounting. */
+static ULONGLONG g_channel_uptime_base_seconds[MAX_CHANNELS];
+static ULONGLONG g_channel_on_since_ms[MAX_CHANNELS];
+static bool g_channel_on_prev[MAX_CHANNELS];
 static int g_uptime_tick_counter;
 
 static WNDPROC g_panel_orig_proc;
@@ -272,6 +283,16 @@ static bool g_channel_selected[MAX_CHANNELS];
  * button/combo/gauge still claims its own clicks first, completely
  * unaffected by this. */
 static bool g_bulk_select_mode;
+
+/* Bulk ON/OFF are one-shot actions (see their WM_DRAWITEM comment) - no
+ * real per-button "state" to reflect. Direct request was for whichever
+ * one was clicked most recently to still show a lasting, visible marker
+ * (a bright border - see the drawing code) distinguishing it from the
+ * other, purely cosmetic/session-local, until the other one is clicked.
+ * Reset on disconnect (set_channel_controls_enabled(false)) since a
+ * stale marker from a previous session reads as a live state. */
+enum { BULK_POWER_NONE, BULK_POWER_ON, BULK_POWER_OFF };
+static int g_bulk_last_power_action = BULK_POWER_NONE;
 
 /* Spectrum panel state - true shows the all-16 overview grid (the
  * default), false shows one channel's trace full-size, with
@@ -1870,6 +1891,7 @@ static int channel_lbl_high_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_MEDIUM_OFFSET; }
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
+static int channel_uptime_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_UPTIME_OFFSET; }
 
 /* Invalidates a card's background panel AND every one of its own
  * foreground siblings (title, mode label, mode combo, Set, ON, OFF,
@@ -1904,6 +1926,7 @@ static void ui_invalidate_card(int index) {
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_medium_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_low_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_lbl_off_id(index)), NULL, FALSE);
+    InvalidateRect(GetDlgItem(g_hwnd, channel_uptime_id(index)), NULL, FALSE);
 }
 
 /* Every control that can actually command a channel (mode Set, ON, OFF,
@@ -1956,6 +1979,21 @@ static bool bulk_has_selection(void) {
     return false;
 }
 
+/* True while any selected channel's send from a bulk action is still
+ * queued/settling - drives IDC_BULK_SELECTED_LBL's "Sending..." text
+ * (see ui_refresh_bulk_selected_label()), since a bulk click otherwise
+ * gives no feedback of its own that anything happened - the only sign
+ * used to be watching every individual card change. */
+static bool bulk_any_selected_busy(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i] && channels_get(i)->busy) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void ui_refresh_bulk_target_buttons_enabled(void) {
     bool enabled = conn_is_connected(&g_conn) && bulk_has_selection();
     unsigned i;
@@ -1968,6 +2006,9 @@ static void ui_refresh_bulk_target_buttons_enabled(void) {
 
 static void set_channel_controls_enabled(bool enabled) {
     int i;
+    if (!enabled) {
+        g_bulk_last_power_action = BULK_POWER_NONE;
+    }
     for (i = 0; i < MAX_CHANNELS; i++) {
         HWND set_btn = GetDlgItem(g_hwnd, channel_set_id(i));
         HWND on_btn = GetDlgItem(g_hwnd, channel_on_id(i));
@@ -2031,7 +2072,11 @@ static void ui_refresh_bulk_selected_label(void) {
     for (i = 0; i < MAX_CHANNELS; i++) {
         if (g_channel_selected[i]) count++;
     }
-    wsprintfA(text, "%d selected", count);
+    if (bulk_any_selected_busy()) {
+        lstrcpynA(text, "Sending...", (int)sizeof(text));
+    } else {
+        wsprintfA(text, "%d selected", count);
+    }
     SetDlgItemTextA(g_hwnd, IDC_BULK_SELECTED_LBL, text);
     ui_refresh_bulk_target_buttons_enabled();
 }
@@ -2406,6 +2451,11 @@ static void add_channel_card(HWND hwnd, int index) {
      * see IDC_CH_STATUS_OFFSET's comment in resource.h. */
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
              x + 8, y + 64, 130, 14, channel_status_id(index));
+
+    /* Cumulative ON-time odometer, right below the status line - see
+     * IDC_CH_UPTIME_OFFSET's comment in resource.h. */
+    add_ctrl(hwnd, "STATIC", "Up 00:00:00", SS_LEFT | SS_NOPREFIX,
+             x + 8, y + 80, 130, 12, channel_uptime_id(index));
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
@@ -3266,20 +3316,14 @@ static void format_uptime(char *out, ULONGLONG total_seconds) {
     }
 }
 
-static ULONGLONG current_uptime_seconds(void) {
-    return g_uptime_base_seconds + (GetTickCount64() - g_uptime_session_start_ms) / 1000;
-}
-
-/* Persists just the uptime key, not the whole settings file - called
- * periodically from WM_TIMER (see g_uptime_tick_counter) as well as from
- * save_settings() at shutdown, so a crash mid-session only loses a few
- * seconds of credit instead of the whole run. */
-static void save_uptime(void) {
-    char path[MAX_PATH + 8];
-    char buf[32];
-    get_ini_path(path);
-    wsprintfA(buf, "%lu", (unsigned long)current_uptime_seconds());
-    WritePrivateProfileStringA("App", "TotalUptimeSeconds", buf, path);
+/* idx's real-time total: everything already accumulated, plus (while
+ * currently on) however long the CURRENT on-period has run so far. */
+static ULONGLONG channel_uptime_seconds(int idx) {
+    ULONGLONG total = g_channel_uptime_base_seconds[idx];
+    if (channels_get(idx)->output_on) {
+        total += (GetTickCount64() - g_channel_on_since_ms[idx]) / 1000;
+    }
+    return total;
 }
 
 static void save_settings(void) {
@@ -3320,10 +3364,10 @@ static void save_settings(void) {
             WritePrivateProfileStringA(section, "Level", buf, path);
             wsprintfA(buf, "%d", ch->output_on ? 1 : 0);
             WritePrivateProfileStringA(section, "Output", buf, path);
+            wsprintfA(buf, "%lu", (unsigned long)channel_uptime_seconds(i));
+            WritePrivateProfileStringA(section, "UptimeSeconds", buf, path);
         }
     }
-
-    save_uptime();
 }
 
 /* Call after build_controls() has populated every combo's item list -
@@ -3351,9 +3395,6 @@ static void load_settings(void) {
     if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) > 0) {
         select_combo_by_text(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), buf);
     }
-
-    g_uptime_base_seconds = (ULONGLONG)(unsigned long)GetPrivateProfileIntA("App", "TotalUptimeSeconds", 0, path);
-    g_uptime_session_start_ms = GetTickCount64();
 }
 
 /* Must run AFTER channels_init() (which sets every channel back to its
@@ -3391,6 +3432,7 @@ static void load_channel_settings(void) {
         mode = GetPrivateProfileIntA(section, "Mode", -1, path);
         level = GetPrivateProfileIntA(section, "Level", -1, path);
         output_on = GetPrivateProfileIntA(section, "Output", 0, path);
+        g_channel_uptime_base_seconds[i] = (ULONGLONG)(unsigned long)GetPrivateProfileIntA(section, "UptimeSeconds", 0, path);
         if (mode < 0 || level < 0) {
             continue;
         }
@@ -3825,6 +3867,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(60), SY(18));
     PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(44), SX(60), SY(18));
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(80), SX(130), SY(12));
 
     PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
     PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
@@ -4059,21 +4102,42 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 check_kill_switch();
                 ui_refresh_kill_switch();
 
-                /* Uptime - ID_POLL_TIMER fires every 100ms, so every 10th
-                 * tick is ~1s (title update) and every 300th is ~30s
-                 * (persist to the .ini - see save_uptime()'s comment on
-                 * why this doesn't just wait for WM_DESTROY). */
+                /* Per-channel uptime accounting - every tick (cheap: just
+                 * comparing output_on to last tick's value), so the
+                 * OFF->ON/ON->OFF edge is never missed regardless of how
+                 * often the display/persist steps below run. */
+                {
+                    int ci;
+                    for (ci = 0; ci < MAX_CHANNELS; ci++) {
+                        bool on = channels_get(ci)->output_on;
+                        if (on && !g_channel_on_prev[ci]) {
+                            g_channel_on_since_ms[ci] = GetTickCount64();
+                        } else if (!on && g_channel_on_prev[ci]) {
+                            g_channel_uptime_base_seconds[ci] += (GetTickCount64() - g_channel_on_since_ms[ci]) / 1000;
+                        }
+                        g_channel_on_prev[ci] = on;
+                    }
+                }
+
+                /* ID_POLL_TIMER fires every 100ms, so every 10th tick is
+                 * ~1s (display update) and every 300th is ~30s (persist
+                 * to the .ini via save_settings() - not just at
+                 * WM_DESTROY - so a crash only loses a few seconds of
+                 * credit). */
                 g_uptime_tick_counter++;
                 if (g_uptime_tick_counter % 10 == 0) {
-                    char uptime_str[20];
-                    char title[64];
-                    format_uptime(uptime_str, current_uptime_seconds());
-                    wsprintfA(title, "ECM Management System - Uptime %s", uptime_str);
-                    SetWindowTextA(hwnd, title);
+                    int ci;
+                    for (ci = 0; ci < MAX_CHANNELS; ci++) {
+                        char uptime_str[20];
+                        char label[32];
+                        format_uptime(uptime_str, channel_uptime_seconds(ci));
+                        wsprintfA(label, "Up %s", uptime_str);
+                        SetDlgItemTextA(hwnd, channel_uptime_id(ci), label);
+                    }
                 }
                 if (g_uptime_tick_counter >= 300) {
                     g_uptime_tick_counter = 0;
-                    save_uptime();
+                    save_settings();
                 }
 
                 InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
@@ -4236,10 +4300,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_BULK_ON_BTN && code == BN_CLICKED) {
                 bulk_turn_output_on();
+                g_bulk_last_power_action = BULK_POWER_ON;
+                InvalidateRect(GetDlgItem(hwnd, IDC_BULK_ON_BTN), NULL, FALSE);
+                InvalidateRect(GetDlgItem(hwnd, IDC_BULK_OFF_BTN), NULL, FALSE);
                 return 0;
             }
             if (id == IDC_BULK_OFF_BTN && code == BN_CLICKED) {
                 bulk_turn_output_off();
+                g_bulk_last_power_action = BULK_POWER_OFF;
+                InvalidateRect(GetDlgItem(hwnd, IDC_BULK_ON_BTN), NULL, FALSE);
+                InvalidateRect(GetDlgItem(hwnd, IDC_BULK_OFF_BTN), NULL, FALSE);
                 return 0;
             }
             if (id == IDC_BULK_HIGH_BTN && code == BN_CLICKED) {
@@ -4541,6 +4611,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
                         SelectObject(dis->hDC, old_brush);
                         SelectObject(dis->hDC, old_pen);
+                    }
+                    /* See g_bulk_last_power_action's comment - a bright
+                     * border traces whichever of Bulk ON/OFF was clicked
+                     * most recently, so it stays visibly distinct from
+                     * the other even though both are one-shot actions
+                     * with no real per-button state to reflect. */
+                    if (!disabled &&
+                        ((dis->CtlID == IDC_BULK_ON_BTN && g_bulk_last_power_action == BULK_POWER_ON) ||
+                         (dis->CtlID == IDC_BULK_OFF_BTN && g_bulk_last_power_action == BULK_POWER_OFF))) {
+                        HPEN hl_pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+                        HPEN old_hl_pen = (HPEN)SelectObject(dis->hDC, hl_pen);
+                        HBRUSH old_hl_brush = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                        RoundRect(dis->hDC, rc.left + 1, rc.top + 1, rc.right - 1, rc.bottom - 1,
+                                  BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
+                        SelectObject(dis->hDC, old_hl_brush);
+                        SelectObject(dis->hDC, old_hl_pen);
+                        DeleteObject(hl_pen);
                     }
                 }
                 SetTextColor(dis->hDC, RGB(255, 255, 255));

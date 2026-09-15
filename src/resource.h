@@ -88,7 +88,7 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             11
+#define IDC_CH_STRIDE             12
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
@@ -115,3 +115,9 @@
  * other control on the card is itself clickable and swallows the
  * click first - reported as "this is unclickable"). */
 #define IDC_CH_SELECT_OFFSET      10
+/* Cumulative time this channel has actually been ON (transmitting) -
+ * an odometer, not a session timer: keeps counting across app restarts
+ * (persisted in the .ini alongside Mode/Level/Output), frozen (not
+ * reset) while the channel is off. See channel_uptime_seconds() and the
+ * per-tick accounting in WM_TIMER, main.c. */
+#define IDC_CH_UPTIME_OFFSET      11
