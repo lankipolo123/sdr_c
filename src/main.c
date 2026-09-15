@@ -1924,11 +1924,47 @@ static void ui_invalidate_card(int index) {
  * through the dark theme (that took five attempts to get right - see
  * the big comment above combo_arrow_subclass_proc). Set/ON/OFF/gauge
  * are all custom-painted, so they stay fully themed either way. */
-static const int BULK_ACTION_BTN_IDS[] = {
-    IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN, IDC_BULK_SET_BTN, IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
+static const int BULK_ALWAYS_BTN_IDS[] = {
+    IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN
+};
+#define BULK_ALWAYS_BTN_COUNT (sizeof(BULK_ALWAYS_BTN_IDS) / sizeof(BULK_ALWAYS_BTN_IDS[0]))
+
+/* Set/ON/OFF/High/Medium/Low/Off - these are the ones that actually DO
+ * something to the selected channels, unlike Clear/Select All (which act
+ * on the selection itself, not through it). Lighting up in full color
+ * the instant you connect - before picking a single channel - read as
+ * "ready to fire" when clicking any of them would just be a no-op
+ * (bulk_apply_mode() etc. already skip everything when nothing's
+ * selected). Gated on bulk_has_selection() too now (see
+ * ui_refresh_bulk_target_buttons_enabled()) so they only look armed once
+ * there's actually something for them to act on - reuses the exact same
+ * EnableWindow+ODS_DISABLED dimming every other button in this app
+ * already gets while disconnected, just gated on selection too. */
+static const int BULK_TARGET_BTN_IDS[] = {
+    IDC_BULK_SET_BTN, IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
     IDC_BULK_HIGH_BTN, IDC_BULK_MEDIUM_BTN, IDC_BULK_LOW_BTN, IDC_BULK_LEVEL_OFF_BTN
 };
-#define BULK_ACTION_BTN_COUNT (sizeof(BULK_ACTION_BTN_IDS) / sizeof(BULK_ACTION_BTN_IDS[0]))
+#define BULK_TARGET_BTN_COUNT (sizeof(BULK_TARGET_BTN_IDS) / sizeof(BULK_TARGET_BTN_IDS[0]))
+
+static bool bulk_has_selection(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (g_channel_selected[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ui_refresh_bulk_target_buttons_enabled(void) {
+    bool enabled = conn_is_connected(&g_conn) && bulk_has_selection();
+    unsigned i;
+    for (i = 0; i < BULK_TARGET_BTN_COUNT; i++) {
+        HWND btn = GetDlgItem(g_hwnd, BULK_TARGET_BTN_IDS[i]);
+        EnableWindow(btn, enabled);
+        InvalidateRect(btn, NULL, FALSE);
+    }
+}
 
 static void set_channel_controls_enabled(bool enabled) {
     int i;
@@ -1948,11 +1984,12 @@ static void set_channel_controls_enabled(bool enabled) {
         InvalidateRect(off_btn, NULL, FALSE);
         InvalidateRect(gauge, NULL, FALSE);
     }
-    for (i = 0; i < (int)BULK_ACTION_BTN_COUNT; i++) {
-        HWND btn = GetDlgItem(g_hwnd, BULK_ACTION_BTN_IDS[i]);
+    for (i = 0; i < (int)BULK_ALWAYS_BTN_COUNT; i++) {
+        HWND btn = GetDlgItem(g_hwnd, BULK_ALWAYS_BTN_IDS[i]);
         EnableWindow(btn, enabled);
         InvalidateRect(btn, NULL, FALSE);
     }
+    ui_refresh_bulk_target_buttons_enabled();
 }
 
 /* Selection checkbox is gated on three things, all required: the RS422
@@ -1996,6 +2033,7 @@ static void ui_refresh_bulk_selected_label(void) {
     }
     wsprintfA(text, "%d selected", count);
     SetDlgItemTextA(g_hwnd, IDC_BULK_SELECTED_LBL, text);
+    ui_refresh_bulk_target_buttons_enabled();
 }
 
 static void bulk_clear_selection(void) {
