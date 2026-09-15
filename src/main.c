@@ -2964,6 +2964,33 @@ static bool has_extension(const char *path, const char *ext) {
     return dot && lstrcmpiA(dot, ext) == 0;
 }
 
+/* Sniffs the real file signature rather than trusting the extension -
+ * a browser's "Save Image As" routinely hands back a WebP file with a
+ * .bmp/.jpg/.png extension on it (confirmed directly: a user-reported
+ * "not a loadable BMP" turned out to be a file starting with
+ * "RIFF....WEBP", the standard WebP container signature). GDI+'s
+ * built-in codec set is BMP/GIF/JPEG/PNG/TIFF only - no WebP - so
+ * load_image_as_bitmap_gdiplus() would just fail on one of these with
+ * the same generic "Could not read that image file" as any other
+ * corrupt/unsupported file, giving no hint that the real problem is
+ * "this isn't actually the format its extension claims". Checking this
+ * up front means the warning can say exactly that instead. */
+static bool is_webp_file(const char *path) {
+    HANDLE file;
+    unsigned char header[12];
+    DWORD read_len = 0;
+    bool result;
+
+    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    result = ReadFile(file, header, sizeof(header), &read_len, NULL) && read_len == sizeof(header) &&
+             memcmp(header, "RIFF", 4) == 0 && memcmp(header + 8, "WEBP", 4) == 0;
+    CloseHandle(file);
+    return result;
+}
+
 /* Loads a .png/.jpg/.jpeg through GDI+ (gdiplus.dll, shipped with
  * Windows since XP - a system DLL this links against, same as
  * user32/gdi32, not a file this app has to bundle) and returns its
@@ -3069,6 +3096,15 @@ static void browse_and_set_logo(HWND hwnd) {
             ui_show_warning_with_last_error("Could not read that .ico file");
             return;
         }
+    } else if (is_webp_file(picked)) {
+        /* GDI+ would just fail on this too (no WebP codec) - catching
+         * it here first means the warning can say what's actually
+         * wrong instead of a generic decode failure. Kept short - both
+         * ui_show_warning() and log_add() use a fixed 160-byte buffer
+         * and wsprintfA (unlike snprintf) doesn't truncate on overflow. */
+        ui_show_warning("That's actually a WebP image (common from browser saves) "
+                         "- GDI+ can't decode WebP. Convert to PNG/JPG/BMP first.");
+        return;
     } else {
         HBITMAP extracted = load_image_as_bitmap_gdiplus(picked);
         bool saved = extracted && save_hbitmap_as_bmp(extracted, branding_path);
