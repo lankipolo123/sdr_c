@@ -199,6 +199,12 @@ static HBITMAP g_custom_logo_bmp;
  * icon it was created with (the embedded IDI_APP_ICON resource). */
 static HICON g_custom_icon_big;
 static HICON g_custom_icon_small;
+/* The embedded IDI_APP_ICON handles WinMain originally loaded for the
+ * window class - kept around (not just left local to WinMain) so
+ * IDC_RESET_LOGO_BTN can hand them back to WM_SETICON and genuinely
+ * restore the original icon, not just stop showing a custom one. */
+static HICON g_default_icon_big;
+static HICON g_default_icon_small;
 static WNDPROC g_panel_orig_proc;
 static WNDPROC g_combo_edit_orig_proc;
 static bool g_combo_edit_no_recurse;
@@ -3102,6 +3108,44 @@ static void browse_and_set_logo(HWND hwnd) {
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
+/* IDC_RESET_LOGO_BTN's handler - undoes browse_and_set_logo(): deletes
+ * branding.bmp (so a future startup's load_custom_logo() has nothing
+ * to find), frees the in-memory bitmap, hands the taskbar/title-bar
+ * icon back to the original embedded IDI_APP_ICON handles (see
+ * g_default_icon_big/small), and clears the .ini's SourceFile display
+ * field. No-op (but still harmless) if there was never a custom logo
+ * to begin with - DeleteFileA on a file that isn't there just fails
+ * quietly, nothing here treats that as an error worth surfacing. */
+static void reset_custom_logo(HWND hwnd) {
+    char branding_path[MAX_PATH + 16];
+    char ini_path[MAX_PATH + 8];
+
+    get_branding_bmp_path(branding_path);
+    DeleteFileA(branding_path);
+
+    if (g_custom_logo_bmp) {
+        DeleteObject(g_custom_logo_bmp);
+        g_custom_logo_bmp = NULL;
+    }
+
+    SendMessageA(hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_default_icon_big);
+    SendMessageA(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_default_icon_small);
+    if (g_custom_icon_big) {
+        DestroyIcon(g_custom_icon_big);
+        g_custom_icon_big = NULL;
+    }
+    if (g_custom_icon_small) {
+        DestroyIcon(g_custom_icon_small);
+        g_custom_icon_small = NULL;
+    }
+
+    get_ini_path(ini_path);
+    WritePrivateProfileStringA("Branding", "SourceFile", NULL, ini_path);
+
+    log_add("Logo reset to default");
+    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
+}
+
 static void select_combo_by_text(HWND combo, const char *text) {
     int idx = (int)SendMessageA(combo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)text);
     if (idx != CB_ERR) {
@@ -3241,12 +3285,16 @@ static void build_controls(HWND hwnd) {
      * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
-    /* Sits under the HelixDefender wordmark (drawn inline in
-     * panel_subclass_proc, not a real control - this button is,
-     * because it needs a click). Centered under the logo mark's own
-     * cx=135 - see browse_and_set_logo(). */
+    /* Sit under the HelixDefender wordmark (drawn inline in
+     * panel_subclass_proc, not a real control - these buttons are,
+     * because they need a click), side by side, the pair centered as a
+     * block under the logo mark's own cx=135 - see browse_and_set_logo().
+     * Reset is the narrower of the two - it's the occasional-use
+     * escape hatch, not the primary action. */
     add_ctrl(hwnd, "BUTTON", "Change Logo", BS_OWNERDRAW | WS_TABSTOP,
-             60, 148, 150, 20, IDC_CHANGE_LOGO_BTN);
+             47, 148, 110, 20, IDC_CHANGE_LOGO_BTN);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP,
+             163, 148, 60, 20, IDC_RESET_LOGO_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -3462,8 +3510,15 @@ static void build_controls(HWND hwnd) {
      * listbox 10px short of the button above it. */
     add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
              SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
-    add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_BORDER,
+    add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP | WS_BORDER,
              22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
+    /* WS_HSCROLL alone does nothing on a listbox until it's told how far
+     * there is to scroll - a long line (like a warning with a Win32
+     * error message appended, see ui_show_warning_with_last_error())
+     * just gets silently clipped at the control's own width otherwise,
+     * with no way to see the rest of it. 900px is generous headroom
+     * well past anything this app actually logs. */
+    SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_SETHORIZONTALEXTENT, 900, 0);
 
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
@@ -3931,6 +3986,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 browse_and_set_logo(hwnd);
                 return 0;
             }
+            if (id == IDC_RESET_LOGO_BTN && code == BN_CLICKED) {
+                reset_custom_logo(hwnd);
+                return 0;
+            }
             if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
                 g_bulk_select_mode = !g_bulk_select_mode;
                 SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
@@ -4301,6 +4360,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
             if (g_custom_icon_big) DestroyIcon(g_custom_icon_big);
             if (g_custom_icon_small) DestroyIcon(g_custom_icon_small);
+            if (g_default_icon_big) DestroyIcon(g_default_icon_big);
+            if (g_default_icon_small) DestroyIcon(g_default_icon_small);
             /* Only delete g_font if it's the CreateFontA() result, not
              * the GetStockObject() fallback - stock objects must never
              * be passed to DeleteObject(). */
@@ -4352,6 +4413,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!wc.hIcon) {
         wc.hIcon = LoadIconA(NULL, IDI_APPLICATION);
     }
+    g_default_icon_big = wc.hIcon;
+    g_default_icon_small = wc.hIconSm;
     wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
     wc.hbrBackground = g_brush_page;
     wc.lpszClassName = "DigitalNoiseConfigMultiMainWindow";

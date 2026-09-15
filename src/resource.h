@@ -28,6 +28,9 @@
  * the original filename picked, for display/reference, not as the
  * thing actually loaded on startup. */
 #define IDC_CHANGE_LOGO_BTN  1022
+/* Deletes branding.bmp and restores the built-in embedded icon/vector
+ * mark - see reset_custom_logo() in main.c. */
+#define IDC_RESET_LOGO_BTN   1023
 
 /* Bulk Actions bar, above the channel grid - click a card's checkbox to
  * select it (lit accent border), then one of these applies to every
