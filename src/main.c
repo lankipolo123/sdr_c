@@ -192,13 +192,21 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * same width and drawn a little smaller to make room, rather than the
  * strip eating into its existing space. */
 #define ROW_LABEL_STRIP_W 52
-/* The control itself is narrow-and-tall, not wide-and-short - its text
- * is rotated 90 degrees (see grid_row_lbl_subclass_proc()), so "width"
- * here is across the rotated glyphs' stroke direction and "height" is
- * along the text's actual reading direction. 90px comfortably fits
- * "1st row" et al at g_vertical_font's size with room to spare. */
-#define ROW_LABEL_W 20
-#define ROW_LABEL_H 90
+/* The control itself is narrow-and-tall - "vertical" here means one
+ * character per line (upright, not rotated), e.g.
+ *   1
+ *   s
+ *   t
+ *
+ *   r
+ *   o
+ *   w
+ * built by inserting '\n' between every character (see row_lbl_text[]
+ * in build_controls()) and letting a plain multi-line STATIC wrap
+ * them - no custom drawing needed, unlike a rotated-glyph approach. 7
+ * lines (3 + a blank for the word gap + 3) at the normal UI font. */
+#define ROW_LABEL_W 24
+#define ROW_LABEL_H 100
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
@@ -215,7 +223,6 @@ static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
 static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
-static HFONT g_vertical_font; /* escapement-rotated, for the grid row labels - see grid_row_lbl_subclass_proc() */
 /* NULL = draw the built-in vector HelixDefender mark (the normal case).
  * Set by load_custom_logo() at startup (if branding.bmp exists next to
  * the .exe) or by browse_and_set_logo() (IDC_CHANGE_LOGO_BTN) - either
@@ -1937,43 +1944,6 @@ static int grid_row_lbl_id(int row) {
     return ids[row];
 }
 
-/* Actually-rotated text via g_vertical_font (escapement/orientation
- * 900 = 90 degrees), not plain horizontal text just sitting in a
- * narrow control - a STATIC control's own DrawTextA ignores a font's
- * escapement entirely, so this needs its own WM_PAINT via TextOutA. */
-static LRESULT CALLBACK grid_row_lbl_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_ERASEBKGND) {
-        return 1;
-    }
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC hdc;
-        RECT rc;
-        char text[16];
-        HFONT old_font;
-        SIZE sz;
-        int cx, cy;
-
-        hdc = BeginPaint(hwnd, &ps);
-        GetClientRect(hwnd, &rc);
-        FillRect(hdc, &rc, g_brush_panel);
-
-        GetWindowTextA(hwnd, text, sizeof(text));
-        old_font = (HFONT)SelectObject(hdc, g_vertical_font ? g_vertical_font : g_font);
-        SetTextColor(hdc, COLOR_APP_MUTED);
-        SetBkMode(hdc, TRANSPARENT);
-        GetTextExtentPoint32A(hdc, text, lstrlenA(text), &sz);
-
-        cx = (rc.left + rc.right) / 2;
-        cy = (rc.top + rc.bottom) / 2;
-        TextOutA(hdc, cx - sz.cy / 2, cy + sz.cx / 2, text, lstrlenA(text));
-
-        SelectObject(hdc, old_font);
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
-}
 
 /* Invalidates a card's background panel AND every one of its own
  * foreground siblings (title, mode label, mode combo, Set, ON, OFF,
@@ -3932,24 +3902,21 @@ static void build_controls(HWND hwnd) {
         add_channel_card(hwnd, idx);
     }
 
-    /* Row labels - see ROW_LABEL_STRIP_W's comment. Narrow-and-tall
-     * (not wide-and-short) since the text itself is rotated 90 degrees
-     * - see grid_row_lbl_subclass_proc(). Design-time positions
-     * (card_h == CARD_H); relayout_for_size() repositions these
-     * alongside the cards themselves as the window resizes. */
+    /* Row labels - see ROW_LABEL_STRIP_W/ROW_LABEL_W's comments for
+     * what "vertical" means here (one upright character per line, not
+     * rotated glyphs). Design-time positions (card_h == CARD_H);
+     * relayout_for_size() repositions these alongside the cards
+     * themselves as the window resizes. */
     {
         static const char *const row_lbl_text[GRID_ROWS] = {
-            "1st row", "2nd row", "3rd row", "4th row"
+            "1\ns\nt\n\nr\no\nw", "2\nn\nd\n\nr\no\nw", "3\nr\nd\n\nr\no\nw", "4\nt\nh\n\nr\no\nw"
         };
         int row;
         for (row = 0; row < GRID_ROWS; row++) {
             int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
-            HWND lbl = add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
-                                 GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2,
-                                 row_cy - ROW_LABEL_H / 2, ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
-            if (lbl) {
-                SetWindowLongPtrA(lbl, GWLP_WNDPROC, (LONG_PTR)grid_row_lbl_subclass_proc);
-            }
+            add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
+                     GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2,
+                     row_cy - ROW_LABEL_H / 2, ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
         }
     }
 
@@ -4213,20 +4180,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                        DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
             if (!g_logo_font) {
                 g_logo_font = g_header_font;
-            }
-
-            /* Actually rotated text (escapement/orientation both 900 =
-             * 90.0 degrees - both need setting for TrueType fonts to
-             * really rotate, escapement alone can silently no-op on
-             * some fonts) for the grid row labels - see
-             * grid_row_lbl_subclass_proc(). Direct correction: stacking
-             * plain horizontal "1st row" text in a vertical column is
-             * NOT the same thing as vertical text. */
-            g_vertical_font = CreateFontA(-12, 0, 900, 900, FW_NORMAL, FALSE, FALSE, FALSE,
-                                           ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                           DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
-            if (!g_vertical_font) {
-                g_vertical_font = g_font;
             }
 
             build_controls(hwnd);
@@ -4963,7 +4916,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
-            if (g_vertical_font && g_vertical_font != g_font) DeleteObject(g_vertical_font);
             if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
             if (g_custom_icon_big) DestroyIcon(g_custom_icon_big);
             if (g_custom_icon_small) DestroyIcon(g_custom_icon_small);
