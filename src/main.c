@@ -212,15 +212,16 @@ static HICON g_default_icon_small;
  * options staying tucked away until you tap the little badge on it. */
 static bool g_logo_options_visible;
 
-/* Continuous Wave (CW) is a fixed, undithered carrier - the one mode
- * this app gates behind a password before it can be armed (a channel's
- * own Set, or Bulk Set). The real password comes from the vendor DLL
- * itself (Transit.dll's GetDllPassword export - confirmed to take no
- * arguments and return a pointer to a static string it already has
- * baked in, not anything hardware/dongle-dependent - see
- * transit_dll.h's header comment), never anything this app invents or
- * stores on its own. Authorized once per run - every card's Set and
- * Bulk Set share this flag instead of re-prompting per click. See
+/* The shared admin-unlock flag - gates both arming Continuous Wave (CW,
+ * a fixed undithered carrier) via a channel's Set/Bulk Set, AND opening
+ * the logo lock badge (IDC_LOGO_LOCK_BTN) to reveal Change Logo/Reset.
+ * The real password comes from the vendor DLL itself (Transit.dll's
+ * GetDllPassword export - confirmed to take no arguments and return a
+ * pointer to a static string it already has baked in, not anything
+ * hardware/dongle-dependent - see transit_dll.h's header comment),
+ * never anything this app invents or stores on its own. Authorized once
+ * per run - unlocking through either entry point covers both for the
+ * rest of the session instead of re-prompting per click. See
  * unlock_cw(). */
 static bool g_cw_authorized;
 static char g_cw_pw_input[64]; /* transient scratch for cw_password_dlg_proc() */
@@ -3477,12 +3478,15 @@ static INT_PTR CALLBACK cw_password_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam,
     return FALSE;
 }
 
-/* Continuous Wave is a fixed, undithered carrier - the one mode this app
- * gates behind a password before a channel's Set (or Bulk Set) can
- * actually arm it. Checked against the real password Transit.dll itself
- * reports via GetDllPassword (see transit_dll.h) - not anything this app
- * invents or stores. Authorized once per run: every card and Bulk Set
- * share g_cw_authorized instead of re-prompting per click. */
+/* The shared admin gate - originally just for arming Continuous Wave
+ * (a fixed, undithered carrier - the one mode this app gates behind a
+ * password before a channel's Set/Bulk Set can arm it), now also
+ * covering the logo lock badge (IDC_LOGO_LOCK_BTN, revealing Change
+ * Logo/Reset). Checked against the real password Transit.dll itself
+ * reports via GetDllPassword (see transit_dll.h) - not anything this
+ * app invents or stores. Authorized once per run: unlocking through
+ * either entry point covers both for the rest of the session, via the
+ * one shared g_cw_authorized flag. */
 static bool unlock_cw(HWND hwnd) {
     const char *real_password;
     INT_PTR result;
@@ -3492,14 +3496,14 @@ static bool unlock_cw(HWND hwnd) {
     }
 
     if (!transit_dll_is_loaded(&g_conn.dll) || g_conn.dll.get_dll_password == NULL) {
-        ui_show_warning("Continuous Wave needs Transit.dll's password check, but it "
-                         "isn't loaded or this build doesn't export GetDllPassword.");
+        ui_show_warning("Admin password check needs Transit.dll loaded first - "
+                         "connect to the RS422 dongle, then try again.");
         return false;
     }
 
     real_password = g_conn.dll.get_dll_password();
     if (real_password == NULL || real_password[0] == '\0') {
-        ui_show_warning("Continuous Wave password check failed - GetDllPassword returned nothing.");
+        ui_show_warning("Admin password check failed - GetDllPassword returned nothing.");
         return false;
     }
 
@@ -3510,14 +3514,14 @@ static bool unlock_cw(HWND hwnd) {
     }
 
     if (lstrcmpA(g_cw_pw_input, real_password) != 0) {
-        ui_show_warning("Wrong password - Continuous Wave was not armed.");
+        ui_show_warning("Wrong password.");
         SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
         return false;
     }
 
     SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
     g_cw_authorized = true;
-    log_add("Continuous Wave unlocked for this session.");
+    log_add("Admin access unlocked for this session.");
     return true;
 }
 
@@ -4297,7 +4301,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return 0;
             }
             if (id == IDC_LOGO_LOCK_BTN && code == BN_CLICKED) {
-                g_logo_options_visible = !g_logo_options_visible;
+                /* Opening requires the same password as arming Continuous
+                 * Wave (see unlock_cw()) - Change Logo/Reset are just as
+                 * much an admin-only action as CW is, and sharing one
+                 * password/one unlocked-for-the-session flag means
+                 * unlocking either one covers both for the rest of the
+                 * run. Closing never re-prompts - hiding them back away
+                 * isn't the sensitive part. */
+                if (!g_logo_options_visible) {
+                    if (!unlock_cw(hwnd)) {
+                        return 0;
+                    }
+                    g_logo_options_visible = true;
+                } else {
+                    g_logo_options_visible = false;
+                }
                 ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), g_logo_options_visible ? SW_SHOW : SW_HIDE);
                 ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), g_logo_options_visible ? SW_SHOW : SW_HIDE);
                 InvalidateRect(GetDlgItem(hwnd, IDC_LOGO_LOCK_BTN), NULL, FALSE);
@@ -4558,41 +4576,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return TRUE;
                 }
 
-                /* The logo's lock badge - a small filled circle with a
-                 * padlock glyph, closed normally and swung open once
-                 * g_logo_options_visible is true, so the badge itself
-                 * shows which state Change Logo/Reset are in without
-                 * needing to look at whether they're visible below it. */
+                /* The logo's lock badge - just a padlock glyph, no filled
+                 * circle behind it: FillRect with g_brush_panel first
+                 * (same trick icon_subclass_proc uses for the header
+                 * icons) so it blends into the panel's own flat
+                 * background instead of standing out as a solid dot -
+                 * direct request. Closed normally, swung open once
+                 * g_logo_options_visible is true, so the glyph itself
+                 * still shows which state Change Logo/Reset are in. */
                 if (dis->CtlID == IDC_LOGO_LOCK_BTN) {
                     int cx = (rc.left + rc.right) / 2;
                     int cy = (rc.top + rc.bottom) / 2;
-                    int r = (rc.right - rc.left) / 2 - 1;
-                    HBRUSH badge_brush = g_brush_accent;
-                    HPEN badge_pen = CreatePen(PS_SOLID, 1, COLOR_APP_HEADER);
-                    HPEN old_pen = (HPEN)SelectObject(dis->hDC, badge_pen);
-                    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, badge_brush);
-                    Ellipse(dis->hDC, cx - r, cy - r, cx + r, cy + r);
-                    SelectObject(dis->hDC, old_brush);
-                    SelectObject(dis->hDC, old_pen);
-                    DeleteObject(badge_pen);
+                    HPEN glyph_pen = CreatePen(PS_SOLID, 2, COLOR_APP_HEADER);
+                    HPEN old_gp;
+                    HBRUSH old_gb;
+                    int shackle_dx = g_logo_options_visible ? 3 : 0;
+                    int shackle_dy = g_logo_options_visible ? -2 : 0;
 
-                    {
-                        HPEN glyph_pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
-                        HPEN old_gp = (HPEN)SelectObject(dis->hDC, glyph_pen);
-                        HBRUSH old_gb = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
-                        int shackle_dx = g_logo_options_visible ? 3 : 0;
-                        int shackle_dy = g_logo_options_visible ? -2 : 0;
+                    FillRect(dis->hDC, &rc, g_brush_panel);
 
-                        Ellipse(dis->hDC, cx - 3 + shackle_dx, cy - 7 + shackle_dy,
-                                cx + 3 + shackle_dx, cy - 1 + shackle_dy);
+                    old_gp = (HPEN)SelectObject(dis->hDC, glyph_pen);
+                    old_gb = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
 
-                        SelectObject(dis->hDC, GetStockObject(WHITE_BRUSH));
-                        Rectangle(dis->hDC, cx - 4, cy - 1, cx + 4, cy + 5);
+                    Ellipse(dis->hDC, cx - 3 + shackle_dx, cy - 7 + shackle_dy,
+                            cx + 3 + shackle_dx, cy - 1 + shackle_dy);
+                    RoundRect(dis->hDC, cx - 4, cy - 1, cx + 4, cy + 5, 2, 2);
 
-                        SelectObject(dis->hDC, old_gb);
-                        SelectObject(dis->hDC, old_gp);
-                        DeleteObject(glyph_pen);
-                    }
+                    SelectObject(dis->hDC, old_gb);
+                    SelectObject(dis->hDC, old_gp);
+                    DeleteObject(glyph_pen);
                     return TRUE;
                 }
 
