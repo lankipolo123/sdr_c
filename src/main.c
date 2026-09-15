@@ -206,6 +206,12 @@ static HICON g_custom_icon_small;
 static HICON g_default_icon_big;
 static HICON g_default_icon_small;
 
+/* Whether Change Logo/Reset are currently shown - see IDC_LOGO_LOCK_BTN's
+ * comment in resource.h. Starts false: those two buttons sit hidden
+ * until the lock badge is clicked, the same as a profile picture's edit
+ * options staying tucked away until you tap the little badge on it. */
+static bool g_logo_options_visible;
+
 /* Continuous Wave (CW) is a fixed, undithered carrier - the one mode
  * this app gates behind a password before it can be armed (a channel's
  * own Set, or Bulk Set). The real password comes from the vendor DLL
@@ -3536,11 +3542,21 @@ static void build_controls(HWND hwnd) {
      * because they need a click), side by side, the pair centered as a
      * block under the logo mark's own cx=135 - see browse_and_set_logo().
      * Reset is the narrower of the two - it's the occasional-use
-     * escape hatch, not the primary action. */
+     * escape hatch, not the primary action. Hidden until
+     * IDC_LOGO_LOCK_BTN is clicked - see g_logo_options_visible. */
     add_ctrl(hwnd, "BUTTON", "Change Logo", BS_OWNERDRAW | WS_TABSTOP,
              47, 148, 110, 20, IDC_CHANGE_LOGO_BTN);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP,
              163, 148, 60, 20, IDC_RESET_LOGO_BTN);
+    ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), SW_HIDE);
+    ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), SW_HIDE);
+
+    /* The lock badge itself - overlapping the logo mark's own
+     * bottom-right corner (mark is centered at (135,68), 96x96 box, so
+     * the corner lands around (183,116)); same idea as a profile
+     * picture's small round edit badge. */
+    add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP,
+             167, 97, 22, 22, IDC_LOGO_LOCK_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -4276,6 +4292,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 reset_custom_logo(hwnd);
                 return 0;
             }
+            if (id == IDC_LOGO_LOCK_BTN && code == BN_CLICKED) {
+                g_logo_options_visible = !g_logo_options_visible;
+                ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), g_logo_options_visible ? SW_SHOW : SW_HIDE);
+                ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), g_logo_options_visible ? SW_SHOW : SW_HIDE);
+                InvalidateRect(GetDlgItem(hwnd, IDC_LOGO_LOCK_BTN), NULL, FALSE);
+                return 0;
+            }
             if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
                 g_bulk_select_mode = !g_bulk_select_mode;
                 SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
@@ -4527,6 +4550,44 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         LineTo(dis->hDC, rc.right - 3, rc.top + 3);
                         SelectObject(dis->hDC, old_check_pen);
                         DeleteObject(check_pen);
+                    }
+                    return TRUE;
+                }
+
+                /* The logo's lock badge - a small filled circle with a
+                 * padlock glyph, closed normally and swung open once
+                 * g_logo_options_visible is true, so the badge itself
+                 * shows which state Change Logo/Reset are in without
+                 * needing to look at whether they're visible below it. */
+                if (dis->CtlID == IDC_LOGO_LOCK_BTN) {
+                    int cx = (rc.left + rc.right) / 2;
+                    int cy = (rc.top + rc.bottom) / 2;
+                    int r = (rc.right - rc.left) / 2 - 1;
+                    HBRUSH badge_brush = g_brush_accent;
+                    HPEN badge_pen = CreatePen(PS_SOLID, 1, COLOR_APP_HEADER);
+                    HPEN old_pen = (HPEN)SelectObject(dis->hDC, badge_pen);
+                    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, badge_brush);
+                    Ellipse(dis->hDC, cx - r, cy - r, cx + r, cy + r);
+                    SelectObject(dis->hDC, old_brush);
+                    SelectObject(dis->hDC, old_pen);
+                    DeleteObject(badge_pen);
+
+                    {
+                        HPEN glyph_pen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
+                        HPEN old_gp = (HPEN)SelectObject(dis->hDC, glyph_pen);
+                        HBRUSH old_gb = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                        int shackle_dx = g_logo_options_visible ? 3 : 0;
+                        int shackle_dy = g_logo_options_visible ? -2 : 0;
+
+                        Ellipse(dis->hDC, cx - 3 + shackle_dx, cy - 7 + shackle_dy,
+                                cx + 3 + shackle_dx, cy - 1 + shackle_dy);
+
+                        SelectObject(dis->hDC, GetStockObject(WHITE_BRUSH));
+                        Rectangle(dis->hDC, cx - 4, cy - 1, cx + 4, cy + 5);
+
+                        SelectObject(dis->hDC, old_gb);
+                        SelectObject(dis->hDC, old_gp);
+                        DeleteObject(glyph_pen);
                     }
                     return TRUE;
                 }

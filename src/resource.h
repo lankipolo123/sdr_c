@@ -31,6 +31,14 @@
 /* Deletes branding.bmp and restores the built-in embedded icon/vector
  * mark - see reset_custom_logo() in main.c. */
 #define IDC_RESET_LOGO_BTN   1023
+/* Small round badge overlapping the logo's bottom-right corner, same
+ * idea as a profile picture's edit badge in a modern app - Change Logo/
+ * Reset stay hidden until this is clicked, instead of sitting there
+ * permanently. Toggles between a closed and an open padlock glyph so
+ * the badge itself shows which state it's in - see
+ * IDC_CHANGE_LOGO_BTN's WM_DRAWITEM case and g_logo_options_visible in
+ * main.c. */
+#define IDC_LOGO_LOCK_BTN    1024
 
 /* Bulk Actions bar, above the channel grid - click a card's checkbox to
  * select it (lit accent border), then one of these applies to every
