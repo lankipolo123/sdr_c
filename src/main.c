@@ -3010,12 +3010,21 @@ static HBITMAP load_image_as_bitmap_gdiplus(const char *path) {
  * originally-picked filename in the .ini purely for display/reference
  * (SourceFile is never read back to decide what to load -
  * branding.bmp's own presence is the one thing that decides that, so
- * the two can never disagree with each other). .bmp copies straight
- * through; .ico and .png/.jpg both get decoded first (via
- * load_icon_as_bitmap()/load_image_as_bitmap_gdiplus() above) and
- * re-saved as branding.bmp, so load_custom_logo() at next startup
- * never needs to know or care which format the user originally
- * picked. */
+ * the two can never disagree with each other).
+ *
+ * Every raster format (.bmp included) goes through GDI+
+ * (load_image_as_bitmap_gdiplus()) rather than a raw CopyFileA for
+ * .bmp - a real-world .bmp can be RLE-compressed, a V4/V5-header
+ * variant, or some other flavor plain LoadImageA(IMAGE_BITMAP) can't
+ * parse even though the file is perfectly valid (confirmed: a real
+ * user's .bmp reloaded here as "not a loadable BMP" after copying
+ * through fine). GDI+ decodes all of that far more thoroughly, and
+ * since it's re-saved through save_hbitmap_as_bmp() either way, the
+ * result is always our own simple, guaranteed-loadable 24bpp output -
+ * so this class of failure can't recur regardless of the source BMP's
+ * own internal format. Only .ico is still special-cased (via
+ * load_icon_as_bitmap()'s Windows-icon-loader trick) since GDI+ itself
+ * doesn't decode the .ico container format. */
 static void browse_and_set_logo(HWND hwnd) {
     char picked[MAX_PATH];
     char branding_path[MAX_PATH + 16];
@@ -3038,9 +3047,10 @@ static void browse_and_set_logo(HWND hwnd) {
 
     get_branding_bmp_path(branding_path);
     /* Re-picking the file that's already branding.bmp itself (the .ini's
-     * "SourceFile" display invites exactly that) needs to be a no-op,
-     * not a copy - CopyFileA(x, x, ...) fails outright when source and
-     * destination are literally the same file. */
+     * "SourceFile" display invites exactly that) needs to be a no-op -
+     * GDI+ can't usefully "decode and re-save" a file onto itself
+     * either (opens it, then tries to write the same path while GDI+
+     * still holds it open for read). */
     if (lstrcmpiA(picked, branding_path) == 0) {
         /* already in place */
     } else if (has_extension(picked, ".ico")) {
@@ -3053,7 +3063,7 @@ static void browse_and_set_logo(HWND hwnd) {
             ui_show_warning_with_last_error("Could not read that .ico file");
             return;
         }
-    } else if (has_extension(picked, ".png") || has_extension(picked, ".jpg") || has_extension(picked, ".jpeg")) {
+    } else {
         HBITMAP extracted = load_image_as_bitmap_gdiplus(picked);
         bool saved = extracted && save_hbitmap_as_bmp(extracted, branding_path);
         if (extracted) {
@@ -3063,14 +3073,11 @@ static void browse_and_set_logo(HWND hwnd) {
             ui_show_warning_with_last_error("Could not read that image file");
             return;
         }
-    } else if (!CopyFileA(picked, branding_path, FALSE)) {
-        ui_show_warning_with_last_error("Could not copy the selected file to branding.bmp");
-        return;
     }
 
     loaded = (HBITMAP)LoadImageA(NULL, branding_path, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE);
     if (!loaded) {
-        ui_show_warning("That file isn't a loadable BMP");
+        ui_show_warning_with_last_error("That file isn't a loadable BMP");
         return;
     }
     if (g_custom_logo_bmp) {
