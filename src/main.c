@@ -4576,34 +4576,45 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return TRUE;
                 }
 
-                /* The logo's lock badge - just a padlock glyph, no filled
-                 * circle behind it: FillRect with g_brush_panel first
-                 * (same trick icon_subclass_proc uses for the header
-                 * icons) so it blends into the panel's own flat
-                 * background instead of standing out as a solid dot -
-                 * direct request. Closed normally, swung open once
-                 * g_logo_options_visible is true, so the glyph itself
-                 * still shows which state Change Logo/Reset are in. */
+                /* The logo's lock badge - no filled circle behind it:
+                 * FillRect with g_brush_panel first (same trick
+                 * icon_subclass_proc uses for the header icons) so it
+                 * blends into the panel's own flat background instead of
+                 * standing out as a solid dot - direct request.
+                 *
+                 * The glyph itself is a real padlock silhouette, not two
+                 * thin outline shapes barely touching (the first attempt,
+                 * reported as reading like a broken squiggle at this
+                 * size): a FILLED body drawn last, overlapping and
+                 * masking the bottom of the shackle loop drawn under it,
+                 * the same layering trick a bitmap padlock icon uses -
+                 * only the loop's top arc ends up visible, peeking above
+                 * a solid body, which is what actually reads as "lock" at
+                 * 22px. Closed normally, shackle swung right and up once
+                 * g_logo_options_visible is true. */
                 if (dis->CtlID == IDC_LOGO_LOCK_BTN) {
                     int cx = (rc.left + rc.right) / 2;
                     int cy = (rc.top + rc.bottom) / 2;
+                    HBRUSH glyph_brush = CreateSolidBrush(COLOR_APP_HEADER);
                     HPEN glyph_pen = CreatePen(PS_SOLID, 2, COLOR_APP_HEADER);
                     HPEN old_gp;
                     HBRUSH old_gb;
-                    int shackle_dx = g_logo_options_visible ? 3 : 0;
+                    int shackle_dx = g_logo_options_visible ? 4 : 0;
                     int shackle_dy = g_logo_options_visible ? -2 : 0;
 
                     FillRect(dis->hDC, &rc, g_brush_panel);
 
                     old_gp = (HPEN)SelectObject(dis->hDC, glyph_pen);
                     old_gb = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                    Ellipse(dis->hDC, cx - 4 + shackle_dx, cy - 8 + shackle_dy,
+                            cx + 4 + shackle_dx, cy + shackle_dy);
 
-                    Ellipse(dis->hDC, cx - 3 + shackle_dx, cy - 7 + shackle_dy,
-                            cx + 3 + shackle_dx, cy - 1 + shackle_dy);
-                    RoundRect(dis->hDC, cx - 4, cy - 1, cx + 4, cy + 5, 2, 2);
+                    SelectObject(dis->hDC, glyph_brush);
+                    RoundRect(dis->hDC, cx - 5, cy - 2, cx + 5, cy + 6, 3, 3);
 
                     SelectObject(dis->hDC, old_gb);
                     SelectObject(dis->hDC, old_gp);
+                    DeleteObject(glyph_brush);
                     DeleteObject(glyph_pen);
                     return TRUE;
                 }
