@@ -1960,8 +1960,14 @@ static void ui_invalidate_card(int index) {
  * through the dark theme (that took five attempts to get right - see
  * the big comment above combo_arrow_subclass_proc). Set/ON/OFF/gauge
  * are all custom-painted, so they stay fully themed either way. */
+/* Gated on the connection alone, not on there being a selection (unlike
+ * BULK_TARGET_BTN_IDS below) - Clear/Select All act on the selection
+ * itself, and Card Click (IDC_BULK_TOGGLE_BTN) just arms a way to
+ * build one. Card Click used to stay enabled even while disconnected -
+ * direct request: no bus means no real "card on" state to reflect, so
+ * it shouldn't be armable at all until connected. */
 static const int BULK_ALWAYS_BTN_IDS[] = {
-    IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN
+    IDC_BULK_CLEAR_BTN, IDC_BULK_SELECT_ALL_BTN, IDC_BULK_TOGGLE_BTN
 };
 #define BULK_ALWAYS_BTN_COUNT (sizeof(BULK_ALWAYS_BTN_IDS) / sizeof(BULK_ALWAYS_BTN_IDS[0]))
 
@@ -2008,7 +2014,10 @@ static bool bulk_any_selected_busy(void) {
 }
 
 static void ui_refresh_bulk_target_buttons_enabled(void) {
-    bool enabled = conn_is_connected(&g_conn) && bulk_has_selection();
+    /* Direct request: Card Click being On is the real "armed" signal,
+     * not just having a selection - Select All alone (with Card Click
+     * still Off) shouldn't be enough to light these up. */
+    bool enabled = conn_is_connected(&g_conn) && g_bulk_select_mode && bulk_has_selection();
     unsigned i;
     for (i = 0; i < BULK_TARGET_BTN_COUNT; i++) {
         HWND btn = GetDlgItem(g_hwnd, BULK_TARGET_BTN_IDS[i]);
@@ -2021,6 +2030,15 @@ static void set_channel_controls_enabled(bool enabled) {
     int i;
     if (!enabled) {
         g_bulk_last_power_action = BULK_POWER_NONE;
+        /* No bus, no real "card on" state to reflect - Card Click
+         * itself gets disabled below (BULK_ALWAYS_BTN_IDS), but force
+         * it back to Off too so a disconnect doesn't leave it stuck
+         * showing "On" for a mode that's no longer armable. */
+        if (g_bulk_select_mode) {
+            g_bulk_select_mode = false;
+            SetDlgItemTextA(g_hwnd, IDC_BULK_TOGGLE_BTN, "Card Click: Off");
+            ui_update_all_select_checkbox_visibility();
+        }
     }
     for (i = 0; i < MAX_CHANNELS; i++) {
         HWND set_btn = GetDlgItem(g_hwnd, channel_set_id(i));
@@ -4341,6 +4359,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
                                 g_bulk_select_mode ? "Card Click: On" : "Card Click: Off");
                 ui_update_all_select_checkbox_visibility();
+                /* Set/ON/OFF/High/Medium/Low/Off's enabled state depends
+                 * on g_bulk_select_mode now too - refresh immediately,
+                 * not just on the next selection change. */
+                ui_refresh_bulk_target_buttons_enabled();
                 return 0;
             }
             if (id == IDC_BULK_CLEAR_BTN && code == BN_CLICKED) {
