@@ -4439,11 +4439,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     int cx = SIG_STRIP_CONTENT_X + 130;
                     int cy = CONTENT_TOP + 370;
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
-                        draw_app_logo_silhouette(hdc, cx, cy, 42, RGB(255, 255, 255));
-                        draw_app_logo_mark(hdc, cx, cy, 40);
-                        draw_signal_waves(hdc, cx, cy, 40, g_signal_wave_phase, count_channels_on(), &sig_rc);
+                        draw_app_logo_silhouette(hdc, cx, cy, 64, RGB(255, 255, 255));
+                        draw_app_logo_mark(hdc, cx, cy, 60);
+                        draw_signal_waves(hdc, cx, cy, 60, g_signal_wave_phase, count_channels_on(), &sig_rc);
                     } else {
-                        draw_app_logo_faded(hdc, cx, cy, 40, 110); /* ~43% opacity */
+                        draw_app_logo_faded(hdc, cx, cy, 60, 110); /* ~43% opacity */
                     }
                 }
             }
