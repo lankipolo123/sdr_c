@@ -198,8 +198,17 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * "3rd"/"4th" instead of spelling out "row" on every one of them; it
  * was never a request to go horizontal. 3 lines ("1"/"s"/"t") at the
  * normal UI font. */
+/* A small fixed gap off the card edge, not centered in the middle of
+ * the wider ROW_LABEL_STRIP_W dead space - direct complaint that the
+ * labels read as floating, detached from the cards they're labeling,
+ * rather than sitting snug next to them. */
+#define ROW_LABEL_GAP 4
 #define ROW_LABEL_W 24
 #define ROW_LABEL_H 52
+/* Wider than ROW_LABEL_W - "Rows" is one line of real text (not one
+ * character per line like the labels below it) and clips inside a
+ * box that narrow. Centered over the label column below it. */
+#define ROW_LABEL_HEADING_W 44
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
@@ -3902,15 +3911,16 @@ static void build_controls(HWND hwnd) {
      * heading - it isn't tied to any one row, no need to move it)
      * alongside the cards themselves as the window resizes. */
     add_ctrl(hwnd, "STATIC", "Rows", SS_CENTER | SS_NOPREFIX,
-             GRID_RIGHT + CARD_GAP, CONTENT_TOP + 4, ROW_LABEL_STRIP_W, 16, IDC_GRID_ROW_HEADING);
+             GRID_RIGHT + ROW_LABEL_GAP - (ROW_LABEL_HEADING_W - ROW_LABEL_W) / 2, CONTENT_TOP + 4,
+             ROW_LABEL_HEADING_W, 16, IDC_GRID_ROW_HEADING);
     {
         static const char *const row_lbl_text[GRID_ROWS] = { "1\ns\nt", "2\nn\nd", "3\nr\nd", "4\nt\nh" };
         int row;
         for (row = 0; row < GRID_ROWS; row++) {
             int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
             add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
-                     GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2,
-                     row_cy - ROW_LABEL_H / 2, ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
+                     GRID_RIGHT + ROW_LABEL_GAP, row_cy - ROW_LABEL_H / 2,
+                     ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
         }
     }
 
@@ -4122,7 +4132,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     for (i = 0; i < GRID_ROWS; i++) {
         int row_cy = CONTENT_TOP + i * (card_h + CARD_GAP) + card_h / 2;
         MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)),
-                   GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2, row_cy - ROW_LABEL_H / 2,
+                   GRID_RIGHT + ROW_LABEL_GAP, row_cy - ROW_LABEL_H / 2,
                    ROW_LABEL_W, ROW_LABEL_H, FALSE);
     }
 
