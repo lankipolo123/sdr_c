@@ -3803,18 +3803,22 @@ static void build_controls(HWND hwnd) {
                  790 + BULK_X_SHIFT, 120, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
     }
 
-    /* Ambient Temperature's commands stay in their header zone (title,
-     * Port/Refresh/Connect, status/Avg, Kill Switch), unchanged. */
+    /* Ambient Temperature's commands - narrower, taller: each row split
+     * onto its own line (same "Port on its own row, Refresh/Connect
+     * below it" shape Connection & Settings already uses) instead of
+     * Port+Refresh+Connect sharing one wide row - direct request to
+     * take up less width and more height, freeing more of the header's
+     * resize gap for the heatmap next to it. */
     add_header_icon(hwnd, 1033, 14, ICON_WAVE);
     add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
     add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60, 100, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 90, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 88, 80, 18, IDC_KILL_RESET_BTN);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 90, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1025, 58, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1097, 58, 72, 18, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1025, 82, 130, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1025, 102, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1025, 130, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 80, 18, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
     /* The heatmap fills the empty gap that opens up inside the header
