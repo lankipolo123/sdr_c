@@ -89,6 +89,10 @@
 #define IDC_GRID_ROW_LBL_2   1061
 #define IDC_GRID_ROW_LBL_3   1062
 #define IDC_GRID_ROW_LBL_4   1063
+/* The "Rows" heading above them - a real ID (not 0) so
+ * WM_CTLCOLORSTATIC can match it specifically, same reason as the
+ * IDC_GRID_ROW_LBL_* ids below. */
+#define IDC_GRID_ROW_HEADING 1064
 
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the

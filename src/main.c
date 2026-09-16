@@ -192,12 +192,14 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * same width and drawn a little smaller to make room, rather than the
  * strip eating into its existing space. */
 #define ROW_LABEL_STRIP_W 52
-/* Back to plain single-line horizontal text ("1st"/"2nd"/"3rd"/"4th",
- * not spelling out "row" each time) once a "Rows" heading (see
- * build_controls()) sits above the whole column making that
- * redundant - direct correction after two swings at literal rotated/
- * stacked "vertical" text that both missed what was actually wanted. */
-#define ROW_LABEL_H 16
+/* Vertical (one upright character per line, via '\n' in the string -
+ * see row_lbl_text[] in build_controls()) stays - a "Rows" heading
+ * above the column only shortened the text itself to "1st"/"2nd"/
+ * "3rd"/"4th" instead of spelling out "row" on every one of them; it
+ * was never a request to go horizontal. 3 lines ("1"/"s"/"t") at the
+ * normal UI font. */
+#define ROW_LABEL_W 24
+#define ROW_LABEL_H 52
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
@@ -3900,15 +3902,15 @@ static void build_controls(HWND hwnd) {
      * heading - it isn't tied to any one row, no need to move it)
      * alongside the cards themselves as the window resizes. */
     add_ctrl(hwnd, "STATIC", "Rows", SS_CENTER | SS_NOPREFIX,
-             GRID_RIGHT + CARD_GAP, CONTENT_TOP + 4, ROW_LABEL_STRIP_W, 16, 0);
+             GRID_RIGHT + CARD_GAP, CONTENT_TOP + 4, ROW_LABEL_STRIP_W, 16, IDC_GRID_ROW_HEADING);
     {
-        static const char *const row_lbl_text[GRID_ROWS] = { "1st", "2nd", "3rd", "4th" };
+        static const char *const row_lbl_text[GRID_ROWS] = { "1\ns\nt", "2\nn\nd", "3\nr\nd", "4\nt\nh" };
         int row;
         for (row = 0; row < GRID_ROWS; row++) {
             int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
             add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
-                     GRID_RIGHT + CARD_GAP, row_cy - ROW_LABEL_H / 2,
-                     ROW_LABEL_STRIP_W, ROW_LABEL_H, grid_row_lbl_id(row));
+                     GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2,
+                     row_cy - ROW_LABEL_H / 2, ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
         }
     }
 
@@ -4119,8 +4121,9 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
 
     for (i = 0; i < GRID_ROWS; i++) {
         int row_cy = CONTENT_TOP + i * (card_h + CARD_GAP) + card_h / 2;
-        MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)), GRID_RIGHT + CARD_GAP, row_cy - ROW_LABEL_H / 2,
-                   ROW_LABEL_STRIP_W, ROW_LABEL_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)),
+                   GRID_RIGHT + CARD_GAP + (ROW_LABEL_STRIP_W - ROW_LABEL_W) / 2, row_cy - ROW_LABEL_H / 2,
+                   ROW_LABEL_W, ROW_LABEL_H, FALSE);
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -4603,6 +4606,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetTextColor(hdc, count_kill_switch_tripped() > 0 ? COLOR_APP_DISCONNECTED : COLOR_APP_CONNECTED);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
+            }
+            /* "Rows" heading + "1st".."4th" row labels sit directly over
+             * the main window's dot-pattern background (see
+             * WM_ERASEBKGND) rather than inside any solid-color panel -
+             * a solid g_brush_panel fill here looked like a floating
+             * gray box against the dots around it. g_brush_dot_pattern
+             * matches what's actually behind them instead. */
+            if (ctl_id == IDC_GRID_ROW_HEADING || ctl_id == IDC_GRID_ROW_LBL_1 ||
+                ctl_id == IDC_GRID_ROW_LBL_2 || ctl_id == IDC_GRID_ROW_LBL_3 || ctl_id == IDC_GRID_ROW_LBL_4) {
+                SetTextColor(hdc, COLOR_APP_MUTED);
+                SetBkMode(hdc, TRANSPARENT);
+                return (LRESULT)(g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_panel);
             }
             if (channel_index_from_id(ctl_id, &idx)) {
                 int offset = (ctl_id - IDC_CH_BASE) % IDC_CH_STRIDE;
