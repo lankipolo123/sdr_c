@@ -105,7 +105,7 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
  * that one channel, or all of them via the sidebar Reset button).
  * Auto-resuming at the threshold would let it silently cycle on/off
  * right at the boundary, defeating the point of a safety cutoff. */
-#define KILL_SWITCH_THRESHOLD_C 60.0f
+#define KILL_SWITCH_THRESHOLD_C 40.0f
 
 /* Modbus slave address each of the 6 physical sensors is wired to.
  * Defaults to the unit number, 1-indexed - edit this table once the real
