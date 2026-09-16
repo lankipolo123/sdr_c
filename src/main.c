@@ -47,13 +47,13 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     308 /* was 180 - a new full-width heatmap band (see
-                            * HEADER_ROW_Y_SHIFT) now sits above
-                            * Connection & Settings/Bulk Actions/Ambient
-                            * Temperature's commands, which all shift down
-                            * to make room for it */
+#define HEADER_H     224 /* was 180 - grown to give Ambient Temperature's
+                            * heatmap real room instead of a cramped bar;
+                            * Connection & Settings and Bulk Actions just
+                            * get extra padding below their own content,
+                            * direct request rather than an oversight */
 
-#define CONTENT_TOP  322 /* shifts down by the same 128px HEADER_H grew,
+#define CONTENT_TOP  238 /* shifts down by the same 44px HEADER_H grew,
                             * keeping the usual 8px gap below the panel */
 
 /* Connection & Settings and Bulk Actions pushed right, compressing the
@@ -75,14 +75,6 @@
  * look cut/incomplete. */
 #define CONN_X_SHIFT 256
 #define BULK_X_SHIFT 118
-/* Applied to every Connection & Settings/Bulk Actions/Ambient
- * Temperature-commands y-coordinate below, same "flat offset, original
- * numbers stay visible" approach as CONN_X_SHIFT/BULK_X_SHIFT above -
- * makes room for the new full-width heatmap band now sitting above all
- * three at the top of the header panel (direct request: heatmap
- * spanning the whole header width, not confined to Ambient
- * Temperature's own narrow column). */
-#define HEADER_ROW_Y_SHIFT 120
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -769,9 +761,9 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         if (hwnd == g_header_panel) {
             RECT brc;
             brc.left = 444 + BULK_X_SHIFT;
-            brc.top = 8 + HEADER_ROW_Y_SHIFT;
+            brc.top = 8;
             brc.right = 884 + BULK_X_SHIFT;
-            brc.bottom = 164 + HEADER_ROW_Y_SHIFT;
+            brc.bottom = 164;
 
             /* CARD_CORNER_DIAMETER/CARD_SHADOW_PX, not the PANEL_*
              * constants used above for the outer header panel itself -
@@ -833,17 +825,17 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
                     int dh = (int)(bm.bmHeight * s + 0.5);
                     HDC mem_dc = CreateCompatibleDC(hdc);
                     HBITMAP old_bmp = (HBITMAP)SelectObject(mem_dc, g_custom_logo_bmp);
-                    StretchBlt(hdc, 135 - dw / 2, 68 + HEADER_ROW_Y_SHIFT - dh / 2, dw, dh,
+                    StretchBlt(hdc, 135 - dw / 2, 68 - dh / 2, dw, dh,
                                mem_dc, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
                     SelectObject(mem_dc, old_bmp);
                     DeleteDC(mem_dc);
                 }
             } else {
-                draw_app_logo_silhouette(hdc, 135, 68 + HEADER_ROW_Y_SHIFT, 106, RGB(255, 255, 255));
-                draw_app_logo_mark(hdc, 135, 68 + HEADER_ROW_Y_SHIFT, 100);
+                draw_app_logo_silhouette(hdc, 135, 68, 106, RGB(255, 255, 255));
+                draw_app_logo_mark(hdc, 135, 68, 100);
             }
 
-            wm_rc.left = 20; wm_rc.top = 118 + HEADER_ROW_Y_SHIFT; wm_rc.right = 250; wm_rc.bottom = 142 + HEADER_ROW_Y_SHIFT;
+            wm_rc.left = 20; wm_rc.top = 118; wm_rc.right = 250; wm_rc.bottom = 142;
             old_font = (HFONT)SelectObject(hdc, g_logo_font);
             /* Letter-spacing - CreateFontA has no such parameter, this
              * is the actual mechanism (extra px added after every
@@ -3639,9 +3631,9 @@ static void build_controls(HWND hwnd) {
      * escape hatch, not the primary action. Hidden until
      * IDC_LOGO_LOCK_BTN is clicked - see g_logo_options_visible. */
     add_ctrl(hwnd, "BUTTON", "Change Logo", BS_OWNERDRAW | WS_TABSTOP,
-             47, 148 + HEADER_ROW_Y_SHIFT, 110, 20, IDC_CHANGE_LOGO_BTN);
+             47, 148, 110, 20, IDC_CHANGE_LOGO_BTN);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP,
-             163, 148 + HEADER_ROW_Y_SHIFT, 60, 20, IDC_RESET_LOGO_BTN);
+             163, 148, 60, 20, IDC_RESET_LOGO_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), SW_HIDE);
     ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), SW_HIDE);
 
@@ -3663,15 +3655,15 @@ static void build_controls(HWND hwnd) {
      * THIS button's coordinate space is x:97-193/y:26-122, wordmark
      * y:124-148 - the numbers below are converted (+10,+6) accordingly. */
     add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP,
-             196, 94 + HEADER_ROW_Y_SHIFT, 24, 24, IDC_LOGO_LOCK_BTN);
+             196, 94, 24, 24, IDC_LOGO_LOCK_BTN);
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
      * (tucked up against Amplifier Temperature), leaving the whole left
      * half of the header empty. Bulk Actions now takes the middle
      * column, Amplifier Temperature stays right-aligned. */
-    add_header_icon(hwnd, 36 + CONN_X_SHIFT, 14 + HEADER_ROW_Y_SHIFT, ICON_PLUG);
-    add_header(hwnd, "Connection && Settings", 54 + CONN_X_SHIFT, 14 + HEADER_ROW_Y_SHIFT, 260, 18);
+    add_header_icon(hwnd, 36 + CONN_X_SHIFT, 14, ICON_PLUG);
+    add_header(hwnd, "Connection && Settings", 54 + CONN_X_SHIFT, 14, 260, 18);
 
     /* Every row below is centered within this section's own ~310px-wide
      * span (roughly x=22-332) instead of flush against its left edge -
@@ -3684,18 +3676,18 @@ static void build_controls(HWND hwnd) {
      * pitch is a modest ~8px gap between a row's visual bottom and
      * the next row's top - not the cramped 3-4px pitch from before
      * (too tight), not the old ~30-40px gaps either (too spacious). */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 63 + CONN_X_SHIFT, 36 + HEADER_ROW_Y_SHIFT, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 99 + CONN_X_SHIFT, 34 + HEADER_ROW_Y_SHIFT, 90, 140, IDC_PORT_COMBO));
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 201 + CONN_X_SHIFT, 36 + HEADER_ROW_Y_SHIFT, 100, 16, IDC_CONN_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 105 + CONN_X_SHIFT, 63 + HEADER_ROW_Y_SHIFT, 64, 18, IDC_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 177 + CONN_X_SHIFT, 63 + HEADER_ROW_Y_SHIFT, 72, 18, IDC_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 63 + CONN_X_SHIFT, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 99 + CONN_X_SHIFT, 34, 90, 140, IDC_PORT_COMBO));
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT | SS_NOPREFIX, 201 + CONN_X_SHIFT, 36, 100, 16, IDC_CONN_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 105 + CONN_X_SHIFT, 63, 64, 18, IDC_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 177 + CONN_X_SHIFT, 63, 72, 18, IDC_CONNECT_BTN);
 
-    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 113 + CONN_X_SHIFT, 91 + HEADER_ROW_Y_SHIFT, 34, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 151 + CONN_X_SHIFT, 89 + HEADER_ROW_Y_SHIFT, 90, 140, IDC_BAUD_COMBO));
-    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 57 + CONN_X_SHIFT, 120 + HEADER_ROW_Y_SHIFT, 60, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 121 + CONN_X_SHIFT, 118 + HEADER_ROW_Y_SHIFT, 45, 100, IDC_DATABITS_COMBO));
-    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 182 + CONN_X_SHIFT, 120 + HEADER_ROW_Y_SHIFT, 40, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 226 + CONN_X_SHIFT, 118 + HEADER_ROW_Y_SHIFT, 70, 100, IDC_PARITY_COMBO));
+    add_ctrl(hwnd, "STATIC", "Baud:", SS_LEFT, 113 + CONN_X_SHIFT, 91, 34, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 151 + CONN_X_SHIFT, 89, 90, 140, IDC_BAUD_COMBO));
+    add_ctrl(hwnd, "STATIC", "Data Bits:", SS_LEFT, 57 + CONN_X_SHIFT, 120, 60, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 121 + CONN_X_SHIFT, 118, 45, 100, IDC_DATABITS_COMBO));
+    add_ctrl(hwnd, "STATIC", "Parity:", SS_LEFT, 182 + CONN_X_SHIFT, 120, 40, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 226 + CONN_X_SHIFT, 118, 70, 100, IDC_PARITY_COMBO));
 
     /* Bulk Actions - middle column of the header, between Connection &
      * Settings (left) and Amplifier Temperature (right). Always
@@ -3739,20 +3731,20 @@ static void build_controls(HWND hwnd) {
          * level gauge + High/Medium/Low/Off tick labels there -> the
          * same 4 levels as actual buttons here, since bulk applies a
          * level with a click rather than a drag). */
-        add_header_icon(hwnd, 470 + BULK_X_SHIFT, 24 + HEADER_ROW_Y_SHIFT, ICON_LIST);
-        add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24 + HEADER_ROW_Y_SHIFT, 150, 18);
+        add_header_icon(hwnd, 470 + BULK_X_SHIFT, 24, ICON_LIST);
+        add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
-                 648 + BULK_X_SHIFT, 26 + HEADER_ROW_Y_SHIFT, 84, 16, IDC_BULK_SELECTED_LBL);
+                 648 + BULK_X_SHIFT, 26, 84, 16, IDC_BULK_SELECTED_LBL);
         /* Fixed in the row-1 corner slot, matching a Unit card's
          * checkbox position - arms/disarms clicking a card's plain
          * background to toggle its selection (the checkbox itself
          * always works either way). Off by default so a stray click
          * on a card doesn't silently select it. */
         add_ctrl(hwnd, "BUTTON", "Card Click: Off", BS_OWNERDRAW | WS_TABSTOP,
-                 740 + BULK_X_SHIFT, 22 + HEADER_ROW_Y_SHIFT, 138, 22, IDC_BULK_TOGGLE_BTN);
+                 740 + BULK_X_SHIFT, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
 
         bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                    470 + BULK_X_SHIFT, 54 + HEADER_ROW_Y_SHIFT, 230, 140, IDC_BULK_MODE_COMBO);
+                                    470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
         for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
             const char *name = proto_mode_name((uint8_t)mi);
             SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -3760,20 +3752,20 @@ static void build_controls(HWND hwnd) {
         SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
         make_combo_readonly(bulk_mode_combo);
         add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-                 710 + BULK_X_SHIFT, 54 + HEADER_ROW_Y_SHIFT, 60, 20, IDC_BULK_SET_BTN);
+                 710 + BULK_X_SHIFT, 54, 60, 20, IDC_BULK_SET_BTN);
 
         add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-                 470 + BULK_X_SHIFT, 84 + HEADER_ROW_Y_SHIFT, 110, 22, IDC_BULK_ON_BTN);
+                 470 + BULK_X_SHIFT, 84, 110, 22, IDC_BULK_ON_BTN);
         add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-                 590 + BULK_X_SHIFT, 84 + HEADER_ROW_Y_SHIFT, 110, 22, IDC_BULK_OFF_BTN);
+                 590 + BULK_X_SHIFT, 84, 110, 22, IDC_BULK_OFF_BTN);
 
         add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-                 470 + BULK_X_SHIFT, 116 + HEADER_ROW_Y_SHIFT, 90, 20, IDC_BULK_CLEAR_BTN);
+                 470 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_CLEAR_BTN);
         /* Select All's real value is the opposite case: select all,
          * then uncheck the few you want left out, instead of clicking
          * 12+ individual checkboxes by hand. */
         add_ctrl(hwnd, "BUTTON", "Select All", BS_OWNERDRAW | WS_TABSTOP,
-                 568 + BULK_X_SHIFT, 116 + HEADER_ROW_Y_SHIFT, 90, 20, IDC_BULK_SELECT_ALL_BTN);
+                 568 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_SELECT_ALL_BTN);
 
         /* Quick-select presets - see bulk_select_row() and
          * IDC_BULK_ROWSELECT_COMBO's comment in resource.h. Applies
@@ -3782,7 +3774,7 @@ static void build_controls(HWND hwnd) {
          * simple. Starts on "Custom" (last item) so it doesn't fire a
          * selection change the instant the window opens. */
         row_select_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                     470 + BULK_X_SHIFT, 140 + HEADER_ROW_Y_SHIFT, 188, 120, IDC_BULK_ROWSELECT_COMBO);
+                                     470 + BULK_X_SHIFT, 140, 188, 120, IDC_BULK_ROWSELECT_COMBO);
         for (ri = 0; ri < (int)(sizeof(row_select_items) / sizeof(row_select_items[0])); ri++) {
             SendMessageA(row_select_combo, CB_ADDSTRING, 0, (LPARAM)row_select_items[ri]);
         }
@@ -3791,45 +3783,54 @@ static void build_controls(HWND hwnd) {
         make_combo_readonly(row_select_combo);
 
         add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
-                 790 + BULK_X_SHIFT, 54 + HEADER_ROW_Y_SHIFT, 84, 18, IDC_BULK_HIGH_BTN);
+                 790 + BULK_X_SHIFT, 54, 84, 18, IDC_BULK_HIGH_BTN);
         add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
-                 790 + BULK_X_SHIFT, 76 + HEADER_ROW_Y_SHIFT, 84, 18, IDC_BULK_MEDIUM_BTN);
+                 790 + BULK_X_SHIFT, 76, 84, 18, IDC_BULK_MEDIUM_BTN);
         add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
-                 790 + BULK_X_SHIFT, 98 + HEADER_ROW_Y_SHIFT, 84, 18, IDC_BULK_LOW_BTN);
+                 790 + BULK_X_SHIFT, 98, 84, 18, IDC_BULK_LOW_BTN);
         add_ctrl(hwnd, "BUTTON", "Off", BS_OWNERDRAW | WS_TABSTOP,
-                 790 + BULK_X_SHIFT, 120 + HEADER_ROW_Y_SHIFT, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
+                 790 + BULK_X_SHIFT, 120, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
     }
 
-    /* Ambient Temperature's heatmap spans the FULL header width now, in
-     * its own band at the very top of the panel, above Connection &
-     * Settings/Bulk Actions/its own commands (which all shift down by
-     * HEADER_ROW_Y_SHIFT to make room - see that constant's comment) -
-     * direct request, rather than confined to this section's own
-     * narrow ~260px-wide column like everything below it still is. */
-    add_header_icon(hwnd, 32, 14, ICON_WAVE);
-    add_header(hwnd, "Ambient Temperature", 50, 14, 260, 18);
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 32, 40, CLIENT_WIDTH - 2 * SIDEBAR_X - 64, 90);
-
-    /* Port/Refresh/Connect stay on one combined row here (unlike
-     * Connection & Settings' own split rows) - splitting them would
-     * make this the taller of the two cards, working against making it
-     * smaller. Right-aligned in the header bar, same as before. */
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36 + HEADER_ROW_Y_SHIFT, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                  1059, 34 + HEADER_ROW_Y_SHIFT, 82, 140, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35 + HEADER_ROW_Y_SHIFT, 64, 18, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35 + HEADER_ROW_Y_SHIFT, 72, 18, IDC_SENSOR_CONNECT_BTN);
+    /* Amplifier Temperature, right-aligned in the same header bar
+     * rather than below it in the sidebar - same row shape as
+     * Connection & Settings, just anchored to the header's right edge
+     * instead of sitting bunched up next to it. Port/Refresh/Connect
+     * stay on one combined row here (unlike Connection & Settings'
+     * split rows) - splitting them would make this the taller of the
+     * two cards, working against making it smaller. */
+    add_header_icon(hwnd, 1033, 14, ICON_WAVE);
+    add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
+    /* 4 physical sensors scanning the rack area, each at its own
+     * address (see UNIT_TEMP_ADDR) - not one per RF channel. Status and
+     * the rack-wide average (across whichever of the 4 currently have a
+     * reading) are one aligned row of two gradient pills instead of two
+     * stacked plain-text lines - width matches the chip grid below so
+     * the whole column reads as one aligned block. */
     /* Plain text, not a pill - only the temperature reading gets that
      * treatment. Still on the same row/aligned with the Avg pill next
      * to it, just left-aligned status text like every other connection
-     * status label in this app. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60 + HEADER_ROW_Y_SHIFT, 100, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1149, 56 + HEADER_ROW_Y_SHIFT, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+     * status label in this app (Connection & Settings' own status,
+     * left as-is, is the same style). Row centered as a group within
+     * the card zone, not flush left/right against its edges. */
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60, 100, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+    /* Heatmap replaces the old BAY 1-4 chip grid, given real room by
+     * HEADER_H's growth instead of squeezed into the chip grid's old
+     * 68px-tall block - see sensor_heatmap_subclass_proc()'s comment.
+     * Same x/width as the old chip grid so it still aligns under the
+     * Avg pill above it. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1026, 88, 258, 92);
     /* Always visible ("Kill Switch: Armed" until something trips it) -
      * see ui_refresh_kill_switch()'s comment. Only the Reset button
-     * hides while armed, since there's nothing to reset yet. */
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 157 + HEADER_ROW_Y_SHIFT, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 155 + HEADER_ROW_Y_SHIFT, 80, 18, IDC_KILL_RESET_BTN);
+     * hides while armed, since there's nothing to reset yet. Right
+     * below the heatmap (88 + 92 = 180, +6px gap). */
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 186, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 184, 80, 18, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
