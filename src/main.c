@@ -361,7 +361,6 @@ static int g_spectrum_unit;
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
-static HWND g_ambient_panel;
 static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the Spectrum plot at a Y that moves with
                                  * the grid's actual height (see
@@ -3821,15 +3820,10 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 88, 80, 18, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    /* The heatmap now sits inside a real panel (rounded border, shadow -
-     * same generic look as the sidebar panel below it), instead of just
-     * floating in the dead-space strip with a thin outline - direct
-     * request, extended upward to cover the empty space above it too
-     * (top-aligned with the header panels at y=6, not CONTENT_TOP). The
-     * logo mark moved to its own small control below the gradient,
-     * inside the same panel (see add_ambient_logo()). */
-    g_ambient_panel = add_panel(hwnd, SIG_STRIP_X, 6, 270, 350);
-    g_sensor_heatmap = add_sensor_heatmap(g_ambient_panel, 6, 16, 258, 320);
+    /* Vertical (portrait, taller than wide) heatmap block in the strip,
+     * near the top - matches the Option 2 mockup's own proportions,
+     * scaled to the strip's actual width. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, SIG_STRIP_CONTENT_X, CONTENT_TOP + 10, 258, 320);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4354,18 +4348,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
 
             /* HelixDefender mark + signal-wave pulse, straight over the
-             * dot pattern just filled above - drawn on the main window's
-             * own background, never moved or touched by the Ambient
-             * Temperature panel work above it (g_ambient_panel is sized
-             * to end well above this, at y=356). Always shows the mark
-             * itself - full brightness with the pulsing arcs while
-             * actually connected and transmitting, faded to a dim idle
-             * icon otherwise. */
+             * dot pattern just filled above - see
+             * get_signal_area_rect()'s comment for why this is drawn
+             * inline here rather than as a separate window. Always
+             * shows the mark itself (so that spot isn't just blank
+             * background) - full brightness with the pulsing arcs
+             * while actually connected and transmitting, faded to a
+             * dim idle icon (no arcs - nothing to show a signal for)
+             * otherwise. */
             {
                 RECT sig_rc;
                 if (get_signal_area_rect(&sig_rc)) {
+                    /* Sits below the moved Ambient Temperature commands
+                     * in this same strip (title/Port/Connect/status/Avg/
+                     * Kill Switch - see build_controls()), not centered
+                     * in the whole strip like before - direct request
+                     * once those became real controls sharing the space
+                     * instead of the mark owning all of it. sig_rc itself
+                     * is unchanged (still the full strip) - only used
+                     * here as draw_signal_waves()'s clip bounds, which is
+                     * harmless to leave generous. */
                     int cx = SIG_STRIP_CONTENT_X + 130;
-                    int cy = 406;
+                    int cy = CONTENT_TOP + 370; /* below the now-vertical heatmap block (10 + 320 tall) */
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
                         draw_app_logo_silhouette(hdc, cx, cy, 42, RGB(255, 255, 255));
                         draw_app_logo_mark(hdc, cx, cy, 40);
