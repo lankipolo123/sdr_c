@@ -362,7 +362,6 @@ static int g_spectrum_unit;
 static HWND g_header_panel;
 static HWND g_sidebar_panel;
 static HWND g_ambient_panel;
-static HWND g_ambient_logo;
 static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the Spectrum plot at a Y that moves with
                                  * the grid's actual height (see
@@ -1562,54 +1561,6 @@ static HWND add_sensor_heatmap(HWND parent, int x, int y, int w, int h) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
         }
         SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)sensor_heatmap_subclass_proc);
-    }
-    return ctrl;
-}
-
-/* HelixDefender mark + signal-wave pulse, now living inside its own
- * control in g_ambient_panel (below the heatmap) instead of drawn
- * loose over the main window's dot-pattern background - the panel it
- * used to sit in front of is a real opaque child window now, so
- * anything the main window drew back there would just be covered by
- * it. Same lit-vs-faded logic as before, just centered in this
- * control's own (small) client rect. */
-static LRESULT CALLBACK ambient_logo_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_ERASEBKGND) {
-        return 1;
-    }
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC hdc;
-        RECT rc;
-        int cx, cy;
-
-        hdc = BeginPaint(hwnd, &ps);
-        GetClientRect(hwnd, &rc);
-        FillRect(hdc, &rc, g_brush_panel);
-
-        cx = (rc.left + rc.right) / 2;
-        cy = (rc.top + rc.bottom) / 2;
-        if (conn_is_connected(&g_conn) && any_channel_on()) {
-            draw_app_logo_silhouette(hdc, cx, cy, 42, RGB(255, 255, 255));
-            draw_app_logo_mark(hdc, cx, cy, 40);
-            draw_signal_waves(hdc, cx, cy, 40, g_signal_wave_phase, count_channels_on(), &rc);
-        } else {
-            draw_app_logo_faded(hdc, cx, cy, 40, 110); /* ~43% opacity */
-        }
-
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
-}
-
-static HWND add_ambient_logo(HWND parent, int x, int y, int w, int h) {
-    HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, 0);
-    if (ctrl) {
-        if (!g_panel_orig_proc) {
-            g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
-        }
-        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)ambient_logo_subclass_proc);
     }
     return ctrl;
 }
@@ -3877,9 +3828,8 @@ static void build_controls(HWND hwnd) {
      * (top-aligned with the header panels at y=6, not CONTENT_TOP). The
      * logo mark moved to its own small control below the gradient,
      * inside the same panel (see add_ambient_logo()). */
-    g_ambient_panel = add_panel(hwnd, SIG_STRIP_X, 6, 270, 460);
+    g_ambient_panel = add_panel(hwnd, SIG_STRIP_X, 6, 270, 350);
     g_sensor_heatmap = add_sensor_heatmap(g_ambient_panel, 6, 16, 258, 320);
-    g_ambient_logo = add_ambient_logo(g_ambient_panel, 6, 346, 258, 100);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4085,6 +4035,37 @@ static int log_panel_y_for(int card_h) {
     return CONTENT_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H;
 }
 
+/* Where the HelixDefender mark + signal-wave pulse draw, in the dead
+ * space right of the grid (see CARD_H_MAX's comment on why the grid
+ * itself never widens to fill it) - drawn straight onto the main
+ * window's own background in WM_ERASEBKGND, not a separate child
+ * window/panel: an earlier version used a child window there and even
+ * borderless it still read as a distinct box sitting in the
+ * background (direct feedback: "why is there a card here"), because
+ * its own fill could never quite be the SAME paint call as the
+ * surrounding dot pattern. Drawing inline after that same fill has no
+ * seam to see, because there isn't a second rect at all. Returns false
+ * (nothing to draw) when there isn't SIGNAL_AREA_MIN_W of room, using
+ * the last size relayout_for_size() actually ran for. */
+#define SIGNAL_AREA_MIN_W 100
+static bool get_signal_area_rect(RECT *out) {
+    int card_h = channel_card_height(g_last_client_h);
+    int log_y = log_panel_y_for(card_h);
+    /* Shifted right by ROW_LABEL_STRIP_W to leave room for the row
+     * labels sitting between the grid and this area - see that
+     * constant's comment. */
+    int x = GRID_RIGHT + CARD_GAP + ROW_LABEL_STRIP_W;
+    int w = g_last_client_w - SIDEBAR_X - x;
+    if (w < SIGNAL_AREA_MIN_W) {
+        return false;
+    }
+    out->left = x;
+    out->top = CONTENT_TOP;
+    out->right = x + w;
+    out->bottom = log_y + LOG_PANEL_H;
+    return true;
+}
+
 /* Recomputes the whole layout for a new client size: the header bar
  * stretches horizontally to fill the wider client area, and the 16
  * cards grow TALLER (never wider - see CARD_H_MAX's comment on why
@@ -4250,6 +4231,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         case WM_TIMER:
             if (wParam == ID_POLL_TIMER) {
                 bool signal_active;
+                RECT sig_rc;
 
                 conn_poll(&g_conn);
                 channels_poll();
@@ -4305,19 +4287,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                  * right on any active<->inactive edge (in either
                  * direction) so the switch between the dim idle icon
                  * and the full lit-up mark+arcs is immediate instead of
-                 * waiting up to SIGNAL_TICKS_PER_STEP ticks. Just the
-                 * logo control itself now (see ambient_logo_subclass_proc()),
-                 * not a loose rect on the main window's background. */
+                 * waiting up to SIGNAL_TICKS_PER_STEP ticks. Only that
+                 * one small rect is invalidated (with erase, so
+                 * WM_ERASEBKGND's draw actually reruns), not the whole
+                 * window. */
                 signal_active = conn_is_connected(&g_conn) && any_channel_on();
                 if (signal_active) {
                     g_signal_tick_counter++;
                     if (!g_signal_active_prev || g_signal_tick_counter >= SIGNAL_TICKS_PER_STEP) {
                         g_signal_tick_counter = 0;
                         g_signal_wave_phase++;
-                        InvalidateRect(g_ambient_logo, NULL, TRUE);
+                        if (get_signal_area_rect(&sig_rc)) {
+                            InvalidateRect(hwnd, &sig_rc, TRUE);
+                        }
                     }
                 } else if (g_signal_active_prev) {
-                    InvalidateRect(g_ambient_logo, NULL, TRUE);
+                    if (get_signal_area_rect(&sig_rc)) {
+                        InvalidateRect(hwnd, &sig_rc, TRUE);
+                    }
                 }
                 g_signal_active_prev = signal_active;
             }
@@ -4366,12 +4353,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
              * in its tile - no separate full-rect FillRect needed. */
             FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
 
-            /* The HelixDefender mark used to draw straight over this dot
-             * pattern here - now g_ambient_panel is a real opaque child
-             * window sitting in front of that spot, so it moved into
-             * its own control inside that panel instead (see
-             * ambient_logo_subclass_proc()); drawing it here would just
-             * be covered up and never actually shown. */
+            /* HelixDefender mark + signal-wave pulse, straight over the
+             * dot pattern just filled above - drawn on the main window's
+             * own background, never moved or touched by the Ambient
+             * Temperature panel work above it (g_ambient_panel is sized
+             * to end well above this, at y=356). Always shows the mark
+             * itself - full brightness with the pulsing arcs while
+             * actually connected and transmitting, faded to a dim idle
+             * icon otherwise. */
+            {
+                RECT sig_rc;
+                if (get_signal_area_rect(&sig_rc)) {
+                    int cx = SIG_STRIP_CONTENT_X + 130;
+                    int cy = 406;
+                    if (conn_is_connected(&g_conn) && any_channel_on()) {
+                        draw_app_logo_silhouette(hdc, cx, cy, 42, RGB(255, 255, 255));
+                        draw_app_logo_mark(hdc, cx, cy, 40);
+                        draw_signal_waves(hdc, cx, cy, 40, g_signal_wave_phase, count_channels_on(), &sig_rc);
+                    } else {
+                        draw_app_logo_faded(hdc, cx, cy, 40, 110); /* ~43% opacity */
+                    }
+                }
+            }
             return 1;
         }
 
