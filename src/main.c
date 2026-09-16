@@ -51,13 +51,13 @@
  * CONTENT_TOP is where the sidebar panels and channel grid start
  * beneath it (same 6px top margin and 8px panel-to-panel gap used
  * everywhere else). */
-#define HEADER_H     224 /* was 180 - grown to give Ambient Temperature's
-                            * heatmap real room instead of a cramped bar;
-                            * Connection & Settings and Bulk Actions just
-                            * get extra padding below their own content,
-                            * direct request rather than an oversight */
+#define HEADER_H     180 /* back to its original size - the heatmap moved
+                            * out to the dead-space strip, so this zone
+                            * only needs to fit Ambient Temperature's
+                            * commands again, same as Connection &
+                            * Settings/Bulk Actions */
 
-#define CONTENT_TOP  238 /* shifts down by the same 44px HEADER_H grew,
+#define CONTENT_TOP  194 /* shifts down by the same 12px HEADER_H grew,
                             * keeping the usual 8px gap below the panel */
 
 /* Connection & Settings and Bulk Actions pushed right, compressing the
@@ -3803,40 +3803,27 @@ static void build_controls(HWND hwnd) {
                  790 + BULK_X_SHIFT, 120, 84, 18, IDC_BULK_LEVEL_OFF_BTN);
     }
 
-    /* Ambient Temperature's OLD zone (icon+title+commands) is now
-     * ENTIRELY the heatmap - no title/icon inside it, just the 4-corner
-     * gradient, stretching right to fill the header bar's width (see
-     * relayout_for_size()) the same way Connection & Settings' panel
-     * itself already stretches on resize. Everything that used to be
-     * here - title, Port/Refresh/Connect, status/Avg, Kill Switch, the
-     * logo mark - moved out to the dead-space strip right of the row
-     * labels (the "red box" - see SIG_STRIP_X) instead. */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1023, 14, CLIENT_WIDTH - SIDEBAR_X - 1023 - 15, 195);
+    /* Ambient Temperature's commands are back in their original header
+     * zone (title, Port/Refresh/Connect, status/Avg, Kill Switch) - the
+     * heatmap moved out instead, to a vertical block in the dead-space
+     * strip right of the row labels (the "red box" - see SIG_STRIP_X),
+     * direct request/swap from the last round. */
+    add_header_icon(hwnd, 1033, 14, ICON_WAVE);
+    add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60, 100, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 90, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 88, 80, 18, IDC_KILL_RESET_BTN);
+    ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    {
-        int sx = SIG_STRIP_CONTENT_X;
-
-        add_header_icon(hwnd, sx, CONTENT_TOP + 4 + 0, ICON_WAVE);
-        add_header(hwnd, "Ambient Temperature", sx + 18, CONTENT_TOP + 4, 260, 18);
-
-        /* Port/Refresh/Connect stay on one combined row, same shape as
-         * before, just re-based on the strip's own left edge. */
-        add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, sx, CONTENT_TOP + 30, 32, 16, 0);
-        make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                      sx + 34, CONTENT_TOP + 28, 82, 140, IDC_SENSOR_PORT_COMBO));
-        add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, sx + 122, CONTENT_TOP + 29, 64, 18, IDC_SENSOR_REFRESH_BTN);
-        add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, sx + 190, CONTENT_TOP + 29, 72, 18, IDC_SENSOR_CONNECT_BTN);
-
-        add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, sx + 4, CONTENT_TOP + 54, 100, 16, IDC_SENSOR_STATUS_LBL);
-        add_pill(hwnd, "Avg -", sx + 124, CONTENT_TOP + 50, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
-
-        /* Always visible ("Kill Switch: Armed" until something trips
-         * it) - see ui_refresh_kill_switch()'s comment. Only the Reset
-         * button hides while armed, since there's nothing to reset yet. */
-        add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, sx + 8, CONTENT_TOP + 80, 190, 16, IDC_KILL_STATUS_LBL);
-        add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, sx + 204, CONTENT_TOP + 78, 80, 18, IDC_KILL_RESET_BTN);
-        ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-    }
+    /* Vertical (portrait, taller than wide) heatmap block in the strip,
+     * near the top - matches the Option 2 mockup's own proportions,
+     * scaled to the strip's actual width. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, SIG_STRIP_CONTENT_X, CONTENT_TOP + 10, 258, 320);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4092,10 +4079,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    /* Stretches right along with the header panel itself, same reason -
-     * the heatmap fills its whole zone now instead of a fixed-width
-     * block within it (see build_controls()). */
-    MoveWindow(g_sensor_heatmap, 1023, 14, client_w - SIDEBAR_X - 1023 - 15, 195, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
@@ -4386,7 +4369,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                      * here as draw_signal_waves()'s clip bounds, which is
                      * harmless to leave generous. */
                     int cx = SIG_STRIP_CONTENT_X + 130;
-                    int cy = CONTENT_TOP + 140;
+                    int cy = CONTENT_TOP + 370; /* below the now-vertical heatmap block (10 + 320 tall) */
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
                         draw_app_logo_silhouette(hdc, cx, cy, 42, RGB(255, 255, 255));
                         draw_app_logo_mark(hdc, cx, cy, 40);
