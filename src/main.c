@@ -1508,14 +1508,15 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
-        /* "BAY N <reading>" at each corner, rotated 90 (reading bottom-
-         * to-top) so it hugs the corner without eating into the bar's
-         * width - drawn right over the gradient (direct request), so
-         * every string is drawn twice: once 1px offset in near-black,
-         * then the real (white) text on top, a cheap drop-shadow that
-         * keeps it legible over both the light and dark ends of the
-         * gradient rather than picking one fixed text color. */
-        vfont = CreateFontA(-11, 0, 900, 900, FW_BOLD, FALSE, FALSE, FALSE,
+        /* "BAY N <reading>" at each corner, plain horizontal text (not
+         * rotated - direct request, the heatmap is wide/short now, not
+         * portrait, so there's no reason to stand the text on end) -
+         * drawn right over the gradient, so every string is drawn
+         * twice: once 1px offset in near-black, then the real (white)
+         * text on top, a cheap drop-shadow that keeps it legible over
+         * both the light and dark ends of the gradient rather than
+         * picking one fixed text color. */
+        vfont = CreateFontA(-11, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                              ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                              DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
         old_font = (HFONT)SelectObject(hdc, vfont ? vfont : g_font);
@@ -1523,10 +1524,10 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         for (i = 0; i < SENSOR_MAX_UNITS; i++) {
             const SensorState *st = sensor_get_state(&g_sensor, i);
             char label[24];
-            int ox, oy; /* origin - the BOTTOM of a 90-rotated string,
-                          * text runs upward from here */
+            RECT lrc;
             bool left_side = (i == 0 || i == 2);
             bool top_half = (i == 0 || i == 1);
+            UINT align;
 
             if (st->has_reading) {
                 wsprintfA(label, "BAY %d  %d.%dC", sensor_get_unit_address(&g_sensor, i),
@@ -1535,14 +1536,18 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 wsprintfA(label, "BAY %d  -", sensor_get_unit_address(&g_sensor, i));
             }
 
-            ox = left_side ? rc.left + 14 : rc.right - 14;
-            oy = top_half ? rc.top + 8 + (int)lstrlenA(label) * 8 : rc.bottom - 8;
-            if (oy > rc.bottom - 6) oy = rc.bottom - 6;
+            lrc.left = left_side ? rc.left + 10 : rc.left;
+            lrc.right = left_side ? rc.right : rc.right - 10;
+            lrc.top = top_half ? rc.top + 6 : rc.top;
+            lrc.bottom = top_half ? rc.bottom : rc.bottom - 6;
+            align = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
 
             SetTextColor(hdc, RGB(10, 10, 12));
-            TextOutA(hdc, ox + 1, oy + 1, label, lstrlenA(label));
+            OffsetRect(&lrc, 1, 1);
+            DrawTextA(hdc, label, -1, &lrc, align);
+            OffsetRect(&lrc, -1, -1);
             SetTextColor(hdc, RGB(255, 255, 255));
-            TextOutA(hdc, ox, oy, label, lstrlenA(label));
+            DrawTextA(hdc, label, -1, &lrc, align);
         }
         SelectObject(hdc, old_font);
         if (vfont) DeleteObject(vfont);
@@ -3828,7 +3833,11 @@ static void build_controls(HWND hwnd) {
      * unused strip to their right. Horizontal, right of those controls,
      * stretching to track the panel's right edge on resize instead of
      * a fixed width. */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1320, 14, CLIENT_WIDTH - SIDEBAR_X - 1320 - 15, 150);
+    /* Left edge moved 1320 -> 1190 to actually use the space the
+     * narrower commands block just freed up; right margin widened
+     * 15 -> 30 so it clears the panel's corner rivet decoration
+     * instead of running under it. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1190, 14, CLIENT_WIDTH - SIDEBAR_X - 1190 - 30, 150);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4086,7 +4095,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     /* Stretches right along with the header panel itself, filling the
      * gap that opens up next to it on resize (see build_controls()). */
-    MoveWindow(g_sensor_heatmap, 1320, 14, client_w - SIDEBAR_X - 1320 - 15, 150, FALSE);
+    MoveWindow(g_sensor_heatmap, 1190, 14, client_w - SIDEBAR_X - 1190 - 30, 150, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
