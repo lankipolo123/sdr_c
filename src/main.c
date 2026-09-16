@@ -3817,9 +3817,14 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 88, 80, 18, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
-    /* Vertical (portrait, taller than wide) heatmap block in the strip
-     * right of the row labels, near the top. */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, SIG_STRIP_CONTENT_X, CONTENT_TOP + 10, 258, 320);
+    /* The heatmap fills the empty gap that opens up inside the header
+     * panel itself once the window is wider than the design minimum -
+     * the panel stretches (see relayout_for_size()) but Ambient
+     * Temperature's own controls stay fixed-position, leaving a growing
+     * unused strip to their right. Horizontal, right of those controls,
+     * stretching to track the panel's right edge on resize instead of
+     * a fixed width. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1320, 14, CLIENT_WIDTH - SIDEBAR_X - 1320 - 15, 150);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4075,6 +4080,9 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
+    /* Stretches right along with the header panel itself, filling the
+     * gap that opens up next to it on resize (see build_controls()). */
+    MoveWindow(g_sensor_heatmap, 1320, 14, client_w - SIDEBAR_X - 1320 - 15, 150, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
