@@ -1847,8 +1847,10 @@ static int count_kill_switch_tripped(void) {
 
 /* The status label is always visible now - "Kill Switch: Armed" (green)
  * normally, switching to the red TRIPPED message once something trips
- * it. Only the Reset button hides/shows, since there's nothing to
- * reset while armed. WM_CTLCOLORSTATIC picks the label's color off the
+ * it. IDC_KILL_TRIP_BTN and IDC_KILL_RESET_BTN share one slot and swap
+ * places: the manual Trip button shows while armed (nothing to reset
+ * yet), Reset shows once something's tripped (already off, nothing left
+ * to manually trip). WM_CTLCOLORSTATIC picks the label's color off the
  * same count_kill_switch_tripped() check this uses. */
 static void ui_refresh_kill_switch(void) {
     int tripped_count = count_kill_switch_tripped();
@@ -1861,17 +1863,13 @@ static void ui_refresh_kill_switch(void) {
         return;
     }
     if (any_tripped) {
-        char text[48];
-        if (tripped_count >= MAX_CHANNELS) {
-            lstrcpynA(text, "KILL SWITCH TRIPPED - all units", (int)sizeof(text));
-        } else {
-            wsprintfA(text, "KILL SWITCH TRIPPED - %d unit%s", tripped_count, tripped_count == 1 ? "" : "s");
-        }
-        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, text);
+        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "KILL SWITCH TRIPPED");
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_SHOW);
+        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_TRIP_BTN), SW_HIDE);
     } else {
         SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "Kill Switch: Armed");
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
+        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_TRIP_BTN), SW_SHOW);
     }
     InvalidateRect(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), NULL, FALSE);
     g_kill_ui_valid = true;
@@ -1908,6 +1906,29 @@ static void check_kill_switch(void) {
         char msg[96];
         wsprintfA(msg, "KILL SWITCH TRIPPED (avg %d.%d C >= %d C) - %d channel%s forced OFF",
                   (int)avg_c, (int)(avg_c * 10) % 10, (int)KILL_SWITCH_THRESHOLD_C,
+                  newly_tripped, newly_tripped == 1 ? "" : "s");
+        log_add(msg);
+    }
+}
+
+/* Manual trip - same rack-wide effect as check_kill_switch()'s automatic
+ * trip, but user-initiated regardless of the current average reading.
+ * Lets the operator force every channel off immediately (e.g. on visual/
+ * audible confirmation of trouble) instead of waiting for the sensor
+ * average to actually cross KILL_SWITCH_THRESHOLD_C. */
+static void on_kill_switch_manual_trip(void) {
+    int i;
+    int newly_tripped = 0;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (!g_kill_switch_tripped[i]) {
+            g_kill_switch_tripped[i] = true;
+            channel_turn_output_off(i);
+            newly_tripped++;
+        }
+    }
+    if (newly_tripped > 0) {
+        char msg[64];
+        wsprintfA(msg, "Kill switch manually triggered - %d channel%s forced OFF",
                   newly_tripped, newly_tripped == 1 ? "" : "s");
         log_add(msg);
     }
@@ -3828,6 +3849,7 @@ static void build_controls(HWND hwnd) {
     add_pill(hwnd, "Avg -", 1025, 102, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1025, 130, 190, 16, IDC_KILL_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 80, 18, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 110, 18, IDC_KILL_TRIP_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
 
     /* The heatmap fills the empty gap that opens up inside the header
@@ -4425,6 +4447,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_KILL_RESET_BTN && code == BN_CLICKED) {
                 on_kill_reset_clicked();
+                return 0;
+            }
+            if (id == IDC_KILL_TRIP_BTN && code == BN_CLICKED) {
+                on_kill_switch_manual_trip();
                 return 0;
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {

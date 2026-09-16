@@ -17,6 +17,10 @@
 #define IDC_KILL_STATUS_LBL      1015
 #define IDC_KILL_RESET_BTN       1016
 #define IDC_SENSOR_REFRESH_BTN   1017
+/* Manual trip - same slot as IDC_KILL_RESET_BTN, mutually exclusive
+ * visibility (armed shows this, tripped shows Reset instead) - see
+ * ui_refresh_kill_switch() in main.c. */
+#define IDC_KILL_TRIP_BTN        1065
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
