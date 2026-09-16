@@ -383,7 +383,7 @@ static HWND g_card_mode_lbl[MAX_CHANNELS]; /* muted mode name next to "Unit N",
  * could leave the overlay unpainted, exposing the native COMBOBOX's own
  * white arrow/bevel underneath instead of the dark themed one. */
 static HWND g_card_combo_overlays[MAX_CHANNELS][5];
-static HWND g_sensor_chip[SENSOR_MAX_UNITS];
+static HWND g_sensor_heatmap;
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
 static int g_last_client_w = -1; /* last size relayout_for_size() actually
@@ -1429,105 +1429,111 @@ static HWND add_pill(HWND parent, LPCSTR text, int x, int y, int w, int h, int i
     return ctrl;
 }
 
-/* Small rounded "mini card" for one sensor unit's address + reading -
- * reads live off g_sensor each paint (unit_index stashed in
- * GWLP_USERDATA at creation) rather than being fed text, same pattern
- * as the other self-drawing gauges above. Muted "-" when that unit
- * doesn't have a reading yet. */
-/* No more chip/badge box - just the address and reading as plain text,
- * with a thin line underneath standing in for an "is this address
- * actually reporting" indicator: dim/muted (near-invisible against the
- * panel) until that unit has a real reading, then lit in the same
- * color as the reading itself. */
-/* Real hierarchy instead of two same-weight lines: the address is a
- * small muted label (secondary - it's fixed wiring, rarely what you're
- * scanning for), the reading is the bold, bigger, primary number - the
- * thing actually worth looking at. Same transparent/no-box, line-lights-
- * when-read approach as before, just with weight put where it belongs. */
-static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+/* Horizontal heatmap across the 4 physical sensor bays: BAY 1's color
+ * on the left blending through BAY 2/3 to BAY 4's on the right, each
+ * stop taken from the SAME temp_band_color() used everywhere else in
+ * this app (the per-channel gauges, the Avg pill) - not a separate
+ * invented color scale, so a reading means the same color here as it
+ * does anywhere else in the UI. It's an honest "known points, blended
+ * for readability" gradient, not a real spatial scan (see
+ * SENSOR_MAX_UNITS' comment - only 4 discrete sensors exist, no x/y
+ * layout data on them at all), so each real reading is also called
+ * out in text under its own tick, exactly like the chip grid this
+ * replaced. Reads live off g_sensor each paint, same pattern as the
+ * gauges and the old per-unit chips. */
+static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
     }
     if (msg == WM_PAINT) {
         PAINTSTRUCT ps;
         HDC hdc;
-        RECT rc, addr_rc, val_rc, line_rc;
-        int unit_index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-        const SensorState *st = sensor_get_state(&g_sensor, unit_index);
-        char addr_text[16];
-        char val_text[16];
-        HBRUSH line_brush;
+        RECT rc;
+        COLORREF stop[SENSOR_MAX_UNITS];
         HFONT old_font;
-        COLORREF val_color, line_color;
+        HPEN pen, old_pen;
+        int i;
+        int bar_top, bar_bottom;
+        int seg_w;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, g_brush_panel); /* same "clears old glyph
+                                              * pixels" reasoning as the
+                                              * chip grid this replaced */
 
-        /* Real fill, not transparent - this control sits well inside the
-         * Amplifier Temperature panel, nowhere near its rounded corners,
-         * so a flat g_brush_panel fill looks identical to "background
-         * bleeds through" here, but actually clears old glyph pixels.
-         * Without this, WM_ERASEBKGND returning 1 (and the caller's
-         * InvalidateRect(..., FALSE) skipping erase too) meant a changed
-         * reading's new digits painted directly over the old ones -
-         * "27.0" -> "27.1" left a smeared double-exposure of both,
-         * confirmed by a real-hardware screenshot. DT_NOCLIP on the value
-         * text below means glyphs can extend past its own rect, so this
-         * clears the whole control, not just the text sub-rects. */
-        FillRect(hdc, &rc, g_brush_panel);
+        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+            const SensorState *st = sensor_get_state(&g_sensor, i);
+            stop[i] = st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED;
+        }
+
+        /* "BAY N" row on top, the gradient bar in the middle, each
+         * reading's own number underneath its tick - same 3-tier
+         * layout the chip grid used (address / bar / value), just laid
+         * out horizontally instead of as 4 separate boxes. */
+        seg_w = (rc.right - rc.left) / (SENSOR_MAX_UNITS - 1);
+        bar_top = rc.top + 14;
+        bar_bottom = bar_top + 16;
+
+        old_font = (HFONT)SelectObject(hdc, g_font);
         SetBkMode(hdc, TRANSPARENT);
-
-        wsprintfA(addr_text, "BAY %d", sensor_get_unit_address(&g_sensor, unit_index));
-        addr_rc = rc;
-        addr_rc.top += 3;
-        addr_rc.bottom = addr_rc.top + 12;
-        old_font = (HFONT)SelectObject(hdc, g_font);
-        SetTextColor(hdc, COLOR_APP_MUTED);
-        DrawTextA(hdc, addr_text, -1, &addr_rc, DT_CENTER | DT_SINGLELINE);
-        SelectObject(hdc, old_font);
-
-        /* Value box needs real height for g_header_font (bold, -13) -
-         * the previous 10px box was shorter than the font's own line
-         * height, so DrawTextA's default clipping (no DT_NOCLIP) cut
-         * the bottom off every glyph, including the decimal point -
-         * "27.0" rendered with no visible "." at all. DT_VCENTER now
-         * too, so it's not relying on exact pixel accounting to look
-         * right. */
-        val_rc = rc;
-        val_rc.top = addr_rc.bottom + 1;
-        val_rc.bottom = rc.bottom - 6;
-        if (st->has_reading) {
-            wsprintfA(val_text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
-            val_color = temp_band_color(st->temperature_c);
-            line_color = val_color;
-        } else {
-            lstrcpynA(val_text, "-", (int)sizeof(val_text));
-            val_color = COLOR_APP_MUTED;
-            line_color = COLOR_APP_PANEL_BORDER; /* "off" - dim, barely there */
+        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+            char label[16];
+            RECT lrc;
+            int cx = (i == SENSOR_MAX_UNITS - 1) ? rc.right : rc.left + i * seg_w;
+            wsprintfA(label, "BAY %d", sensor_get_unit_address(&g_sensor, i));
+            lrc.left = cx - seg_w / 2;
+            lrc.right = cx + seg_w / 2;
+            if (lrc.left < rc.left) lrc.left = rc.left;
+            if (lrc.right > rc.right) lrc.right = rc.right;
+            lrc.top = rc.top;
+            lrc.bottom = bar_top - 1;
+            SetTextColor(hdc, COLOR_APP_MUTED);
+            DrawTextA(hdc, label, -1, &lrc, DT_CENTER | DT_SINGLELINE);
         }
-        /* Regular weight, not g_header_font (bold) - looked cramped/
-         * smudgy on real hardware ClearType at this size, even though
-         * it looked fine in Wine testing. Hierarchy still comes from
-         * color + the line indicator, doesn't need the bold too. */
-        old_font = (HFONT)SelectObject(hdc, g_font);
-        SetTextColor(hdc, val_color);
-        DrawTextA(hdc, val_text, -1, &val_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP);
-        SelectObject(hdc, old_font);
 
-        {
-            int inset = (rc.right - rc.left) / 4; /* short, centered - not
-                                                     * edge-to-edge, but
-                                                     * wider than a bare
-                                                     * accent tick */
-            line_rc.left = rc.left + inset;
-            line_rc.right = rc.right - inset;
-            line_rc.bottom = rc.bottom - 1;
-            line_rc.top = line_rc.bottom - 2; /* 2px lit, reads as a real
-                                                 * indicator, not a hairline */
+        for (i = 0; i < SENSOR_MAX_UNITS - 1; i++) {
+            RECT seg;
+            seg.top = bar_top;
+            seg.bottom = bar_bottom;
+            seg.left = rc.left + i * seg_w;
+            seg.right = (i == SENSOR_MAX_UNITS - 2) ? rc.right : seg.left + seg_w;
+            gradient_fill_rect(hdc, seg, stop[i], stop[i + 1], false);
         }
-        line_brush = CreateSolidBrush(line_color);
-        FillRect(hdc, &line_rc, line_brush);
-        DeleteObject(line_brush);
+        pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+        old_pen = (HPEN)SelectObject(hdc, pen);
+        SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        Rectangle(hdc, rc.left, bar_top, rc.right, bar_bottom);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+
+        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+            const SensorState *st = sensor_get_state(&g_sensor, i);
+            char val_text[16];
+            RECT vrc;
+            int cx = (i == SENSOR_MAX_UNITS - 1) ? rc.right : rc.left + i * seg_w;
+            HPEN tick_pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            HPEN old_tick_pen = (HPEN)SelectObject(hdc, tick_pen);
+            MoveToEx(hdc, cx, bar_bottom, NULL);
+            LineTo(hdc, cx, bar_bottom + 3);
+            SelectObject(hdc, old_tick_pen);
+            DeleteObject(tick_pen);
+
+            if (st->has_reading) {
+                wsprintfA(val_text, "%d.%d C", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
+            } else {
+                lstrcpynA(val_text, "-", (int)sizeof(val_text));
+            }
+            vrc.left = cx - seg_w / 2;
+            vrc.right = cx + seg_w / 2;
+            if (vrc.left < rc.left) vrc.left = rc.left;
+            if (vrc.right > rc.right) vrc.right = rc.right;
+            vrc.top = bar_bottom + 4;
+            vrc.bottom = rc.bottom;
+            SetTextColor(hdc, st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED);
+            DrawTextA(hdc, val_text, -1, &vrc, DT_CENTER | DT_SINGLELINE | DT_NOCLIP);
+        }
+        SelectObject(hdc, old_font);
 
         EndPaint(hwnd, &ps);
         return 0;
@@ -1535,14 +1541,13 @@ static LRESULT CALLBACK sensor_chip_subclass_proc(HWND hwnd, UINT msg, WPARAM wP
     return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
 }
 
-static HWND add_sensor_chip(HWND parent, int x, int y, int w, int h, int unit_index) {
+static HWND add_sensor_heatmap(HWND parent, int x, int y, int w, int h) {
     HWND ctrl = add_ctrl(parent, "STATIC", NULL, SS_LEFT, x, y, w, h, 0);
     if (ctrl) {
         if (!g_panel_orig_proc) {
             g_panel_orig_proc = (WNDPROC)GetWindowLongPtrA(ctrl, GWLP_WNDPROC);
         }
-        SetWindowLongPtrA(ctrl, GWLP_USERDATA, (LONG_PTR)unit_index);
-        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)sensor_chip_subclass_proc);
+        SetWindowLongPtrA(ctrl, GWLP_WNDPROC, (LONG_PTR)sensor_heatmap_subclass_proc);
     }
     return ctrl;
 }
@@ -1791,15 +1796,10 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
 
-    /* Each unit's mini card reads live off g_sensor when it paints (see
-     * sensor_chip_subclass_proc()) - just needs a repaint kicked off
+    /* The heatmap reads live off g_sensor when it paints (see
+     * sensor_heatmap_subclass_proc()) - just needs a repaint kicked off
      * here, not text pushed into it. */
-    {
-        int u;
-        for (u = 0; u < SENSOR_MAX_UNITS; u++) {
-            InvalidateRect(g_sensor_chip[u], NULL, FALSE);
-        }
-    }
+    InvalidateRect(g_sensor_heatmap, NULL, FALSE);
 
     g_sensor_ui_valid = true;
     g_sensor_ui_connected = connected;
@@ -3800,46 +3800,24 @@ static void build_controls(HWND hwnd) {
      * two cards, working against making it smaller. */
     add_header_icon(hwnd, 1033, 14, ICON_WAVE);
     add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 82, 140, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 35, 64, 18, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 35, 72, 18, IDC_SENSOR_CONNECT_BTN);
-    /* 4 physical sensors scanning the rack area, each at its own
-     * address (see UNIT_TEMP_ADDR) - not one per RF channel. Status and
-     * the rack-wide average (across whichever of the 4 currently have a
-     * reading) are one aligned row of two gradient pills instead of two
-     * stacked plain-text lines - width matches the chip grid below so
-     * the whole column reads as one aligned block. */
+    /* The heatmap sits right under the title, in the zone the BAY chip
+     * grid used to occupy - see sensor_heatmap_subclass_proc()'s
+     * comment. Port/Refresh/Connect and the status/Avg row move down
+     * into the space that frees up below it (direct request: the
+     * commands don't need to be the first thing under the title). */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1026, 34, 258, 48);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 88, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 86, 82, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 87, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 87, 72, 18, IDC_SENSOR_CONNECT_BTN);
     /* Plain text, not a pill - only the temperature reading gets that
      * treatment. Still on the same row/aligned with the Avg pill next
      * to it, just left-aligned status text like every other connection
      * status label in this app (Connection & Settings' own status,
      * left as-is, is the same style). Row centered as a group within
      * the card zone, not flush left/right against its edges. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 60, 100, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1149, 56, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
-    /* Address + reading per physical sensor unit, 2 columns x 2 rows
-     * (was 3x2 for 6 units - see SENSOR_MAX_UNITS) - plain text (no
-     * box), see sensor_chip_subclass_proc(). Chip height trimmed 38 ->
-     * 32: the value text draws with DT_NOCLIP now (see
-     * sensor_chip_subclass_proc), which is what actually fixed the old
-     * decimal-point clipping bug, not the taller box - DT_NOCLIP draws
-     * outside a short rect instead of cutting the glyphs off, so the
-     * box itself can shrink safely. Chip width widened 84 -> 126 (gap
-     * 4 -> 6) so 2 columns still fill the same ~260px span the old 3-
-     * column grid used, keeping this aligned with the Avg pill above it
-     * instead of leaving a dead gap on the right. Centered within the
-     * zone (start x=1026, not flush against 1023). */
-    {
-        int chip;
-        for (chip = 0; chip < SENSOR_MAX_UNITS; chip++) {
-            int col = chip % 2;
-            int row = chip / 2;
-            int cx = 1026 + col * (126 + 6);
-            int cy = 88 + row * (32 + 4);
-            g_sensor_chip[chip] = add_sensor_chip(hwnd, cx, cy, 126, 32, chip);
-        }
-    }
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 112, 100, 16, IDC_SENSOR_STATUS_LBL);
+    add_pill(hwnd, "Avg -", 1149, 108, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Always visible ("Kill Switch: Armed" until something trips it) -
      * see ui_refresh_kill_switch()'s comment. Only the Reset button
      * hides while armed, since there's nothing to reset yet. */
