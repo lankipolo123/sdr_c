@@ -1321,14 +1321,18 @@ static void build_dot_pattern_brush(void) {
     g_brush_dot_pattern = CreatePatternBrush(g_dot_pattern_bmp);
 }
 
-/* Which of the 5 confirmed bands a reading falls in - used to color the
- * position marker and the numeric readout beside the gauge, matching the
- * gradient it sits on. */
+/* Which of the 6 confirmed bands a reading falls in - real safe/caution/
+ * danger tiers for this hardware (direct request, not a generic spec):
+ * <10 white, 10-15 green, 15-20 blue, 20-25 orange, 25-35 darker orange,
+ * 35+ red. Shared by the Avg pill's marker/readout and the sensor
+ * heatmap (see sensor_heatmap_subclass_proc) - one reference, so a
+ * reading means the same color everywhere it shows up in the UI. */
 static COLORREF temp_band_color(float temp_c) {
-    if (temp_c < 20.0f) return RGB(255, 255, 255);
-    if (temp_c < 40.0f) return COLOR_APP_CONNECTED;
-    if (temp_c < 56.0f) return RGB(58, 133, 224);
-    if (temp_c < 66.0f) return RGB(224, 146, 34);
+    if (temp_c < 10.0f) return RGB(255, 255, 255);
+    if (temp_c < 15.0f) return COLOR_APP_CONNECTED;
+    if (temp_c < 20.0f) return RGB(58, 133, 224);
+    if (temp_c < 25.0f) return RGB(224, 146, 34);
+    if (temp_c < 35.0f) return RGB(196, 110, 24);
     return COLOR_APP_DISCONNECTED;
 }
 
@@ -1440,49 +1444,18 @@ static HWND add_pill(HWND parent, LPCSTR text, int x, int y, int w, int h, int i
     return ctrl;
 }
 
-/* Ironbow-style thermal palette (black -> purple -> red -> orange ->
- * yellow -> white) - the same look real thermal cameras use, deliberately
- * NOT temp_band_color()'s flat 5-band colors (those collapse 4 close-
- * together real readings into one solid color, which reads as broken,
- * not as a scan). t is 0..1 (clamped), not an absolute temperature -
- * the heatmap normalizes to the current spread of readings itself (see
- * sensor_heatmap_subclass_proc) so a 1C difference between bays still
- * shows up as a visible color shift instead of vanishing into one band. */
-static COLORREF thermal_palette_color(float t) {
-    static const COLORREF stops[] = {
-        RGB(8, 8, 20), RGB(60, 10, 110), RGB(180, 30, 60),
-        RGB(230, 110, 20), RGB(245, 210, 40), RGB(255, 255, 255)
-    };
-    const int n = (int)(sizeof(stops) / sizeof(stops[0]));
-    float scaled;
-    int idx;
-    float frac;
-
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
-
-    scaled = t * (float)(n - 1);
-    idx = (int)scaled;
-    if (idx >= n - 1) idx = n - 2;
-    frac = scaled - (float)idx;
-
-    return RGB(
-        GetRValue(stops[idx]) + (BYTE)((GetRValue(stops[idx + 1]) - GetRValue(stops[idx])) * frac),
-        GetGValue(stops[idx]) + (BYTE)((GetGValue(stops[idx + 1]) - GetGValue(stops[idx])) * frac),
-        GetBValue(stops[idx]) + (BYTE)((GetBValue(stops[idx + 1]) - GetBValue(stops[idx])) * frac));
-}
-
 /* Horizontal heatmap across the 4 physical sensor bays: BAY 1's color
- * on the left blending through BAY 2/3 to BAY 4's on the right, using
- * thermal_palette_color() auto-scaled to the current min/max across the
- * 4 readings (a fixed span floor keeps a near-identical set of readings
- * from blowing up into full-palette noise). It's an honest "known
- * points, blended for readability" gradient, not a real spatial scan
- * (see SENSOR_MAX_UNITS' comment - only 4 discrete sensors exist, no
- * x/y layout data on them at all), so each real reading is also called
- * out in text under its own tick. Sized generously (see HEADER_H) -
- * direct request after an earlier cramped version. Reads live off
- * g_sensor each paint, same pattern as the gauges. */
+ * on the left blending through BAY 2/3 to BAY 4's on the right, each
+ * stop taken from the SAME temp_band_color() used everywhere else in
+ * this app (the Avg pill) - the real safe/caution/danger tiers for
+ * this hardware, not a separate invented scale, so a reading means the
+ * same color here as it does anywhere else in the UI. It's an honest
+ * "known points, blended for readability" gradient, not a real spatial
+ * scan (see SENSOR_MAX_UNITS' comment - only 4 discrete sensors exist,
+ * no x/y layout data on them at all), so each real reading is also
+ * called out in text under its own tick. Sized generously (see
+ * HEADER_H) - direct request after an earlier cramped version. Reads
+ * live off g_sensor each paint, same pattern as the gauges. */
 static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -1500,29 +1473,9 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
-        {
-            float lo = 0.0f, hi = 0.0f;
-            bool any_reading = false;
-
-            for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-                const SensorState *st = sensor_get_state(&g_sensor, i);
-                if (!st->has_reading) continue;
-                if (!any_reading || st->temperature_c < lo) lo = st->temperature_c;
-                if (!any_reading || st->temperature_c > hi) hi = st->temperature_c;
-                any_reading = true;
-            }
-            if (hi - lo < 2.0f) {
-                float mid = (hi + lo) / 2.0f;
-                lo = mid - 1.0f;
-                hi = mid + 1.0f;
-            }
-
-            for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-                const SensorState *st = sensor_get_state(&g_sensor, i);
-                corner[i] = st->has_reading
-                    ? thermal_palette_color((st->temperature_c - lo) / (hi - lo))
-                    : COLOR_APP_MUTED;
-            }
+        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+            const SensorState *st = sensor_get_state(&g_sensor, i);
+            corner[i] = st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED;
         }
 
         /* Bilinear blend across all 4 corners at once, not a left-to-
