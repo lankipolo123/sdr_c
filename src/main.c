@@ -30,7 +30,14 @@
  * area was already marginal at this exact size before that, sub-
  * SIGNAL_AREA_MIN_W and so not drawn at all - unchanged; the row
  * labels are the part that actually needs to never be clipped). */
-#define CLIENT_WIDTH  1403
+/* Widened 1403 -> 1660 so the dead-space strip right of the row labels
+ * (get_signal_area_rect()) always has room for the Ambient Temperature
+ * heatmap + its moved controls (see build_controls()) even at the
+ * window's minimum/design size - that space used to be free to be too
+ * narrow to draw into (SIGNAL_AREA_MIN_W just skipped it), which was
+ * fine for the purely-decorative logo mark it held before, but not
+ * once real functional controls live there. */
+#define CLIENT_WIDTH  1660
 #define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
@@ -209,6 +216,16 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * character per line like the labels below it) and clips inside a
  * box that narrow. Centered over the label column below it. */
 #define ROW_LABEL_HEADING_W 44
+
+/* Left edge of the dead-space strip right of the row labels (same
+ * anchor get_signal_area_rect() uses) - the Ambient Temperature
+ * heatmap, its moved Port/Refresh/Connect/status/Avg controls, and the
+ * HelixDefender logo mark all anchor off this, a few px of padding in
+ * from the row labels. Fixed, not dependent on window size - these
+ * controls don't need to reflow on resize, unlike the row labels
+ * themselves (see relayout_for_size()). */
+#define SIG_STRIP_X (GRID_RIGHT + CARD_GAP + ROW_LABEL_STRIP_W)
+#define SIG_STRIP_CONTENT_X (SIG_STRIP_X + 6)
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 360
@@ -3798,41 +3815,47 @@ static void build_controls(HWND hwnd) {
      * stay on one combined row here (unlike Connection & Settings'
      * split rows) - splitting them would make this the taller of the
      * two cards, working against making it smaller. */
+    /* Ambient Temperature: only the title and the always-visible Kill
+     * Switch status stay in this header zone now. Port/Refresh/Connect,
+     * the status/Avg row, and the heatmap itself all moved out to the
+     * dead-space strip right of the grid (see the SIG_STRIP_X block
+     * below) - direct request, freeing up most of this zone. */
     add_header_icon(hwnd, 1033, 14, ICON_WAVE);
     add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
-    /* The heatmap sits right under the title, in the zone the BAY chip
-     * grid used to occupy - see sensor_heatmap_subclass_proc()'s
-     * comment. Port/Refresh/Connect and the status/Avg row move down
-     * into the space that frees up below it (direct request: the
-     * commands don't need to be the first thing under the title). */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1026, 34, 258, 48);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 88, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 86, 82, 140, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1147, 87, 64, 18, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1215, 87, 72, 18, IDC_SENSOR_CONNECT_BTN);
-    /* Plain text, not a pill - only the temperature reading gets that
-     * treatment. Still on the same row/aligned with the Avg pill next
-     * to it, just left-aligned status text like every other connection
-     * status label in this app (Connection & Settings' own status,
-     * left as-is, is the same style). Row centered as a group within
-     * the card zone, not flush left/right against its edges. */
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1029, 112, 100, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1149, 108, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Always visible ("Kill Switch: Armed" until something trips it) -
      * see ui_refresh_kill_switch()'s comment. Only the Reset button
-     * hides while armed, since there's nothing to reset yet. */
-    /* y=157/155 - the old y=174/172 was left over from when this line
-     * was hidden almost all the time (only shown on an actual trip),
-     * so nobody noticed it sat 10-14px below the panel's own visible
-     * border (HEADER_H=180, but the real border draws at
-     * HEADER_H-PANEL_SHADOW_PX=175 - see panel_subclass_proc). Now that
-     * it's always visible, that overflow read as the text being cut
-     * off by the border. Moved up to fit inside it, right below the
-     * BAY sensor chip grid (2 rows starting y=88, each 32 tall with a
-     * 4px gap - bottom lands at 156). */
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 157, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 155, 80, 18, IDC_KILL_RESET_BTN);
+     * hides while armed, since there's nothing to reset yet. Moved up
+     * to y=40, right under the title - nothing else left in this zone
+     * to sit below. */
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1033, 40, 190, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1229, 38, 80, 18, IDC_KILL_RESET_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
+
+    /* The heatmap + its Port/Refresh/Connect/status/Avg controls, moved
+     * out of the Ambient Temperature header zone into the dead-space
+     * strip right of the row labels - putting real, always-useful
+     * controls into space that used to hold only the decorative logo
+     * mark (still drawn here too, compacted to the top alongside these
+     * instead of centered alone - see the WM_ERASEBKGND case). Offsets
+     * below are carried over unchanged from this block's old position
+     * in the header zone, just re-based on SIG_STRIP_CONTENT_X. */
+    {
+        int sx = SIG_STRIP_CONTENT_X;
+        int sy = CONTENT_TOP + 36; /* leaves room above for the compacted logo mark */
+
+        g_sensor_heatmap = add_sensor_heatmap(hwnd, sx + 1, sy, 258, 48);
+        add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, sx, sy + 54, 32, 16, 0);
+        make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
+                                      sx + 34, sy + 52, 82, 140, IDC_SENSOR_PORT_COMBO));
+        add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, sx + 122, sy + 53, 64, 18, IDC_SENSOR_REFRESH_BTN);
+        add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, sx + 190, sy + 53, 72, 18, IDC_SENSOR_CONNECT_BTN);
+        /* Plain text, not a pill - only the temperature reading gets that
+         * treatment. Still on the same row/aligned with the Avg pill next
+         * to it, just left-aligned status text like every other connection
+         * status label in this app. */
+        add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, sx + 4, sy + 78, 100, 16, IDC_SENSOR_STATUS_LBL);
+        add_pill(hwnd, "Avg -", sx + 124, sy + 74, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
+    }
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4368,21 +4391,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             {
                 RECT sig_rc;
                 if (get_signal_area_rect(&sig_rc)) {
-                    /* Direct request: a little smaller, a little to the
-                     * right of where it used to sit - the rightward part
-                     * comes from get_signal_area_rect() itself now
-                     * starting ROW_LABEL_STRIP_W further right; this
-                     * 100->80 scale is the "smaller" part (silhouette/
-                     * waves scaled down to match, same ~6% halo ratio
-                     * as before). */
-                    int cx = (sig_rc.left + sig_rc.right) / 2;
-                    int cy = sig_rc.top + (sig_rc.bottom - sig_rc.top) * 3 / 5;
+                    /* Compacted to a small icon at the top of the strip,
+                     * centered over the heatmap below it, instead of one
+                     * large mark centered in the whole (now much taller)
+                     * dead-space rect - direct request once real controls
+                     * moved into this strip too (see SIG_STRIP_X and
+                     * build_controls()): the mark keeps its spot, just
+                     * sized to share the space instead of owning all of
+                     * it. sig_rc itself is unchanged (still the full
+                     * strip) - only used here as draw_signal_waves()'s
+                     * clip bounds, which is harmless to leave generous. */
+                    int cx = SIG_STRIP_CONTENT_X + 130;
+                    int cy = CONTENT_TOP + 16;
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
-                        draw_app_logo_silhouette(hdc, cx, cy, 85, RGB(255, 255, 255));
-                        draw_app_logo_mark(hdc, cx, cy, 80);
-                        draw_signal_waves(hdc, cx, cy, 80, g_signal_wave_phase, count_channels_on(), &sig_rc);
+                        draw_app_logo_silhouette(hdc, cx, cy, 36, RGB(255, 255, 255));
+                        draw_app_logo_mark(hdc, cx, cy, 34);
+                        draw_signal_waves(hdc, cx, cy, 34, g_signal_wave_phase, count_channels_on(), &sig_rc);
                     } else {
-                        draw_app_logo_faded(hdc, cx, cy, 80, 110); /* ~43% opacity */
+                        draw_app_logo_faded(hdc, cx, cy, 34, 110); /* ~43% opacity */
                     }
                 }
             }
