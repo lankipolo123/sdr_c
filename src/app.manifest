@@ -35,24 +35,4 @@
       <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}" />
     </application>
   </compatibility>
-  <!-- No DPI-awareness was declared here before, which makes Windows
-       treat this as a DPI-unaware app: on any HiDPI display it
-       bitmap-stretches the whole rendered window instead of letting it
-       draw at native resolution - hits hardest on the smallest text
-       (the 14px per-channel STANDBY/SENDING status line), which is
-       exactly what got reported as unreadable when maximized. This
-       app does its own resize-based layout (relayout_for_size() in
-       main.c) but no DPI-based rescaling, so per-monitor-v2 is
-       correct: Windows stops stretching and the app renders its fixed
-       pixel layout crisply, just physically smaller on a scaled
-       display - the user can resize the window bigger, which the
-       existing layout code already handles. dpiAware (the older,
-       system-wide-only flag) stays alongside it as the fallback for
-       Windows 7/8, which don't understand per-monitor-v2. -->
-  <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-    <asmv3:windowsSettings xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
-      <dpiAware>true/pm</dpiAware>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-    </asmv3:windowsSettings>
-  </asmv3:application>
 </assembly>
