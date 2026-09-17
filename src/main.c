@@ -1624,7 +1624,22 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             static const struct { int radius_pct; BYTE alpha; } rings[] = {
                 { 100, 22 }, { 78, 26 }, { 58, 32 }, { 40, 42 }, { 24, 56 }, { 12, 72 }
             };
-            int blob_radius = (blend_rc.bottom - blend_rc.top) * 11 / 10;
+            int blend_w = blend_rc.right - blend_rc.left;
+            int blend_h = blend_rc.bottom - blend_rc.top;
+            /* Bounded by the SMALLER of width/height (not height alone) -
+             * a panel narrower than it is tall (small window, or the
+             * heatmap's width shrinks with the window while its height
+             * stays fixed - see add_sensor_heatmap()) used to get a
+             * radius sized for the height alone, wildly oversized for
+             * the actual width. That, combined with SelectClipRgn below
+             * only replacing the clip instead of intersecting it with
+             * panel_rgn, let the glow visibly spill out past the
+             * rounded panel edge into whatever sat next to it - both
+             * fixed here: a sane bound plus a real intersection via
+             * ExtSelectClipRgn so a blob's circle can never paint
+             * outside the panel's own rounded bounds, however large its
+             * radius is computed to be. */
+            int blob_radius = (blend_w < blend_h ? blend_w : blend_h) * 7 / 10;
             int corner_x[SENSOR_MAX_UNITS] = { blend_rc.left, blend_rc.right, blend_rc.left, blend_rc.right };
             int corner_y[SENSOR_MAX_UNITS] = { blend_rc.top, blend_rc.top, blend_rc.bottom, blend_rc.bottom };
             int c, ri;
@@ -1636,12 +1651,13 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                     HRGN blob_rgn = CreateEllipticRgn(corner_x[c] - r, corner_y[c] - r, corner_x[c] + r, corner_y[c] + r);
                     bounds.left = corner_x[c] - r; bounds.top = corner_y[c] - r;
                     bounds.right = corner_x[c] + r; bounds.bottom = corner_y[c] + r;
-                    SelectClipRgn(hdc, blob_rgn);
-                    alpha_fill_rect(hdc, bounds, corner[c], rings[ri].alpha);
                     SelectClipRgn(hdc, panel_rgn);
+                    ExtSelectClipRgn(hdc, blob_rgn, RGN_AND);
+                    alpha_fill_rect(hdc, bounds, corner[c], rings[ri].alpha);
                     DeleteObject(blob_rgn);
                 }
             }
+            SelectClipRgn(hdc, panel_rgn);
         }
 
         /* Legend strip: the reserved bottom band, filled with the panel
