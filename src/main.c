@@ -34,7 +34,7 @@
  * (get_signal_area_rect()) always has room for the Ambient Temperature
  * heatmap + its moved controls (see build_controls()) even at the
  * window's minimum/design size. */
-#define CLIENT_WIDTH  1660
+#define CLIENT_WIDTH  1804 /* was 1660 - +144 (4 * CARD_W's own +36) to keep pace with the wider grid */
 #define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
@@ -162,8 +162,11 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * for why). CARD_H sizes to fit the level gauge/tick-label column now
  * - the bottom-row Bandwidth/Address statics that used to extend it
  * are gone too, removed at the same time as the temperature/humidity
- * readouts before them. */
-#define CARD_W 224
+ * readouts before them.
+ * Widened again 224 -> 260 - direct request for more width. CLIENT_WIDTH
+ * grows by 4x this delta (one per column) so GRID_RIGHT-anchored things
+ * (row labels, signal-wave strip) keep the same margin they had before. */
+#define CARD_W 260
 #define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
 #define GRID_LEFT 380
@@ -929,6 +932,7 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         HPEN pen, old_pen;
         int index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
         bool selected = (index >= 0 && index < MAX_CHANNELS) && g_channel_selected[index];
+        bool on = (index >= 0 && index < MAX_CHANNELS) && channels_get(index)->output_on;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -942,13 +946,18 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         DeleteObject(pen);
 
         /* Plain fill with no outline normally (NULL_PEN, not a same-
-         * color pen, so RoundRect doesn't draw an edge at all) - a
-         * selected card gets a real accent-colored stroke instead, the
-         * only visual cue for "this card is in the Bulk Actions
-         * selection". */
+         * color pen, so RoundRect doesn't draw an edge at all). A
+         * selected card gets an accent-colored stroke (Bulk Actions
+         * selection, takes priority since it's the user's own deliberate
+         * pick); otherwise a channel that's actually ON gets a green
+         * stroke instead, direct request - the ON button alone lighting
+         * up wasn't enough of a signal at a glance across all 16 cards. */
         SelectObject(hdc, g_brush_panel);
         if (selected) {
             pen = CreatePen(PS_SOLID, 2, COLOR_APP_HEADER);
+            old_pen = (HPEN)SelectObject(hdc, pen);
+        } else if (on) {
+            pen = CreatePen(PS_SOLID, 2, COLOR_APP_CONNECTED);
             old_pen = (HPEN)SelectObject(hdc, pen);
         } else {
             pen = NULL;
