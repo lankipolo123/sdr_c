@@ -1545,7 +1545,6 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         int i;
         float lo = 0.0f, hi = 0.0f;
         RECT blend_rc;
-        bool all_uniform;
         static const int panel_radius = 14;
         static const int legend_h = 22;
 
@@ -1554,21 +1553,13 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
 
         {
             bool any_reading = false;
-            int reading_count = 0;
-
             for (i = 0; i < SENSOR_MAX_UNITS; i++) {
                 const SensorState *st = sensor_get_state(&g_sensor, i);
                 if (!st->has_reading) continue;
                 if (!any_reading || st->temperature_c < lo) lo = st->temperature_c;
                 if (!any_reading || st->temperature_c > hi) hi = st->temperature_c;
                 any_reading = true;
-                reading_count++;
             }
-            /* True uniformity (all 4 bays actually agree, not just close
-             * enough to share a band) is checked BEFORE the span-floor
-             * stretch below, off the real spread - not the stretched
-             * one, which always claims a 2C span regardless. */
-            all_uniform = (reading_count == SENSOR_MAX_UNITS) && (hi - lo < 0.3f);
 
             if (hi - lo < 2.0f) {
                 float mid = (hi + lo) / 2.0f;
@@ -1719,51 +1710,6 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, panel_radius, panel_radius);
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
-
-        /* "Uniform" badge, top-center - only when all 4 bays genuinely
-         * agree (checked above, before the span-floor stretch), so a
-         * flat-colored scan reads as "confirmed uniform" instead of
-         * looking broken/frozen. */
-        if (all_uniform) {
-            RECT badge = { 0, 0, 0, 0 };
-            HFONT badge_font;
-            SIZE sz;
-            HFONT old_badge_font;
-            const char *text = "UNIFORM";
-
-            badge_font = CreateFontA(-9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                                      ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                      DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
-            old_badge_font = (HFONT)SelectObject(hdc, badge_font ? badge_font : g_font);
-            GetTextExtentPoint32A(hdc, text, (int)lstrlenA(text), &sz);
-
-            badge.left = (rc.left + rc.right) / 2 - (sz.cx / 2) - 8;
-            badge.right = (rc.left + rc.right) / 2 + (sz.cx / 2) + 8;
-            badge.top = rc.top + 8;
-            badge.bottom = badge.top + sz.cy + 6;
-
-            {
-                HRGN badge_rgn = CreateRoundRectRgn(badge.left, badge.top, badge.right + 1, badge.bottom + 1, 8, 8);
-                HBRUSH badge_brush = CreateSolidBrush(RGB(20, 21, 23));
-                SelectClipRgn(hdc, badge_rgn);
-                FillRect(hdc, &badge, badge_brush);
-                SelectClipRgn(hdc, NULL);
-                DeleteObject(badge_brush);
-                DeleteObject(badge_rgn);
-            }
-            pen = CreatePen(PS_SOLID, 1, RGB(90, 93, 98));
-            old_pen = (HPEN)SelectObject(hdc, pen);
-            SelectObject(hdc, GetStockObject(NULL_BRUSH));
-            RoundRect(hdc, badge.left, badge.top, badge.right, badge.bottom, 8, 8);
-            SelectObject(hdc, old_pen);
-            DeleteObject(pen);
-
-            SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, COLOR_APP_TEXT);
-            DrawTextA(hdc, text, -1, &badge, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
-            SelectObject(hdc, old_badge_font);
-            if (badge_font) DeleteObject(badge_font);
-        }
 
         /* Floating "BAY N" / reading at each corner, no boxed chip -
          * drawn right over the blend, so every string is drawn twice:
@@ -2417,21 +2363,24 @@ static void set_channel_controls_enabled(bool enabled) {
     ui_refresh_bulk_target_buttons_enabled();
 }
 
-/* Selection checkbox is gated on three things, all required: the RS422
+/* Selection checkbox is gated on two things, both required: the RS422
  * link is actually connected (no real "on" without a port to send it
- * over), the channel is actually on, and the user has opted into
- * bulk-select by arming Card Click (IDC_BULK_TOGGLE_BTN) - it shouldn't
- * appear as an available control until they've asked for bulk
- * selection at all. Call this anywhere any of those three can have
- * changed: per-channel from ui_refresh_channel() (output_on),
- * IDC_BULK_TOGGLE_BTN's handler and conn_on_connected_changed() need
- * the all-channels form below since they affect every card at once.
- * Hiding it doesn't disable selection itself - the checkbox in
+ * over), and the user has opted into bulk-select by arming Card Click
+ * (IDC_BULK_TOGGLE_BTN) - it shouldn't appear as an available control
+ * until they've asked for bulk selection at all. Used to also require
+ * the channel itself be on, which made the checkbox appear/disappear
+ * per-card depending on each one's own state - reported as looking
+ * inconsistent/buggy rather than as the intentional gating it was;
+ * dropped so every card shows it consistently once Card Click is
+ * armed, matching every other Bulk Actions control's own "connected is
+ * enough" gating. Call this anywhere either of those two can have
+ * changed: IDC_BULK_TOGGLE_BTN's handler and conn_on_connected_changed()
+ * need the all-channels form below since they affect every card at
+ * once. Hiding it doesn't disable selection itself - the checkbox in
  * channel_select_id() still exists, and background-click selection
  * (see g_bulk_select_mode) is separate either way. */
 static void ui_update_select_checkbox_visibility(int index) {
-    const ChannelState *ch = channels_get(index);
-    bool show = g_bulk_select_mode && conn_is_connected(&g_conn) && ch->output_on;
+    bool show = g_bulk_select_mode && conn_is_connected(&g_conn);
     ShowWindow(GetDlgItem(g_hwnd, channel_select_id(index)), show ? SW_SHOW : SW_HIDE);
 }
 
@@ -2465,6 +2414,21 @@ static void ui_refresh_bulk_selected_label(void) {
     ui_refresh_bulk_target_buttons_enabled();
 }
 
+/* Keeps IDC_BULK_ROWSELECT_COMBO's displayed choice honest. Picking a
+ * preset from it should show that preset's name - but the underlying
+ * selection can also change through other means that don't match any
+ * preset (a single checkbox, the background-click toggle, Clear), and
+ * nothing was updating the combo when that happened - it kept showing
+ * whatever preset was last picked even once the real selection no
+ * longer matched it at all. CB_SETCURSEL doesn't fire CBN_SELCHANGE,
+ * so calling this from inside bulk_select_row()/bulk_select_all() is
+ * safe even though those are themselves called FROM that combo's own
+ * handler. index is 0..GRID_ROWS-1 for a row, GRID_ROWS for "Select
+ * All", GRID_ROWS+1 for "Custom". */
+static void bulk_set_rowselect_combo(int index) {
+    SendDlgItemMessageA(g_hwnd, IDC_BULK_ROWSELECT_COMBO, CB_SETCURSEL, (WPARAM)index, 0);
+}
+
 static void bulk_clear_selection(void) {
     int i;
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -2474,6 +2438,7 @@ static void bulk_clear_selection(void) {
         }
     }
     ui_refresh_bulk_selected_label();
+    bulk_set_rowselect_combo(GRID_ROWS + 1); /* Custom - cleared doesn't match any preset */
 }
 
 /* Select-all's real value isn't "apply to all 16 at once" (rare) - it's
@@ -2489,6 +2454,7 @@ static void bulk_select_all(void) {
         }
     }
     ui_refresh_bulk_selected_label();
+    bulk_set_rowselect_combo(GRID_ROWS); /* "Select All" - also reached from IDC_BULK_SELECT_ALL_BTN directly */
 }
 
 /* IDC_BULK_ROWSELECT_COMBO's "1st/2nd/3rd/4th Row" options - replaces
@@ -2505,6 +2471,7 @@ static void bulk_select_row(int row) {
         }
     }
     ui_refresh_bulk_selected_label();
+    bulk_set_rowselect_combo(row);
 }
 
 static void bulk_apply_mode(uint8_t mode) {
@@ -2875,8 +2842,11 @@ static void add_channel_card(HWND hwnd, int index) {
         int half_bw = channel_bandwidth_mhz(index) / 2;
         HWND freq_ctrl;
         wsprintfA(freq_label, "%d-%d MHz", freq - half_bw, freq + half_bw);
-        freq_ctrl = add_ctrl(hwnd, "STATIC", freq_label, SS_LEFT | SS_NOPREFIX,
-                              x + 148, y + 8, 90, 14, channel_freq_lbl_id(index));
+        /* x+90..x+196, right-aligned - shifted left off the gauge column
+         * and narrowed so it ends before the selection checkbox at
+         * x+200 instead of overlapping/hiding it - direct complaint. */
+        freq_ctrl = add_ctrl(hwnd, "STATIC", freq_label, SS_RIGHT | SS_NOPREFIX,
+                              x + 90, y + 8, 106, 14, channel_freq_lbl_id(index));
         if (freq_ctrl) {
             SendMessageA(freq_ctrl, WM_SETFONT, (WPARAM)g_small_font, TRUE);
         }
@@ -4366,7 +4336,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
     PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(80), SX(130), SY(12));
 
-    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(148), y + SY(8), SX(70), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(90), y + SY(8), SX(106), SY(14));
     PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
     PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
     PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(174), y + SY(42), SX(44), SY(14));
@@ -4724,6 +4694,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
                         ui_refresh_bulk_selected_label();
+                        bulk_set_rowselect_combo(GRID_ROWS + 1); /* Custom */
                         break;
                     }
                 }
@@ -4958,6 +4929,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
                         ui_refresh_bulk_selected_label();
+                        bulk_set_rowselect_combo(GRID_ROWS + 1); /* Custom */
                     }
                     return 0;
                 }
@@ -5248,6 +5220,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         fill = g_brush_connected; /* green, same as LEVEL_LOW */
                     } else if (dis->CtlID == IDC_BULK_LEVEL_OFF_BTN) {
                         fill = g_brush_level_off; /* muted gray, same as LEVEL_OFF */
+                    } else if (dis->CtlID == IDC_BULK_TOGGLE_BTN) {
+                        /* Same green-when-armed convention as everything
+                         * else here - the text already swaps "On"/"Off"
+                         * but the button looked identical either way,
+                         * direct complaint it didn't visibly "light up". */
+                        fill = g_bulk_select_mode ? g_brush_connected : g_brush_accent;
                     }
                     {
                         HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
