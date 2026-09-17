@@ -236,6 +236,10 @@ static HWND g_hwnd;
 static HFONT g_font;
 static HFONT g_header_font;
 static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
+static HFONT g_mono_font; /* fixed-width, for numeric instrument readouts -
+                            * per-channel uptime, the Avg pill, heatmap BAY
+                            * labels - so digits align like real lab/rack
+                            * instrumentation instead of proportional UI type */
 /* NULL = draw the built-in vector HelixDefender mark (the normal case).
  * Set by load_custom_logo() at startup (if branding.bmp exists next to
  * the .exe) or by browse_and_set_logo() (IDC_CHANGE_LOGO_BTN) - either
@@ -1324,9 +1328,9 @@ static void build_dot_pattern_brush(void) {
 /* Which of the 6 confirmed bands a reading falls in - real safe/caution/
  * danger tiers for this hardware (direct request, not a generic spec):
  * <10 white, 10-15 green, 15-20 blue, 20-25 orange, 25-35 darker orange,
- * 35+ red. Shared by the Avg pill's marker/readout and the sensor
- * heatmap (see sensor_heatmap_subclass_proc) - one reference, so a
- * reading means the same color everywhere it shows up in the UI. */
+ * 35+ red. Used by the Avg pill's marker/readout. NOT used by the
+ * heatmap (see vivid_thermal_color()'s comment for why a discrete band
+ * function doesn't work there) - accepted tradeoff, direct request. */
 static COLORREF temp_band_color(float temp_c) {
     if (temp_c < 10.0f) return RGB(255, 255, 255);
     if (temp_c < 15.0f) return COLOR_APP_CONNECTED;
@@ -1334,6 +1338,39 @@ static COLORREF temp_band_color(float temp_c) {
     if (temp_c < 25.0f) return RGB(224, 146, 34);
     if (temp_c < 35.0f) return RGB(196, 110, 24);
     return COLOR_APP_DISCONNECTED;
+}
+
+/* Continuous 4-stop version of temp_band_color()'s cool-to-hot hues
+ * (blue -> orange -> darker orange -> red), for the heatmap only. A
+ * discrete band function is the wrong tool there: 4 real bay readings
+ * a couple degrees apart (the normal case) usually land in the SAME
+ * band, so all 4 corners would get an identical color and the "scan"
+ * would collapse into one flat fill - the exact bug this replaces.
+ * t is 0..1 (clamped), not an absolute temperature - the heatmap
+ * auto-scales to the current spread of the 4 live readings (see
+ * sensor_heatmap_subclass_proc) so even a 1C difference between bays
+ * stays visibly distinct instead of vanishing into one band. */
+static COLORREF vivid_thermal_color(float t) {
+    static const COLORREF stops[] = {
+        RGB(58, 133, 224), RGB(224, 146, 34), RGB(196, 110, 24), RGB(224, 90, 90)
+    };
+    const int n = (int)(sizeof(stops) / sizeof(stops[0]));
+    float scaled;
+    int idx;
+    float frac;
+
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+
+    scaled = t * (float)(n - 1);
+    idx = (int)scaled;
+    if (idx >= n - 1) idx = n - 2;
+    frac = scaled - (float)idx;
+
+    return RGB(
+        GetRValue(stops[idx]) + (BYTE)((GetRValue(stops[idx + 1]) - GetRValue(stops[idx])) * frac),
+        GetGValue(stops[idx]) + (BYTE)((GetGValue(stops[idx + 1]) - GetGValue(stops[idx])) * frac),
+        GetBValue(stops[idx]) + (BYTE)((GetBValue(stops[idx + 1]) - GetBValue(stops[idx])) * frac));
 }
 
 /* Shared by both gauges (temperature: horizontal, per-channel level:
@@ -1362,6 +1399,38 @@ static void gradient_fill_rect(HDC hdc, RECT r, COLORREF c0, COLORREF c1, bool v
     gr.UpperLeft = 0;
     gr.LowerRight = 1;
     GradientFill(hdc, v, 2, &gr, 1, vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
+}
+
+/* Solid-color constant-alpha fill over r, respecting hdc's current
+ * clip region (so a clip set to an ellipse region before calling this
+ * yields a soft-edged translucent fill) - same 1x1-stretched-bitmap-
+ * plus-AlphaBlend idiom draw_app_logo_faded() uses for its fade, just
+ * filling flat color instead of a snapshot. Used by the heatmap's per-
+ * bay radial glows. */
+static void alpha_fill_rect(HDC hdc, RECT r, COLORREF color, BYTE alpha) {
+    HDC mem_dc;
+    HBITMAP mem_bmp, old_bmp;
+    BLENDFUNCTION bf;
+    int w = r.right - r.left, h = r.bottom - r.top;
+
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+
+    mem_dc = CreateCompatibleDC(hdc);
+    mem_bmp = CreateCompatibleBitmap(hdc, 1, 1);
+    old_bmp = (HBITMAP)SelectObject(mem_dc, mem_bmp);
+    SetPixelV(mem_dc, 0, 0, color);
+
+    bf.BlendOp = AC_SRC_OVER;
+    bf.BlendFlags = 0;
+    bf.SourceConstantAlpha = alpha;
+    bf.AlphaFormat = 0;
+    AlphaBlend(hdc, r.left, r.top, w, h, mem_dc, 0, 0, 1, 1, bf);
+
+    SelectObject(mem_dc, old_bmp);
+    DeleteObject(mem_bmp);
+    DeleteDC(mem_dc);
 }
 
 /* A full pill (corner diameter = control height) filled with a
@@ -1404,7 +1473,7 @@ static void paint_gradient_pill(HDC hdc, RECT rc, COLORREF grad_to, const char *
     text_color = (luma > 150) ? RGB(20, 21, 23) : COLOR_APP_TEXT;
 
     SetBkMode(hdc, TRANSPARENT);
-    old_font = (HFONT)SelectObject(hdc, g_font);
+    old_font = (HFONT)SelectObject(hdc, g_mono_font);
     SetTextColor(hdc, text_color);
     DrawTextA(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(hdc, old_font);
@@ -1444,18 +1513,19 @@ static HWND add_pill(HWND parent, LPCSTR text, int x, int y, int w, int h, int i
     return ctrl;
 }
 
-/* Horizontal heatmap across the 4 physical sensor bays: BAY 1's color
- * on the left blending through BAY 2/3 to BAY 4's on the right, each
- * stop taken from the SAME temp_band_color() used everywhere else in
- * this app (the Avg pill) - the real safe/caution/danger tiers for
- * this hardware, not a separate invented scale, so a reading means the
- * same color here as it does anywhere else in the UI. It's an honest
- * "known points, blended for readability" gradient, not a real spatial
- * scan (see SENSOR_MAX_UNITS' comment - only 4 discrete sensors exist,
- * no x/y layout data on them at all), so each real reading is also
- * called out in text under its own tick. Sized generously (see
- * HEADER_H) - direct request after an earlier cramped version. Reads
- * live off g_sensor each paint, same pattern as the gauges. */
+/* "Vivid Thermal Scan" redesign - picked over a tactical HUD-bracket
+ * treatment, a plain bilinear-blend surface, and a "glass/aurora"
+ * glow-plus-chips treatment (all tried and rejected first) for an
+ * actual thermal-camera look: one smooth full-bleed 4-corner color
+ * blend (bilinear, same technique the very first version of this
+ * heatmap used), rounded corners, floating readouts with a drop-
+ * shadow instead of boxed chips. Corner colors come from
+ * vivid_thermal_color() (continuous, auto-scaled to the current
+ * spread of readings) rather than temp_band_color()'s discrete bands -
+ * see that function's comment for why a discrete band function
+ * flattens this into one solid color for real, close-together bay
+ * readings. Reads live off g_sensor each paint, same pattern as the
+ * gauges. */
 static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -1466,95 +1536,275 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         RECT rc;
         COLORREF corner[SENSOR_MAX_UNITS]; /* 0=BAY1 top-left, 1=BAY2 top-right,
                                               * 2=BAY3 bottom-left, 3=BAY4 bottom-right */
-        HFONT vfont, old_font;
+        HFONT label_font, num_font, old_font;
         HPEN pen, old_pen;
-        int i, y;
+        HRGN panel_rgn;
+        int i;
+        float lo = 0.0f, hi = 0.0f;
+        RECT blend_rc;
+        bool all_uniform;
+        static const int panel_radius = 14;
+        static const int legend_h = 22;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
 
-        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-            const SensorState *st = sensor_get_state(&g_sensor, i);
-            corner[i] = st->has_reading ? temp_band_color(st->temperature_c) : COLOR_APP_MUTED;
+        {
+            bool any_reading = false;
+            int reading_count = 0;
+
+            for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+                const SensorState *st = sensor_get_state(&g_sensor, i);
+                if (!st->has_reading) continue;
+                if (!any_reading || st->temperature_c < lo) lo = st->temperature_c;
+                if (!any_reading || st->temperature_c > hi) hi = st->temperature_c;
+                any_reading = true;
+                reading_count++;
+            }
+            /* True uniformity (all 4 bays actually agree, not just close
+             * enough to share a band) is checked BEFORE the span-floor
+             * stretch below, off the real spread - not the stretched
+             * one, which always claims a 2C span regardless. */
+            all_uniform = (reading_count == SENSOR_MAX_UNITS) && (hi - lo < 0.3f);
+
+            if (hi - lo < 2.0f) {
+                float mid = (hi + lo) / 2.0f;
+                lo = mid - 1.0f;
+                hi = mid + 1.0f;
+            }
+
+            for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+                const SensorState *st = sensor_get_state(&g_sensor, i);
+                corner[i] = st->has_reading
+                    ? vivid_thermal_color((st->temperature_c - lo) / (hi - lo))
+                    : COLOR_APP_MUTED;
+            }
         }
 
-        /* Bilinear blend across all 4 corners at once, not a left-to-
-         * right ramp: each horizontal strip gets its own left/right
-         * color, itself interpolated top-to-bottom between that side's
-         * two corners, then gradient_fill_rect blends left to right for
-         * that strip - the same "known points, blended for readability"
-         * approach as a real thermal map, just computed by hand since
-         * GDI has no built-in 4-corner gradient. 2px strips, not 1px -
-         * visually identical, a quarter of the gradient_fill_rect calls. */
-        for (y = rc.top; y < rc.bottom; y += 2) {
-            RECT strip;
-            int t1000 = (int)(((long)(y - rc.top) * 1000) / (rc.bottom - rc.top));
-            COLORREF left_c, right_c;
-            left_c = RGB(
-                GetRValue(corner[0]) + (GetRValue(corner[2]) - GetRValue(corner[0])) * t1000 / 1000,
-                GetGValue(corner[0]) + (GetGValue(corner[2]) - GetGValue(corner[0])) * t1000 / 1000,
-                GetBValue(corner[0]) + (GetBValue(corner[2]) - GetBValue(corner[0])) * t1000 / 1000);
-            right_c = RGB(
-                GetRValue(corner[1]) + (GetRValue(corner[3]) - GetRValue(corner[1])) * t1000 / 1000,
-                GetGValue(corner[1]) + (GetGValue(corner[3]) - GetGValue(corner[1])) * t1000 / 1000,
-                GetBValue(corner[1]) + (GetBValue(corner[3]) - GetBValue(corner[1])) * t1000 / 1000);
-            strip.left = rc.left;
-            strip.right = rc.right;
-            strip.top = y;
-            strip.bottom = (y + 2 > rc.bottom) ? rc.bottom : y + 2;
-            gradient_fill_rect(hdc, strip, left_c, right_c, false);
+        /* Colors are auto-scaled to the CURRENT spread of readings (see
+         * above), not a fixed scale - a color alone no longer tells you
+         * an absolute temperature. blend_rc carves out a strip at the
+         * bottom for a legend bar spelling out what the current min/max
+         * actually is, so the scan stays honest to read at a glance. */
+        blend_rc = rc;
+        blend_rc.bottom -= legend_h;
+
+        /* Corners the round-rect clip cuts off still need to show the
+         * surrounding panel's own background, not whatever the blend
+         * would otherwise leave there - so fill the full (square) rect
+         * with it first, underneath everything else. */
+        {
+            RECT full = rc;
+            HBRUSH panel_brush = CreateSolidBrush(COLOR_APP_PANEL_BG);
+            FillRect(hdc, &full, panel_brush);
+            DeleteObject(panel_brush);
         }
+
+        panel_rgn = CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, panel_radius, panel_radius);
+        SelectClipRgn(hdc, panel_rgn);
+
+        /* Each bay gets its own radial "heat origin" centered on its own
+         * corner - concentric alpha-blended circles, biggest/faintest
+         * first so smaller/more-opaque rings layer on top, building up
+         * a center-bright falloff (GDI has no native radial gradient or
+         * blur, so this fakes both the same way draw_app_logo_faded()
+         * fakes a fade). Replaces a flat bilinear blend that smeared all
+         * 4 readings evenly across the whole panel with no sense of
+         * WHERE each bay's own heat actually sits - direct request. */
+        {
+            RECT blob_full = { rc.left, rc.top, rc.right, blend_rc.bottom };
+            HBRUSH base_brush = CreateSolidBrush(COLOR_APP_FIELD_BG);
+            FillRect(hdc, &blob_full, base_brush);
+            DeleteObject(base_brush);
+        }
+        {
+            static const struct { int radius_pct; BYTE alpha; } rings[] = {
+                { 100, 22 }, { 78, 26 }, { 58, 32 }, { 40, 42 }, { 24, 56 }, { 12, 72 }
+            };
+            int blob_radius = (blend_rc.bottom - blend_rc.top) * 11 / 10;
+            int corner_x[SENSOR_MAX_UNITS] = { blend_rc.left, blend_rc.right, blend_rc.left, blend_rc.right };
+            int corner_y[SENSOR_MAX_UNITS] = { blend_rc.top, blend_rc.top, blend_rc.bottom, blend_rc.bottom };
+            int c, ri;
+
+            for (c = 0; c < SENSOR_MAX_UNITS; c++) {
+                for (ri = 0; ri < (int)(sizeof(rings) / sizeof(rings[0])); ri++) {
+                    int r = blob_radius * rings[ri].radius_pct / 100;
+                    RECT bounds;
+                    HRGN blob_rgn = CreateEllipticRgn(corner_x[c] - r, corner_y[c] - r, corner_x[c] + r, corner_y[c] + r);
+                    bounds.left = corner_x[c] - r; bounds.top = corner_y[c] - r;
+                    bounds.right = corner_x[c] + r; bounds.bottom = corner_y[c] + r;
+                    SelectClipRgn(hdc, blob_rgn);
+                    alpha_fill_rect(hdc, bounds, corner[c], rings[ri].alpha);
+                    SelectClipRgn(hdc, panel_rgn);
+                    DeleteObject(blob_rgn);
+                }
+            }
+        }
+
+        /* Legend strip: the reserved bottom band, filled with the panel
+         * background, then a thin multi-stop gradient bar (the same 4
+         * vivid_thermal_color() stops, swept left to right) with the
+         * current lo/hi readings labeled at each end - what "the left
+         * end of this scan's color range" and "the right end" actually
+         * mean in real degrees right now. */
+        {
+            RECT legend_rc = rc;
+            RECT bar_rc;
+            char lo_label[12], hi_label[12];
+            HFONT legend_font;
+            legend_rc.top = blend_rc.bottom;
+
+            legend_font = CreateFontA(-9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                       ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                       DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+
+            bar_rc.left = legend_rc.left + 40;
+            bar_rc.right = legend_rc.right - 40;
+            bar_rc.top = legend_rc.top + 8;
+            bar_rc.bottom = bar_rc.top + 5;
+            if (bar_rc.right > bar_rc.left) {
+                int seg, seg_w = (bar_rc.right - bar_rc.left) / 3;
+                static const COLORREF stops[] = {
+                    RGB(58, 133, 224), RGB(224, 146, 34), RGB(196, 110, 24), RGB(224, 90, 90)
+                };
+                for (seg = 0; seg < 3; seg++) {
+                    RECT seg_rc = bar_rc;
+                    seg_rc.left = bar_rc.left + seg * seg_w;
+                    seg_rc.right = (seg == 2) ? bar_rc.right : seg_rc.left + seg_w;
+                    gradient_fill_rect(hdc, seg_rc, stops[seg], stops[seg + 1], false);
+                }
+            }
+
+            wsprintfA(lo_label, "%d.%dC", (int)lo, (int)(lo * 10) % 10);
+            wsprintfA(hi_label, "%d.%dC", (int)hi, (int)(hi * 10) % 10);
+
+            old_font = (HFONT)SelectObject(hdc, legend_font ? legend_font : g_font);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLOR_APP_MUTED);
+            {
+                RECT lo_rc = legend_rc; lo_rc.left += 6; lo_rc.right = bar_rc.left - 4;
+                RECT hi_rc = legend_rc; hi_rc.left = bar_rc.right + 4; hi_rc.right -= 6;
+                DrawTextA(hdc, lo_label, -1, &lo_rc, DT_SINGLELINE | DT_NOCLIP | DT_LEFT | DT_VCENTER);
+                DrawTextA(hdc, hi_label, -1, &hi_rc, DT_SINGLELINE | DT_NOCLIP | DT_RIGHT | DT_VCENTER);
+            }
+            SelectObject(hdc, old_font);
+            if (legend_font) DeleteObject(legend_font);
+        }
+
+        SelectClipRgn(hdc, NULL);
+        DeleteObject(panel_rgn);
 
         pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, panel_radius, panel_radius);
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
-        /* "BAY N <reading>" at each corner, plain horizontal text (not
-         * rotated - direct request, the heatmap is wide/short now, not
-         * portrait, so there's no reason to stand the text on end) -
-         * drawn right over the gradient, so every string is drawn
-         * twice: once 1px offset in near-black, then the real (white)
-         * text on top, a cheap drop-shadow that keeps it legible over
-         * both the light and dark ends of the gradient rather than
-         * picking one fixed text color. */
-        vfont = CreateFontA(-11, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                             ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                             DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
-        old_font = (HFONT)SelectObject(hdc, vfont ? vfont : g_font);
+        /* "Uniform" badge, top-center - only when all 4 bays genuinely
+         * agree (checked above, before the span-floor stretch), so a
+         * flat-colored scan reads as "confirmed uniform" instead of
+         * looking broken/frozen. */
+        if (all_uniform) {
+            RECT badge = { 0, 0, 0, 0 };
+            HFONT badge_font;
+            SIZE sz;
+            HFONT old_badge_font;
+            const char *text = "UNIFORM";
+
+            badge_font = CreateFontA(-9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                      ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+            old_badge_font = (HFONT)SelectObject(hdc, badge_font ? badge_font : g_font);
+            GetTextExtentPoint32A(hdc, text, (int)lstrlenA(text), &sz);
+
+            badge.left = (rc.left + rc.right) / 2 - (sz.cx / 2) - 8;
+            badge.right = (rc.left + rc.right) / 2 + (sz.cx / 2) + 8;
+            badge.top = rc.top + 8;
+            badge.bottom = badge.top + sz.cy + 6;
+
+            {
+                HRGN badge_rgn = CreateRoundRectRgn(badge.left, badge.top, badge.right + 1, badge.bottom + 1, 8, 8);
+                HBRUSH badge_brush = CreateSolidBrush(RGB(20, 21, 23));
+                SelectClipRgn(hdc, badge_rgn);
+                FillRect(hdc, &badge, badge_brush);
+                SelectClipRgn(hdc, NULL);
+                DeleteObject(badge_brush);
+                DeleteObject(badge_rgn);
+            }
+            pen = CreatePen(PS_SOLID, 1, RGB(90, 93, 98));
+            old_pen = (HPEN)SelectObject(hdc, pen);
+            SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            RoundRect(hdc, badge.left, badge.top, badge.right, badge.bottom, 8, 8);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLOR_APP_TEXT);
+            DrawTextA(hdc, text, -1, &badge, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            SelectObject(hdc, old_badge_font);
+            if (badge_font) DeleteObject(badge_font);
+        }
+
+        /* Floating "BAY N" / reading at each corner, no boxed chip -
+         * drawn right over the blend, so every string is drawn twice:
+         * once 1px offset in near-black, then the real (white) text on
+         * top, a cheap drop-shadow that keeps it legible over both the
+         * light and dark ends of the blend. */
+        label_font = CreateFontA(-9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                  ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                  DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+        num_font = CreateFontA(-16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
         SetBkMode(hdc, TRANSPARENT);
+
         for (i = 0; i < SENSOR_MAX_UNITS; i++) {
             const SensorState *st = sensor_get_state(&g_sensor, i);
-            char label[24];
-            RECT lrc;
+            char blabel[8], num_label[16];
+            RECT lrc, nrc;
             bool left_side = (i == 0 || i == 2);
             bool top_half = (i == 0 || i == 1);
-            UINT align;
+            UINT lalign, nalign;
 
+            wsprintfA(blabel, "BAY %d", sensor_get_unit_address(&g_sensor, i));
             if (st->has_reading) {
-                wsprintfA(label, "BAY %d  %d.%dC", sensor_get_unit_address(&g_sensor, i),
-                          (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
+                wsprintfA(num_label, "%d.%dC", (int)st->temperature_c, (int)(st->temperature_c * 10) % 10);
             } else {
-                wsprintfA(label, "BAY %d  -", sensor_get_unit_address(&g_sensor, i));
+                lstrcpynA(num_label, "-", (int)sizeof(num_label));
             }
 
-            lrc.left = left_side ? rc.left + 10 : rc.left;
-            lrc.right = left_side ? rc.right : rc.right - 10;
-            lrc.top = top_half ? rc.top + 6 : rc.top;
-            lrc.bottom = top_half ? rc.bottom : rc.bottom - 6;
-            align = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
+            lrc.left = left_side ? rc.left + 14 : rc.left;
+            lrc.right = left_side ? rc.right : rc.right - 14;
+            lrc.top = top_half ? rc.top + 10 : rc.top;
+            lrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 26;
+            lalign = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
 
+            nrc = lrc;
+            nrc.top = top_half ? lrc.top + 13 : lrc.top;
+            nrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 12;
+            nalign = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
+
+            old_font = (HFONT)SelectObject(hdc, label_font ? label_font : g_font);
             SetTextColor(hdc, RGB(10, 10, 12));
             OffsetRect(&lrc, 1, 1);
-            DrawTextA(hdc, label, -1, &lrc, align);
+            DrawTextA(hdc, blabel, -1, &lrc, lalign);
             OffsetRect(&lrc, -1, -1);
             SetTextColor(hdc, RGB(255, 255, 255));
-            DrawTextA(hdc, label, -1, &lrc, align);
+            DrawTextA(hdc, blabel, -1, &lrc, lalign);
+
+            SelectObject(hdc, num_font ? num_font : g_font);
+            SetTextColor(hdc, RGB(10, 10, 12));
+            OffsetRect(&nrc, 1, 1);
+            DrawTextA(hdc, num_label, -1, &nrc, nalign);
+            OffsetRect(&nrc, -1, -1);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            DrawTextA(hdc, num_label, -1, &nrc, nalign);
+
+            SelectObject(hdc, old_font);
         }
-        SelectObject(hdc, old_font);
-        if (vfont) DeleteObject(vfont);
+        if (label_font) DeleteObject(label_font);
+        if (num_font) DeleteObject(num_font);
 
         EndPaint(hwnd, &ps);
         return 0;
@@ -2583,9 +2833,15 @@ static void add_channel_card(HWND hwnd, int index) {
              x + 8, y + 64, 130, 14, channel_status_id(index));
 
     /* Cumulative ON-time odometer, right below the status line - see
-     * IDC_CH_UPTIME_OFFSET's comment in resource.h. */
-    add_ctrl(hwnd, "STATIC", "Up 00:00:00", SS_LEFT | SS_NOPREFIX,
-             x + 8, y + 80, 130, 12, channel_uptime_id(index));
+     * IDC_CH_UPTIME_OFFSET's comment in resource.h. Monospace so the
+     * digits don't jitter/reflow width as they tick over. */
+    {
+        HWND uptime_ctrl = add_ctrl(hwnd, "STATIC", "Up 00:00:00", SS_LEFT | SS_NOPREFIX,
+                                     x + 8, y + 80, 130, 12, channel_uptime_id(index));
+        if (uptime_ctrl) {
+            SendMessageA(uptime_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
+        }
+    }
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
@@ -4198,6 +4454,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_logo_font = g_header_font;
             }
 
+            g_mono_font = CreateFontA(-12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                       ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                       DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+            if (!g_mono_font) {
+                g_mono_font = g_font;
+            }
+
             build_controls(hwnd);
             refresh_port_list();
             refresh_sensor_port_list();
@@ -4450,7 +4713,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return 0;
             }
             if (id == IDC_KILL_TRIP_BTN && code == BN_CLICKED) {
-                on_kill_switch_manual_trip();
+                int choice = MessageBoxA(hwnd,
+                    "Force every channel off immediately?\n\nThis trips the kill switch manually, same as an automatic overtemp trip - every channel stays off until reset.",
+                    "Confirm Kill Switch", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+                if (choice == IDYES) {
+                    on_kill_switch_manual_trip();
+                }
                 return 0;
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
@@ -4950,6 +5218,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
+            if (g_mono_font && g_mono_font != g_font) DeleteObject(g_mono_font);
             if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
             if (g_custom_icon_big) DestroyIcon(g_custom_icon_big);
             if (g_custom_icon_small) DestroyIcon(g_custom_icon_small);
