@@ -121,7 +121,7 @@
  * power buttons, a status line, and a vertical level trackbar with
  * High/Medium/Low/Off tick labels. */
 #define IDC_CH_BASE               2000
-#define IDC_CH_STRIDE             12
+#define IDC_CH_STRIDE             13
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
@@ -154,3 +154,8 @@
  * reset) while the channel is off. See channel_uptime_seconds() and the
  * per-tick accounting in WM_TIMER, main.c. */
 #define IDC_CH_UPTIME_OFFSET      11
+/* Real operating frequency (channel_freq_mhz(), main.c/channels.c) -
+ * static per card, set once at creation, white text above the level
+ * gauge. Direct request, added alongside the spectrum plot's real
+ * frequency axis labels. */
+#define IDC_CH_FREQ_OFFSET        12

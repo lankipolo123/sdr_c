@@ -240,6 +240,9 @@ static HFONT g_mono_font; /* fixed-width, for numeric instrument readouts -
                             * per-channel uptime, the Avg pill, heatmap BAY
                             * labels - so digits align like real lab/rack
                             * instrumentation instead of proportional UI type */
+static HFONT g_small_font; /* smaller than g_font - the per-channel
+                             * frequency range label, direct request
+                             * after the default size ran wide/large */
 /* NULL = draw the built-in vector HelixDefender mark (the normal case).
  * Set by load_custom_logo() at startup (if branding.bmp exists next to
  * the .exe) or by browse_and_set_logo() (IDC_CHANGE_LOGO_BTN) - either
@@ -2229,6 +2232,7 @@ static int channel_lbl_medium_id(int idx) { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_LOW_OFFSET; }
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 static int channel_uptime_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_UPTIME_OFFSET; }
+static int channel_freq_lbl_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_FREQ_OFFSET; }
 
 /* row is 0..GRID_ROWS-1, matching bulk_select_row()'s own row numbering. */
 static int grid_row_lbl_id(int row) {
@@ -2843,6 +2847,25 @@ static void add_channel_card(HWND hwnd, int index) {
         }
     }
 
+    /* Real operating frequency RANGE (not just the center), above the
+     * gauge column - white text, direct request. low/high from the
+     * same channel_freq_mhz()/channel_bandwidth_mhz() the spectrum
+     * plot's axis uses (see draw_spectrum_freq_axis()), so this and
+     * that stay consistent. Static per card - these never change for a
+     * given unit - set once here rather than refreshed per tick. */
+    {
+        char freq_label[24];
+        int freq = channel_freq_mhz(index);
+        int half_bw = channel_bandwidth_mhz(index) / 2;
+        HWND freq_ctrl;
+        wsprintfA(freq_label, "%d-%d MHz", freq - half_bw, freq + half_bw);
+        freq_ctrl = add_ctrl(hwnd, "STATIC", freq_label, SS_LEFT | SS_NOPREFIX,
+                              x + 148, y + 8, 90, 14, channel_freq_lbl_id(index));
+        if (freq_ctrl) {
+            SendMessageA(freq_ctrl, WM_SETFONT, (WPARAM)g_small_font, TRUE);
+        }
+    }
+
     /* Right column: custom gradient level gauge (Off at bottom, High at
      * top, like a volume slider) + tick labels. */
     add_channel_gauge(hwnd, x + 148, y + 24, 22, 72, channel_track_id(index));
@@ -3149,6 +3172,40 @@ static void spectrum_draw_grid(HDC hdc, RECT rc) {
     DeleteObject(pen);
 }
 
+/* Real frequency ticks under the single-channel plot - left edge,
+ * center, right edge of THIS channel's actual band (channel_freq_mhz()/
+ * channel_bandwidth_mhz(), the same confirmed real values the caption
+ * and the actual transmitted signal use - see draw_channel_spectrum's
+ * comment). Direct fix: the grid/trace are an honest shape (real mode/
+ * level), but the x-axis previously had no numbers on it at all, so it
+ * couldn't "match" any real frequency - now it does. Only drawn for a
+ * single selected channel; the all-16 grid has no single axis to
+ * label (each of the 16 cells is its own unrelated band). */
+static void draw_spectrum_freq_axis(HDC hdc, RECT axis_rc, RECT grid_rc, int channel_index) {
+    int freq = channel_freq_mhz(channel_index);
+    int half_bw = channel_bandwidth_mhz(channel_index) / 2;
+    char lo_label[16], mid_label[16], hi_label[16];
+    HFONT old_font;
+
+    wsprintfA(lo_label, "%d", freq - half_bw);
+    wsprintfA(mid_label, "%d MHz", freq);
+    wsprintfA(hi_label, "%d", freq + half_bw);
+
+    old_font = (HFONT)SelectObject(hdc, g_font);
+    SetTextColor(hdc, COLOR_APP_MUTED);
+    SetBkMode(hdc, TRANSPARENT);
+    {
+        RECT lo_rc = axis_rc; lo_rc.left = grid_rc.left; lo_rc.right = grid_rc.left + 60;
+        RECT mid_rc = axis_rc; mid_rc.left = (grid_rc.left + grid_rc.right) / 2 - 40;
+        mid_rc.right = mid_rc.left + 80;
+        RECT hi_rc = axis_rc; hi_rc.right = grid_rc.right; hi_rc.left = hi_rc.right - 60;
+        DrawTextA(hdc, lo_label, -1, &lo_rc, DT_SINGLELINE | DT_NOCLIP | DT_LEFT | DT_VCENTER);
+        DrawTextA(hdc, mid_label, -1, &mid_rc, DT_SINGLELINE | DT_NOCLIP | DT_CENTER | DT_VCENTER);
+        DrawTextA(hdc, hi_label, -1, &hi_rc, DT_SINGLELINE | DT_NOCLIP | DT_RIGHT | DT_VCENTER);
+    }
+    SelectObject(hdc, old_font);
+}
+
 static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
@@ -3156,12 +3213,18 @@ static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM 
     if (msg == WM_PAINT) {
         PAINTSTRUCT ps;
         HDC hdc;
-        RECT rc;
+        RECT rc, grid_rc;
+        static const int axis_h = 14;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, g_brush_field);
-        spectrum_draw_grid(hdc, rc);
+
+        grid_rc = rc;
+        if (!g_spectrum_show_all) {
+            grid_rc.bottom -= axis_h;
+        }
+        spectrum_draw_grid(hdc, grid_rc);
 
         if (g_spectrum_show_all) {
             const int cols = 4;
@@ -3192,12 +3255,15 @@ static LRESULT CALLBACK spectrum_plot_subclass_proc(HWND hwnd, UINT msg, WPARAM 
         } else {
             const ChannelState *ch = channels_get(g_spectrum_unit);
             char caption[64];
+            RECT axis_rc = rc;
+            axis_rc.top = grid_rc.bottom;
             if (ch->output_on) {
                 wsprintfA(caption, "%s", proto_mode_name(ch->mode));
             } else {
                 wsprintfA(caption, "%s - STANDBY", proto_mode_name(ch->mode));
             }
-            draw_channel_spectrum(hdc, rc, ch, NULL, caption);
+            draw_channel_spectrum(hdc, grid_rc, ch, NULL, caption);
+            draw_spectrum_freq_axis(hdc, axis_rc, grid_rc, g_spectrum_unit);
         }
 
         EndPaint(hwnd, &ps);
@@ -4169,15 +4235,11 @@ static void build_controls(HWND hwnd) {
         add_channel_card(hwnd, idx);
     }
 
-    /* "Rows" heading above the column, then a plain "1st"/"2nd"/"3rd"/
-     * "4th" per row - the heading makes spelling "row" out on every
-     * one of them redundant. Design-time positions (card_h == CARD_H);
-     * relayout_for_size() repositions the four ordinal labels (not the
-     * heading - it isn't tied to any one row, no need to move it)
-     * alongside the cards themselves as the window resizes. */
-    add_ctrl(hwnd, "STATIC", "Rows", SS_CENTER | SS_NOPREFIX,
-             GRID_RIGHT + ROW_LABEL_GAP - (ROW_LABEL_HEADING_W - ROW_LABEL_W) / 2, CONTENT_TOP + 4,
-             ROW_LABEL_HEADING_W, 16, IDC_GRID_ROW_HEADING);
+    /* Plain "1st"/"2nd"/"3rd"/"4th" per row, no "Rows" heading above
+     * them (removed - direct request). Design-time positions
+     * (card_h == CARD_H); relayout_for_size() repositions the four
+     * ordinal labels alongside the cards themselves as the window
+     * resizes. */
     {
         static const char *const row_lbl_text[GRID_ROWS] = { "1\ns\nt", "2\nn\nd", "3\nr\nd", "4\nt\nh" };
         int row;
@@ -4288,6 +4350,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
     PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(80), SX(130), SY(12));
 
+    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(148), y + SY(8), SX(70), SY(14));
     PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
     PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
     PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(174), y + SY(42), SX(44), SY(14));
@@ -4459,6 +4522,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                        DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
             if (!g_mono_font) {
                 g_mono_font = g_font;
+            }
+
+            g_small_font = CreateFontA(-9, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                        ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                        DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            if (!g_small_font) {
+                g_small_font = g_font;
             }
 
             build_controls(hwnd);
@@ -4667,14 +4737,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 if (get_signal_area_rect(&sig_rc)) {
                     /* Sits below the moved Ambient Temperature commands
                      * in this same strip (title/Port/Connect/status/Avg/
-                     * Kill Switch - see build_controls()), not centered
-                     * in the whole strip like before - direct request
-                     * once those became real controls sharing the space
-                     * instead of the mark owning all of it. sig_rc itself
-                     * is unchanged (still the full strip) - only used
-                     * here as draw_signal_waves()'s clip bounds, which is
+                     * Kill Switch - see build_controls()), not vertically
+                     * centered in the whole strip like before - direct
+                     * request once those became real controls sharing
+                     * the space instead of the mark owning all of it.
+                     * Horizontally centered on the strip's OWN actual
+                     * width (sig_rc.left/right), not a fixed offset from
+                     * the left edge - a fixed offset put the mark right
+                     * up against the strip's right edge at the default
+                     * window width, direct complaint. sig_rc itself is
+                     * unchanged (still the full strip) - also used as
+                     * draw_signal_waves()'s clip bounds, which is
                      * harmless to leave generous. */
-                    int cx = SIG_STRIP_CONTENT_X + 130;
+                    int cx = (sig_rc.left + sig_rc.right) / 2;
                     int cy = CONTENT_TOP + 370;
                     if (conn_is_connected(&g_conn) && any_channel_on()) {
                         draw_app_logo_silhouette(hdc, cx, cy, 64, RGB(255, 255, 255));
@@ -4903,13 +4978,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
-            /* "Rows" heading + "1st".."4th" row labels sit directly over
-             * the main window's dot-pattern background (see
-             * WM_ERASEBKGND) rather than inside any solid-color panel -
-             * a solid g_brush_panel fill here looked like a floating
-             * gray box against the dots around it. g_brush_dot_pattern
-             * matches what's actually behind them instead. */
-            if (ctl_id == IDC_GRID_ROW_HEADING || ctl_id == IDC_GRID_ROW_LBL_1 ||
+            /* "1st".."4th" row labels sit directly over the main
+             * window's dot-pattern background (see WM_ERASEBKGND)
+             * rather than inside any solid-color panel - a solid
+             * g_brush_panel fill here looked like a floating gray box
+             * against the dots around it. g_brush_dot_pattern matches
+             * what's actually behind them instead. */
+            if (ctl_id == IDC_GRID_ROW_LBL_1 ||
                 ctl_id == IDC_GRID_ROW_LBL_2 || ctl_id == IDC_GRID_ROW_LBL_3 || ctl_id == IDC_GRID_ROW_LBL_4) {
                 SetTextColor(hdc, COLOR_APP_MUTED);
                 SetBkMode(hdc, TRANSPARENT);
@@ -4933,6 +5008,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                                        : (offset == IDC_CH_LBL_LOW_OFFSET)    ? LEVEL_LOW
                                                                                : LEVEL_OFF;
                     SetTextColor(hdc, (ch->level == lvl_for_label) ? COLOR_APP_HEADER : COLOR_APP_MUTED);
+                    SetBkMode(hdc, TRANSPARENT);
+                    return (LRESULT)g_brush_panel;
+                }
+                if (offset == IDC_CH_FREQ_OFFSET) {
+                    SetTextColor(hdc, COLOR_APP_TEXT);
                     SetBkMode(hdc, TRANSPARENT);
                     return (LRESULT)g_brush_panel;
                 }
@@ -5219,6 +5299,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_header_font && g_header_font != g_font) DeleteObject(g_header_font);
             if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
             if (g_mono_font && g_mono_font != g_font) DeleteObject(g_mono_font);
+            if (g_small_font && g_small_font != g_font) DeleteObject(g_small_font);
             if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
             if (g_custom_icon_big) DestroyIcon(g_custom_icon_big);
             if (g_custom_icon_small) DestroyIcon(g_custom_icon_small);
