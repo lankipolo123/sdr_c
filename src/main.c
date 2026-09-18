@@ -34,7 +34,20 @@
  * (get_signal_area_rect()) always has room for the Ambient Temperature
  * heatmap + its moved controls (see build_controls()) even at the
  * window's minimum/design size. */
-#define CLIENT_WIDTH  1904 /* was 1660 - +144 (4 * CARD_W's own +36) to keep pace with the wider grid, +100 more so the heatmap (which fills whatever's left of this) reads wider too - direct request */
+/* Was 1904 briefly (1804 + 100 more so the heatmap read wider), then
+ * 1804 - both pushed the window's own MINIMUM size past what fits on a
+ * real screen, so the window (which starts maximized, but can never
+ * shrink below this) ended up wider than the desktop and sat partway
+ * off-screen with no way to see or reach the clipped side - direct
+ * report, real screen, not a Wine/sandbox quirk. Back to 1660 (the
+ * width from before ANY of this session's heatmap/card changes) -
+ * direct follow-up request to shrink the heatmap specifically: it
+ * fills whatever's left of this width (see add_sensor_heatmap()'s own
+ * call), so this also takes it back to its original ~430px size,
+ * while CARD_W stays at its own wider 260 (kept - the grid + row
+ * labels still fit inside 1660 with room to spare, see GRID_RIGHT's
+ * own comment). */
+#define CLIENT_WIDTH  1660
 #define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
