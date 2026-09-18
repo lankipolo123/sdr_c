@@ -10,10 +10,23 @@
 ;                                     itself does)
 ;   src\app.ico                     (installer/uninstaller icon, same mark as the app)
 ;
-; Installs both the exe and dll\Transit.dll under it into Program Files, keeping
-; the same relative layout (dll\Transit.dll next to the exe) the app's own
+; Installs both the exe and dll\Transit.dll under it, keeping the same
+; relative layout (dll\Transit.dll next to the exe) the app's own
 ; TRANSIT_DLL_PATH ("dll\\Transit.dll", connection.c) expects at runtime.
-
+;
+; Installs under %LOCALAPPDATA%\Programs, NOT Program Files - direct
+; consequence of a real bug found in testing: the app writes its own
+; .ini, branding.bmp, and branding\icon.ico's [Branding] state straight
+; next to the exe at runtime (get_ini_path()/get_branding_bmp_path()/
+; get_branding_icon_path() in main.c - portable, no-installer-required
+; by design). Program Files needs admin rights to write to, so once
+; installed there, every one of those writes silently fails unless the
+; app is run elevated every single time - not just custom branding,
+; ALL persisted settings (port/baud, per-channel mode/level/output,
+; uptime) stop saving. %LOCALAPPDATA%\Programs is the standard per-user
+; alternative for exactly this shape of app (same place VS Code and
+; similar self-updating/self-configuring apps install to) - always
+; writable by the owning user, no elevation prompt needed at all.
 !define APP_NAME "ECM Management System"
 !define COMPANY_NAME "lankipolo123"
 !define APP_VERSION "1.0.0.0"
@@ -22,9 +35,9 @@
 
 Name "${APP_NAME}"
 OutFile "ECM_Management_System_Setup.exe"
-InstallDir "$PROGRAMFILES64\${APP_NAME}"
-InstallDirRegKey HKLM "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir"
-RequestExecutionLevel admin
+InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
+InstallDirRegKey HKCU "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir"
+RequestExecutionLevel user
 Icon "src\app.ico"
 UninstallIcon "src\app.ico"
 
@@ -40,7 +53,7 @@ Section "Install"
     SetOutPath "$INSTDIR\dll"
     File "dll\Transit.dll"
 
-    WriteRegStr HKLM "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir" "$INSTDIR"
+    WriteRegStr HKCU "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir" "$INSTDIR"
 
     CreateDirectory "$SMPROGRAMS\${APP_NAME}"
     CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
@@ -49,14 +62,14 @@ Section "Install"
 
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
-    WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "${APP_NAME}"
-    WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "${APP_VERSION}"
-    WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "${COMPANY_NAME}"
-    WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
-    WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${EXE_NAME}"
-    WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
-    WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP_NAME}"
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${APP_VERSION}"
+    WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${COMPANY_NAME}"
+    WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" "$INSTDIR\Uninstall.exe"
+    WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${EXE_NAME}"
+    WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
+    WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
@@ -71,6 +84,6 @@ Section "Uninstall"
     RMDir "$SMPROGRAMS\${APP_NAME}"
     Delete "$DESKTOP\${APP_NAME}.lnk"
 
-    DeleteRegKey HKLM "${UNINST_KEY}"
-    DeleteRegKey HKLM "Software\${COMPANY_NAME}\${APP_NAME}"
+    DeleteRegKey HKCU "${UNINST_KEY}"
+    DeleteRegKey HKCU "Software\${COMPANY_NAME}\${APP_NAME}"
 SectionEnd
