@@ -1660,6 +1660,15 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             SelectClipRgn(hdc, panel_rgn);
         }
 
+        /* App emblem watermark, centered over the blend - same faded
+         * idiom draw_app_logo_faded() already uses for the idle signal-
+         * wave area, direct request to put it here too. Drawn after the
+         * heat blobs (so it reads as sitting over the scan, not painted
+         * over by it) but before the BAY/reading text below, so that
+         * text stays fully legible on top of it. */
+        draw_app_logo_faded(hdc, (blend_rc.left + blend_rc.right) / 2,
+                             (blend_rc.top + blend_rc.bottom) / 2, 70, 90);
+
         /* Legend strip: the reserved bottom band, filled with the panel
          * background, then a thin multi-stop gradient bar (the same 4
          * vivid_thermal_color() stops, swept left to right) with the
