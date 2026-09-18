@@ -41,10 +41,23 @@ RequestExecutionLevel user
 Icon "src\app.ico"
 UninstallIcon "src\app.ico"
 
-Page directory
-Page instfiles
-UninstPage uninstConfirm
-UninstPage instfiles
+; Plain `Page instfiles` alone never shows a real "Installation Complete"
+; screen - just the raw install log with a Close button, easy to read as
+; "did this actually finish?" (direct report). Modern UI 2's finish page
+; is the standard fix: a dedicated success screen, with an optional
+; "run the app now" checkbox.
+!include "MUI2.nsh"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\${EXE_NAME}"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch ${APP_NAME} now"
+
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
     SetOutPath "$INSTDIR"
