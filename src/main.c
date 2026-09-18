@@ -932,7 +932,15 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
         HPEN pen, old_pen;
         int index = (int)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
         bool selected = (index >= 0 && index < MAX_CHANNELS) && g_channel_selected[index];
-        bool on = (index >= 0 && index < MAX_CHANNELS) && channels_get(index)->output_on;
+        /* Gated on actually being connected, not just output_on - a
+         * channel restored from the .ini at launch (channel_restore_
+         * saved(), main.c) has output_on true before a single byte's
+         * ever been sent this run, and lighting the card up green from
+         * that alone read as "this is live" when it's really just a
+         * remembered value. Direct request: every card starts neutral
+         * until the link is actually up. */
+        bool on = (index >= 0 && index < MAX_CHANNELS) && channels_get(index)->output_on &&
+                  conn_is_connected(&g_conn);
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -1873,6 +1881,15 @@ static void set_channel_controls_enabled(bool enabled);
  * so a connect/disconnect has to refresh every card's checkbox the
  * same way it refreshes every other control. */
 static void ui_update_all_select_checkbox_visibility(void);
+/* Also defined below (needs ChannelUiCache/g_ui_cache) - the status
+ * text and card border are now gated on conn_is_connected() too (see
+ * their own comments), which ui_refresh_channel()'s per-field cache
+ * doesn't track on its own: output_on/level/busy/tripped can all stay
+ * exactly the same across a connect/disconnect, so without forcing the
+ * cache stale here the text would keep showing STANDBY (or a stale
+ * level) after connecting until something else happened to change. */
+static void ui_invalidate_all_channel_cache(void);
+static void ui_refresh_all_channels(void);
 
 static void conn_on_connected_changed(bool connected, void *ctx) {
     (void)ctx;
@@ -1882,6 +1899,14 @@ static void conn_on_connected_changed(bool connected, void *ctx) {
     InvalidateRect(GetDlgItem(g_hwnd, IDC_CONN_STATUS_LBL), NULL, TRUE);
     set_channel_controls_enabled(connected);
     ui_update_all_select_checkbox_visibility();
+    /* Forces the cache stale so ui_refresh_all_channels() actually
+     * redraws every card's status text/border even though output_on/
+     * level/busy/tripped may not have changed - see the forward
+     * declaration's own comment. ui_refresh_channel() already calls
+     * ui_invalidate_card() itself whenever it finds a stale cache, so
+     * that's the border covered too, not just the status text. */
+    ui_invalidate_all_channel_cache();
+    ui_refresh_all_channels();
 }
 
 static void conn_on_frame(const ProtoParsedFrame *frame, void *ctx) {
@@ -2896,6 +2921,13 @@ typedef struct {
 
 static ChannelUiCache g_ui_cache[MAX_CHANNELS];
 
+static void ui_invalidate_all_channel_cache(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        g_ui_cache[i].valid = false;
+    }
+}
+
 static void ui_refresh_channel(int index) {
     const ChannelState *ch = channels_get(index);
     ChannelUiCache *cache = &g_ui_cache[index];
@@ -2932,7 +2964,10 @@ static void ui_refresh_channel(int index) {
         lstrcpynA(text, "TRIPPED - reset?", (int)sizeof(text));
     } else if (ch->busy) {
         lstrcpynA(text, "SENDING...", (int)sizeof(text));
-    } else if (ch->output_on) {
+    } else if (ch->output_on && conn_is_connected(&g_conn)) {
+        /* Gated on connection too, same reasoning as the card border
+         * (card_panel_subclass_proc) - a level restored from the .ini
+         * shouldn't read as "currently HIGH" before the link's even up. */
         lstrcpynA(text, LEVEL_LABELS[ch->level], (int)sizeof(text));
         CharUpperA(text);
     } else {
