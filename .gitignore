@@ -8,6 +8,12 @@
 # .ini above, not something to ship a default value for.
 branding.bmp
 
+# Custom app icon override (see branding/README.md and
+# load_branding_icon() in main.c) - same portable/no-default reasoning
+# as branding.bmp above, just its own dedicated folder instead of a
+# loose file, so it reads as "drop your icon here".
+branding/icon.ico
+
 # Transit.dll is a proprietary vendor DLL, never committed - same rule
 # sdr_app's .gitignore follows for it.
 dll/

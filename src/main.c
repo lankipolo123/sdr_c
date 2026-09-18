@@ -3320,6 +3320,60 @@ static void get_branding_bmp_path(char *path /* at least MAX_PATH + 12 bytes */)
     lstrcatA(path, "branding.bmp");
 }
 
+/* branding\icon.ico, sibling to the .exe - a dedicated icon file,
+ * separate from branding.bmp (the in-app header logo): that one gets
+ * cropped/scaled onto a solid square to double as the taskbar icon
+ * (build_custom_app_icon()), which never looks as clean as a real
+ * purpose-made .ico. Direct request for a real icon override, in its
+ * own branding\ folder so it reads as "drop your icon here" rather
+ * than one more loose file next to the exe. Takes priority over the
+ * logo-derived icon when both exist (see WM_CREATE - applied after
+ * apply_custom_app_icon(), so it's the one left showing). */
+static void get_branding_icon_path(char *path /* at least MAX_PATH + 20 bytes */) {
+    char *dot;
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    dot = strrchr(path, '\\');
+    if (dot) {
+        dot[1] = '\0';
+    } else {
+        path[0] = '\0';
+    }
+    lstrcatA(path, "branding\\icon.ico");
+}
+
+/* Called once at startup, after apply_custom_app_icon() - overrides the
+ * window/taskbar/alt-tab icon with branding\icon.ico if present, same
+ * "next to the exe" portability as branding.bmp. Falls back to leaving
+ * whatever icon is already showing (the built-in one, or the logo-
+ * derived one) if the file is missing or LoadImageA can't read it -
+ * never a startup error, just nothing to override with. Records
+ * whether a custom icon was actually applied this run in the .ini
+ * (informational - direct request), same section/key checked again
+ * next launch by nothing else; the file's own presence is still what
+ * actually drives the override, matching branding.bmp's own convention
+ * of the file itself being the state, not a separate settings flag. */
+static void load_branding_icon(HWND hwnd) {
+    char path[MAX_PATH + 20];
+    char ini_path[MAX_PATH + 8];
+    HICON big, small;
+    bool applied = false;
+
+    get_branding_icon_path(path);
+    big = (HICON)LoadImageA(NULL, path, IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+    if (big) {
+        SendMessageA(hwnd, WM_SETICON, ICON_BIG, (LPARAM)big);
+        applied = true;
+    }
+    small = (HICON)LoadImageA(NULL, path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+    if (small) {
+        SendMessageA(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)small);
+        applied = true;
+    }
+
+    get_ini_path(ini_path);
+    WritePrivateProfileStringA("Branding", "CustomIcon", applied ? "1" : "0", ini_path);
+}
+
 /* Called once at startup - if a previous browse_and_set_logo() left a
  * branding.bmp behind, load it so the custom logo survives a restart.
  * Silently falls back to the built-in vector mark (g_custom_logo_bmp
@@ -4539,6 +4593,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             load_settings();
             load_custom_logo();
             apply_custom_app_icon(hwnd);
+            load_branding_icon(hwnd);
 
             memset(&ccb, 0, sizeof(ccb));
             ccb.on_connected_changed = conn_on_connected_changed;
