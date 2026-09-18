@@ -12,37 +12,39 @@ Skips (left as plain text, reported at the end for manual review):
   - anything on a #preprocessor line (handled by hand instead - see
     connection.c's TRANSIT_DLL_PATH, the only #define with a string
     value in this codebase)
-  - any string literal at brace-depth 0 (file scope) that isn't one of
-    the known static lookup-table arrays listed in ARRAY_EXCLUDE_LINES
-    below - those need hand conversion to a runtime-filled array since
-    C requires a compile-time constant for a static initializer, which
-    a decode function call isn't.
+  - any string literal inside one of the named static lookup-table
+    array initializers listed in KNOWN_ARRAY_NAMES below (matched by
+    the array's own NAME, found by walking back from its '=', not by
+    line number - line numbers drift every time main.c changes above
+    them, which silently broke a line-number-based version of this
+    exclusion once already) - those need hand conversion to a runtime-
+    filled array since C requires a compile-time constant for a static
+    initializer, which a decode function call isn't.
+  - any OTHER string literal at brace-depth 0 (file scope) not inside
+    a known array - reported as "FILE SCOPE - needs manual review" so
+    a genuinely new case never gets silently mishandled.
 
 Usage: python3 tools/obfuscate.py
 """
 import os
-import re
 
 SRC_DIR = os.path.join(os.path.dirname(__file__), "..", "src")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "build_obf", "src")
 KEY = 0x5A
 
-# (filename, 1-based line range inclusive) of static string-array
-# initializers that need hand conversion instead of automatic
-# transformation - see the module docstring.
-ARRAY_EXCLUDE_LINES = {
-    "main.c": [(91, 91), (95, 95), (4076, 4082), (4246, 4246)],
-    "protocol.c": [(120, 122)],
+# Names of static string-array initializers that need hand conversion
+# instead of automatic transformation - see the module docstring. Add
+# a name here (and hand-convert its build_obf/src output afterward) if
+# a future edit introduces a new static array of string literals.
+KNOWN_ARRAY_NAMES = {
+    "PARITY_LABELS", "LEVEL_LABELS", "row_select_items", "row_lbl_text",
+    "MODE_NAMES",
 }
 # (filename, 1-based line) of #define lines with a string value,
 # handled by hand instead of automatically.
 DEFINE_EXCLUDE_LINES = {
     "connection.c": [5],
 }
-
-
-def in_ranges(line_no, ranges):
-    return any(lo <= line_no <= hi for lo, hi in ranges)
 
 
 def decode_one_segment(body, out):
@@ -160,7 +162,35 @@ def scan(text):
             while k >= 0 and text[k] in ' \t\r\n':
                 k -= 1
             is_initializer = k >= 0 and text[k] == '='
-            brace_stack.append((i + 1, is_initializer))
+            var_name = None
+            if is_initializer:
+                # Identify WHICH array this is by name, not by line
+                # number - line numbers drift every time main.c grows or
+                # shrinks above this point, which silently broke this
+                # exclusion list once already (see git history). Walk
+                # back past '=', optional '[...]' (array size), and
+                # whitespace to the identifier token right before them.
+                m = k - 1
+                while m >= 0 and text[m] in ' \t\r\n':
+                    m -= 1
+                if m >= 0 and text[m] == ']':
+                    depth = 1
+                    m -= 1
+                    while m >= 0 and depth > 0:
+                        if text[m] == ']':
+                            depth += 1
+                        elif text[m] == '[':
+                            depth -= 1
+                        m -= 1
+                    while m >= 0 and text[m] in ' \t\r\n':
+                        m -= 1
+                name_end = m + 1
+                while m >= 0 and (text[m].isalnum() or text[m] == '_'):
+                    m -= 1
+                name_start = m + 1
+                if name_start < name_end:
+                    var_name = text[name_start:name_end]
+            brace_stack.append((i + 1, is_initializer, var_name))
             i += 1
             continue
         if c == '}':
@@ -218,13 +248,18 @@ def scan(text):
             # Walk up past any initializer-list frames to the nearest
             # real code-block brace - a literal inside `= { ... }` still
             # needs ITS declaration hoisted into the enclosing function's
-            # code block, not into the initializer list itself.
+            # code block, not into the initializer list itself. Also
+            # note the nearest enclosing initializer's array name (None
+            # if this literal isn't inside one at all).
             insert_at = -1
-            for pos, is_init in reversed(brace_stack):
+            array_name = None
+            for pos, is_init, name in reversed(brace_stack):
+                if is_init and array_name is None:
+                    array_name = name
                 if not is_init:
                     insert_at = pos
                     break
-            literals.append((start, end, insert_at, line_start))
+            literals.append((start, end, insert_at, line_start, array_name))
             i = end
             continue
         i += 1
@@ -233,7 +268,6 @@ def scan(text):
 
 def transform_file(fname, text):
     literals = scan(text)
-    line_ranges_excl = ARRAY_EXCLUDE_LINES.get(fname, [])
     define_lines_excl = set(DEFINE_EXCLUDE_LINES.get(fname, []))
 
     # Work back-to-front so earlier offsets stay valid as we edit.
@@ -244,7 +278,7 @@ def transform_file(fname, text):
     hoist_by_insert_point = {}  # insert_at -> list of decl lines
     counter = [0]
 
-    for start, end, insert_at, line_start in literals:
+    for start, end, insert_at, line_start, array_name in literals:
         raw = text[start:end]
         if raw == '""':
             continue  # nothing to hide in an empty string
@@ -266,7 +300,7 @@ def transform_file(fname, text):
         # inside a function) - but that walk-past doesn't make hoisting
         # into it safe: the array itself is still `static`, so its own
         # initializer must stay a compile-time constant either way.
-        if in_ranges(line_no, line_ranges_excl):
+        if array_name in KNOWN_ARRAY_NAMES:
             skipped.append((fname, line_no, raw, "static array initializer (hand-converted)"))
             continue
 
