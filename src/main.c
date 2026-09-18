@@ -34,7 +34,7 @@
  * (get_signal_area_rect()) always has room for the Ambient Temperature
  * heatmap + its moved controls (see build_controls()) even at the
  * window's minimum/design size. */
-#define CLIENT_WIDTH  1804 /* was 1660 - +144 (4 * CARD_W's own +36) to keep pace with the wider grid */
+#define CLIENT_WIDTH  1904 /* was 1660 - +144 (4 * CARD_W's own +36) to keep pace with the wider grid, +100 more so the heatmap (which fills whatever's left of this) reads wider too - direct request */
 #define CLIENT_HEIGHT 702
 
 /* Header bar across the top, above the sidebar/grid content: the
@@ -1725,7 +1725,7 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * once 1px offset in near-black, then the real (white) text on
          * top, a cheap drop-shadow that keeps it legible over both the
          * light and dark ends of the blend. */
-        label_font = CreateFontA(-9, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+        label_font = CreateFontA(-11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                   ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                   DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
         num_font = CreateFontA(-16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
@@ -1748,15 +1748,18 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 lstrcpynA(num_label, "-", (int)sizeof(num_label));
             }
 
-            lrc.left = left_side ? rc.left + 14 : rc.left;
-            lrc.right = left_side ? rc.right : rc.right - 14;
-            lrc.top = top_half ? rc.top + 10 : rc.top;
-            lrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 26;
+            /* Pulled in further from the literal corner (14/10/26 ->
+             * 24/18/34) - direct request for the BAY label to read as
+             * more centered in its quadrant instead of hugging the edge. */
+            lrc.left = left_side ? rc.left + 24 : rc.left;
+            lrc.right = left_side ? rc.right : rc.right - 24;
+            lrc.top = top_half ? rc.top + 18 : rc.top;
+            lrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 34;
             lalign = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
 
             nrc = lrc;
             nrc.top = top_half ? lrc.top + 13 : lrc.top;
-            nrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 12;
+            nrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 20;
             nalign = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
 
             old_font = (HFONT)SelectObject(hdc, label_font ? label_font : g_font);
