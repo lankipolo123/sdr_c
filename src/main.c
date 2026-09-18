@@ -2308,16 +2308,6 @@ static const int BULK_TARGET_BTN_IDS[] = {
 };
 #define BULK_TARGET_BTN_COUNT (sizeof(BULK_TARGET_BTN_IDS) / sizeof(BULK_TARGET_BTN_IDS[0]))
 
-static bool bulk_has_selection(void) {
-    int i;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        if (g_channel_selected[i]) {
-            return true;
-        }
-    }
-    return false;
-}
-
 /* True while any selected channel's send from a bulk action is still
  * queued/settling - drives IDC_BULK_SELECTED_LBL's "Sending..." text
  * (see ui_refresh_bulk_selected_label()), since a bulk click otherwise
@@ -2334,10 +2324,15 @@ static bool bulk_any_selected_busy(void) {
 }
 
 static void ui_refresh_bulk_target_buttons_enabled(void) {
-    /* Direct request: Card Click being On is the real "armed" signal,
-     * not just having a selection - Select All alone (with Card Click
-     * still Off) shouldn't be enough to light these up. */
-    bool enabled = conn_is_connected(&g_conn) && g_bulk_select_mode && bulk_has_selection();
+    /* Direct request: Card Click being On (plus connected) is enough by
+     * itself to light these up - used to also require an actual
+     * selection, which read as "nothing happens when I turn Card Click
+     * on" since 0-selected is the normal starting state. Matches
+     * BULK_ALWAYS_BTN_IDS' own gating now. A click with nothing selected
+     * is still a no-op in practice (bulk_apply_mode() etc. skip an empty
+     * selection) - this only changes how the buttons LOOK, not what a
+     * click with nothing picked actually does. */
+    bool enabled = conn_is_connected(&g_conn) && g_bulk_select_mode;
     unsigned i;
     for (i = 0; i < BULK_TARGET_BTN_COUNT; i++) {
         HWND btn = GetDlgItem(g_hwnd, BULK_TARGET_BTN_IDS[i]);
