@@ -14,6 +14,25 @@
       </requestedPrivileges>
     </security>
   </trustInfo>
+  <!-- System DPI-aware: without this, Windows treats the process as
+       DPI-unaware and virtualizes everything - SPI_GETWORKAREA (used at
+       startup in main.c to size/relayout the maximized window) reports a
+       scaled-down virtual work area instead of the real screen's pixels
+       (e.g. ~1536x864 instead of 1920x1080 at 125% scaling), so the
+       fixed-pixel layout gets squeezed to fit that smaller virtual canvas
+       and DWM then bitmap-stretches the whole rendered window back up to
+       the real screen size - blurry text, undersized/cramped controls,
+       nothing lining up with the sizes actually designed in main.c. This
+       app's layout is fixed-pixel (not DPI-scaled at runtime), so System
+       (not Per-Monitor) is correct - it renders at native pixel size
+       once, matching what a normal unscaled 1920x1080 display would show,
+       instead of needing WM_DPICHANGED handling for monitors changing
+       mid-session. -->
+  <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+    <asmv3:windowsSettings xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
+      <dpiAware>true</dpiAware>
+    </asmv3:windowsSettings>
+  </asmv3:application>
   <!-- Deliberately NOT declaring the Common-Controls v6 dependency here.
        That switches every control to Windows' themed (visual-styles)
        rendering, drawn directly by uxtheme.dll - including a native

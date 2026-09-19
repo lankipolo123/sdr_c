@@ -24,13 +24,7 @@
 #include "channels.h"
 #include "sensor.h"
 
-/* Widened by ROW_LABEL_STRIP_W (defined below) + a little breathing
- * room - the new row labels sat right at this window's own minimum
- * width and got clipped by it otherwise (the signal-wave mark's own
- * area was already marginal at this exact size before that, sub-
- * SIGNAL_AREA_MIN_W and so not drawn at all - unchanged; the row
- * labels are the part that actually needs to never be clipped). */
-/* Widened 1403 -> 1660 so the dead-space strip right of the row labels
+/* Widened 1403 -> 1660 so the dead-space strip right of the grid
  * (get_signal_area_rect()) always has room for the Ambient Temperature
  * heatmap + its moved controls (see build_controls()) even at the
  * window's minimum/design size. */
@@ -178,14 +172,15 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * readouts before them.
  * Widened again 224 -> 260 - direct request for more width. CLIENT_WIDTH
  * grows by 4x this delta (one per column) so GRID_RIGHT-anchored things
- * (row labels, signal-wave strip) keep the same margin they had before. */
+ * (the signal-wave strip) keep the same margin they had before. */
 #define CARD_W 236 /* was 260 - shrunk a bit now that the level tick labels
                      * read "Mid" instead of "Medium" and no longer need as
-                     * much width; the row-label strip gets that space back
-                     * (see ROW_LABEL_STRIP_W below). */
+                     * much width; SIDEBAR_W grew into the space this and
+                     * the removed row labels gave back (see its own
+                     * comment). */
 #define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
-#define GRID_LEFT 380
+#define GRID_LEFT 420 /* was 380 - shifted right by the same 40px SIDEBAR_W grew by */
 #define GRID_TOP CONTENT_TOP
 
 /* Cards used to stay fixed at CARD_W x CARD_H no matter how tall the
@@ -207,40 +202,20 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
 #define GRID_RIGHT (GRID_LEFT + GRID_COLS * (CARD_W + CARD_GAP) - CARD_GAP)
 #define SIGNAL_TICKS_PER_STEP 3 /* 300ms per pulse step at ID_POLL_TIMER's 100ms */
 
-/* A vertical strip carved out of the dead space right of the grid (see
- * GRID_RIGHT's comment), for the 1st/2nd/3rd/4th row labels
- * (IDC_GRID_ROW_LBL_1..4) - one per grid row, so it's obvious which row
- * IDC_BULK_ROWSELECT_COMBO's "1st Row" etc. actually picks. The
- * signal-wave mark (get_signal_area_rect()) is shifted right by this
- * same width and drawn a little smaller to make room, rather than the
- * strip eating into its existing space. */
-#define ROW_LABEL_STRIP_W 64 /* was 52 - widened for plain horizontal
-                               * "1st"/"2nd"/"3rd"/"4th" text (see
-                               * row_lbl_text[] in build_controls()),
-                               * replacing the old one-character-per-line
-                               * vertical layout. CARD_W gave back the
-                               * width this needed (see its own comment). */
-/* A small fixed gap off the card edge, not centered in the middle of
- * the wider ROW_LABEL_STRIP_W dead space - direct complaint that the
- * labels read as floating, detached from the cards they're labeling,
- * rather than sitting snug next to them. */
-#define ROW_LABEL_GAP 4
-#define ROW_LABEL_W 48 /* was 24 - wide enough for horizontal "2nd"/"3rd" text */
-#define ROW_LABEL_H 18 /* was 52 - a single text line now, not 3 stacked characters */
-/* Wider than ROW_LABEL_W - "Rows" is one line of real text (not one
- * character per line like the labels below it) and clips inside a
- * box that narrow. Centered over the label column below it. */
-#define ROW_LABEL_HEADING_W 44
-
-/* Left edge of the dead-space strip right of the row labels (same
- * anchor get_signal_area_rect() uses) - the red-boxed area Ambient
+/* Left edge of the dead-space strip right of the grid (same anchor
+ * get_signal_area_rect() uses) - the red-boxed area Ambient
  * Temperature's heatmap and its moved Port/Refresh/Connect/status/Avg
- * controls now live in, a few px of padding in from the row labels. */
-#define SIG_STRIP_X (GRID_RIGHT + CARD_GAP + ROW_LABEL_STRIP_W)
+ * controls now live in. The 1st/2nd/3rd/4th row labels that used to be
+ * carved out of this strip are gone (direct request) - SIDEBAR_W grew
+ * into the width that freed up instead (see its own comment). */
+#define SIG_STRIP_X (GRID_RIGHT + CARD_GAP)
 #define SIG_STRIP_CONTENT_X (SIG_STRIP_X + 6)
 
 #define SIDEBAR_X 10
-#define SIDEBAR_W 360
+#define SIDEBAR_W 400 /* was 360 - grown into the width the removed
+                        * 1st/2nd/3rd/4th row labels freed up; GRID_LEFT
+                        * shifted right by the same 40px to keep its gap
+                        * off the sidebar's own right edge. */
 
 /* Flush against the bottom of the sidebar box (itself pinned to the
  * grid's height) rather than added below it - keeps the sidebar's
@@ -2256,14 +2231,6 @@ static int channel_lbl_low_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_ST
 static int channel_lbl_off_id(int idx)    { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_LBL_OFF_OFFSET; }
 static int channel_uptime_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_UPTIME_OFFSET; }
 static int channel_freq_lbl_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_FREQ_OFFSET; }
-
-/* row is 0..GRID_ROWS-1, matching bulk_select_row()'s own row numbering. */
-static int grid_row_lbl_id(int row) {
-    static const int ids[GRID_ROWS] = {
-        IDC_GRID_ROW_LBL_1, IDC_GRID_ROW_LBL_2, IDC_GRID_ROW_LBL_3, IDC_GRID_ROW_LBL_4
-    };
-    return ids[row];
-}
 
 
 /* Invalidates a card's background panel AND every one of its own
@@ -4337,24 +4304,6 @@ static void build_controls(HWND hwnd) {
         add_channel_card(hwnd, idx);
     }
 
-    /* Plain "1st"/"2nd"/"3rd"/"4th" per row, no "Rows" heading above
-     * them (removed - direct request). Horizontal, one line each (was
-     * one character per line, e.g. "1\ns\nt" - direct request to widen
-     * ROW_LABEL_STRIP_W and go back to normal horizontal text). Design-
-     * time positions (card_h == CARD_H); relayout_for_size() repositions
-     * the four ordinal labels alongside the cards themselves as the
-     * window resizes. */
-    {
-        static const char *const row_lbl_text[GRID_ROWS] = { "1st", "2nd", "3rd", "4th" };
-        int row;
-        for (row = 0; row < GRID_ROWS; row++) {
-            int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
-            add_ctrl(hwnd, "STATIC", row_lbl_text[row], SS_CENTER | SS_NOPREFIX,
-                     GRID_RIGHT + ROW_LABEL_GAP, row_cy - ROW_LABEL_H / 2,
-                     ROW_LABEL_W, ROW_LABEL_H, grid_row_lbl_id(row));
-        }
-    }
-
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
         char label[16];
         wsprintfA(label, "%d", BAUD_OPTIONS[i]);
@@ -4508,10 +4457,7 @@ static int log_panel_y_for(int card_h) {
 static bool get_signal_area_rect(RECT *out) {
     int card_h = channel_card_height(g_last_client_h);
     int log_y = log_panel_y_for(card_h);
-    /* Shifted right by ROW_LABEL_STRIP_W to leave room for the row
-     * labels sitting between the grid and this area - see that
-     * constant's comment. */
-    int x = GRID_RIGHT + CARD_GAP + ROW_LABEL_STRIP_W;
+    int x = SIG_STRIP_X;
     int w = g_last_client_w - SIDEBAR_X - x;
     if (w < SIGNAL_AREA_MIN_W) {
         return false;
@@ -4562,13 +4508,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int card_x = GRID_LEFT + col * (CARD_W + CARD_GAP);
         int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
         position_channel_card(hwnd, i, card_x, card_y, CARD_W, card_h);
-    }
-
-    for (i = 0; i < GRID_ROWS; i++) {
-        int row_cy = CONTENT_TOP + i * (card_h + CARD_GAP) + card_h / 2;
-        MoveWindow(GetDlgItem(hwnd, grid_row_lbl_id(i)),
-                   GRID_RIGHT + ROW_LABEL_GAP, row_cy - ROW_LABEL_H / 2,
-                   ROW_LABEL_W, ROW_LABEL_H, FALSE);
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -5084,18 +5023,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetTextColor(hdc, count_kill_switch_tripped() > 0 ? COLOR_APP_DISCONNECTED : COLOR_APP_CONNECTED);
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
-            }
-            /* "1st".."4th" row labels sit directly over the main
-             * window's dot-pattern background (see WM_ERASEBKGND)
-             * rather than inside any solid-color panel - a solid
-             * g_brush_panel fill here looked like a floating gray box
-             * against the dots around it. g_brush_dot_pattern matches
-             * what's actually behind them instead. */
-            if (ctl_id == IDC_GRID_ROW_LBL_1 ||
-                ctl_id == IDC_GRID_ROW_LBL_2 || ctl_id == IDC_GRID_ROW_LBL_3 || ctl_id == IDC_GRID_ROW_LBL_4) {
-                SetTextColor(hdc, COLOR_APP_MUTED);
-                SetBkMode(hdc, TRANSPARENT);
-                return (LRESULT)(g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_panel);
             }
             if (channel_index_from_id(ctl_id, &idx)) {
                 int offset = (ctl_id - IDC_CH_BASE) % IDC_CH_STRIDE;

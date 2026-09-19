@@ -84,20 +84,6 @@
 #define IDD_CW_PASSWORD      1051
 #define IDC_CW_PW_EDIT       1052
 
-/* "1st row".."4th row" - one label per grid row, in the strip carved
- * out of the signal-wave mark's dead space (see ROW_LABEL_STRIP_W in
- * main.c) so it's obvious which row IDC_BULK_ROWSELECT_COMBO's "1st
- * Row" etc. actually selects. Repositioned alongside the cards
- * themselves in relayout_for_size() as the window resizes. */
-#define IDC_GRID_ROW_LBL_1   1060
-#define IDC_GRID_ROW_LBL_2   1061
-#define IDC_GRID_ROW_LBL_3   1062
-#define IDC_GRID_ROW_LBL_4   1063
-/* The "Rows" heading above them - a real ID (not 0) so
- * WM_CTLCOLORSTATIC can match it specifically, same reason as the
- * IDC_GRID_ROW_LBL_* ids below. */
-#define IDC_GRID_ROW_HEADING 1064
-
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the
  * comment above g_sidebar_panel's creation in main.c). Not a capture -

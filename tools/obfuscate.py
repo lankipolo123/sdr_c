@@ -37,7 +37,7 @@ KEY = 0x5A
 # a name here (and hand-convert its build_obf/src output afterward) if
 # a future edit introduces a new static array of string literals.
 KNOWN_ARRAY_NAMES = {
-    "PARITY_LABELS", "LEVEL_LABELS", "row_select_items", "row_lbl_text",
+    "PARITY_LABELS", "LEVEL_LABELS", "row_select_items",
     "MODE_NAMES",
 }
 # (filename, 1-based line) of #define lines with a string value,
