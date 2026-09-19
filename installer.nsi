@@ -1,4 +1,4 @@
-; NSIS installer script for ECM Management System.
+; NSIS installer script for ECM Controller.
 ; Build with: makensis installer.nsi
 ;
 ; Expects, in this same directory:
@@ -14,7 +14,7 @@
 ; relative layout (dll\Transit.dll next to the exe) the app's own
 ; TRANSIT_DLL_PATH ("dll\\Transit.dll", connection.c) expects at runtime.
 ;
-; Installs to a plain top-level C:\ECM Management System, NOT Program
+; Installs to a plain top-level C:\ECM Controller, NOT Program
 ; Files - direct consequence of a real bug found in testing: the app
 ; writes its own .ini, branding.bmp, and branding\icon.ico's [Branding]
 ; state straight next to the exe at runtime (get_ini_path()/
@@ -29,14 +29,14 @@
 ; instead of one tucked inside a user-profile folder (Documents,
 ; %LOCALAPPDATA%\Programs) that a corporate/shared machine could
 ; redirect or restrict differently per account.
-!define APP_NAME "ECM Management System"
+!define APP_NAME "ECM Controller"
 !define COMPANY_NAME "lankipolo123"
 !define APP_VERSION "1.0.0.0"
 !define EXE_NAME "digital_noise_config_multi.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
 Name "${APP_NAME}"
-OutFile "ECM_Management_System_Setup.exe"
+OutFile "ECM_Controller_Setup.exe"
 InstallDir "C:\${APP_NAME}"
 InstallDirRegKey HKCU "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir"
 RequestExecutionLevel user
