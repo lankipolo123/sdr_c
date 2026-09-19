@@ -14,21 +14,21 @@
 ; relative layout (dll\Transit.dll next to the exe) the app's own
 ; TRANSIT_DLL_PATH ("dll\\Transit.dll", connection.c) expects at runtime.
 ;
-; Installs under the user's Documents folder, NOT Program Files - direct
-; consequence of a real bug found in testing: the app writes its own
-; .ini, branding.bmp, and branding\icon.ico's [Branding] state straight
-; next to the exe at runtime (get_ini_path()/get_branding_bmp_path()/
-; get_branding_icon_path() in main.c - portable, no-installer-required
-; by design). Program Files needs admin rights to write to, so once
-; installed there, every one of those writes silently fails unless the
-; app is run elevated every single time - not just custom branding,
-; ALL persisted settings (port/baud, per-channel mode/level/output,
-; uptime) stop saving. Documents is always writable by the owning user,
-; no elevation prompt needed at all - same reasoning %LOCALAPPDATA%\
-; Programs had (that's still where VS Code and similar self-configuring
-; apps go), but Documents is an ordinary, always-visible folder instead
-; of one Explorer hides by default - direct request, it confused more
-; than it helped.
+; Installs to a plain top-level C:\ECM Management System, NOT Program
+; Files - direct consequence of a real bug found in testing: the app
+; writes its own .ini, branding.bmp, and branding\icon.ico's [Branding]
+; state straight next to the exe at runtime (get_ini_path()/
+; get_branding_bmp_path()/get_branding_icon_path() in main.c - portable,
+; no-installer-required by design). Program Files needs admin rights to
+; write to, so once installed there, every one of those writes silently
+; fails unless the app is run elevated every single time - not just
+; custom branding, ALL persisted settings (port/baud, per-channel mode/
+; level/output, uptime) stop saving. The root of C:\ is writable by a
+; standard user without elevation on a normal Windows install (unlike
+; Program Files/Windows) - direct request for a plain, top-level folder
+; instead of one tucked inside a user-profile folder (Documents,
+; %LOCALAPPDATA%\Programs) that a corporate/shared machine could
+; redirect or restrict differently per account.
 !define APP_NAME "ECM Management System"
 !define COMPANY_NAME "lankipolo123"
 !define APP_VERSION "1.0.0.0"
@@ -37,7 +37,7 @@
 
 Name "${APP_NAME}"
 OutFile "ECM_Management_System_Setup.exe"
-InstallDir "$DOCUMENTS\${APP_NAME}"
+InstallDir "C:\${APP_NAME}"
 InstallDirRegKey HKCU "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir"
 RequestExecutionLevel user
 Icon "src\app.ico"
