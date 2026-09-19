@@ -28,7 +28,30 @@ bool conn_connect(Connection *conn, const char *port_name, DWORD baud, char pari
 
     if (!transit_dll_is_loaded(&conn->dll) && !transit_dll_load(&conn->dll, TRANSIT_DLL_PATH)) {
         if (conn->cb.on_error) {
-            conn->cb.on_error("Transit.dll not found/loadable", conn->cb.ctx);
+            /* The generic "not found/loadable" message alone left every
+             * real-world failure (missing file, wrong architecture, a
+             * missing dependency like the VC++ Redistributable Transit.dll
+             * itself needs, or a genuinely incompatible DLL) looking
+             * identical - direct report of exactly that ambiguity on real
+             * hardware. FormatMessageA turns the actual Win32 reason
+             * transit_dll_load() captured (see TransitDll.last_error) into
+             * readable text instead of just a bare error number. */
+            char msg[256];
+            char reason[160];
+            DWORD err = conn->dll.last_error;
+            DWORD n;
+
+            n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                NULL, err, 0, reason, (DWORD)sizeof(reason), NULL);
+            if (n == 0) {
+                lstrcpynA(reason, "unknown reason", (int)sizeof(reason));
+            } else {
+                while (n > 0 && (reason[n - 1] == '\r' || reason[n - 1] == '\n')) {
+                    reason[--n] = '\0';
+                }
+            }
+            wsprintfA(msg, "Transit.dll not found/loadable (error %lu: %s)", err, reason);
+            conn->cb.on_error(msg, conn->cb.ctx);
         }
         return false;
     }

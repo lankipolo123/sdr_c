@@ -39,6 +39,16 @@ typedef const char *(*TransitGetPasswordFn)(void);
 typedef struct {
     HMODULE handle;
 
+    /* GetLastError() at the point transit_dll_load() failed - either
+     * LoadLibraryA's own error (file missing, wrong architecture, or a
+     * dependency DLL it needs isn't present - e.g. no matching Visual
+     * C++ Redistributable installed) or GetProcAddress's (loaded fine,
+     * but missing a required export - wrong/incompatible DLL). 0 if
+     * transit_dll_load() hasn't been called or last succeeded. See
+     * conn_connect()'s error message, which turns this into readable
+     * text via FormatMessageA instead of just the generic failure. */
+    DWORD last_error;
+
     /* Confirmed shape - safe to call directly. */
     TransitStatusFn auto_connect_sdr;
     TransitStatusFn check_connection;

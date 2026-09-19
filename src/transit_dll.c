@@ -1,10 +1,13 @@
 #include "transit_dll.h"
 
 bool transit_dll_load(TransitDll *dll, const char *dll_path) {
+    DWORD err;
+
     ZeroMemory(dll, sizeof(*dll));
 
     dll->handle = LoadLibraryA(dll_path);
     if (dll->handle == NULL) {
+        dll->last_error = GetLastError();
         return false;
     }
 
@@ -22,8 +25,11 @@ bool transit_dll_load(TransitDll *dll, const char *dll_path) {
 
     if (!dll->auto_connect_sdr || !dll->check_connection || !dll->disconnect_sdr ||
         !dll->command_tokens || !dll->send_command_to_sdr) {
+        err = GetLastError(); /* the last failing GetProcAddress's reason - saved
+                                * off before ZeroMemory below wipes the struct */
         FreeLibrary(dll->handle);
         ZeroMemory(dll, sizeof(*dll));
+        dll->last_error = err;
         return false;
     }
 
