@@ -2,7 +2,9 @@
 ; Build with: makensis installer.nsi
 ;
 ; Expects, in this same directory:
-;   digital_noise_config_multi.exe  (built via build.bat/the mingw command in README)
+;   digital_noise_config_multi.exe  (built via build.bat/the mingw command in
+;                                     README - installed as ECMController.exe,
+;                                     see EXE_NAME/OLD_EXE_NAME below)
 ;   dll\Transit.dll                 (the proprietary vendor DLL - never committed to
 ;                                     git, see .gitignore's own comment on dll/ -
 ;                                     whoever builds the installer needs their own
@@ -32,7 +34,14 @@
 !define APP_NAME "ECM Controller"
 !define COMPANY_NAME "lankipolo123"
 !define APP_VERSION "1.0.0.0"
-!define EXE_NAME "digital_noise_config_multi.exe"
+; The build output is still digital_noise_config_multi.exe (unchanged -
+; see build.bat/README) - installed under this different name via
+; File's /oname below. Direct request: a genuinely new filename on the
+; target machine sidesteps any lock/cache confusion tied to the old
+; name entirely, instead of relying only on CloseRunningApp actually
+; having released the old one in time.
+!define EXE_NAME "ECMController.exe"
+!define OLD_EXE_NAME "digital_noise_config_multi.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
 Name "${APP_NAME}"
@@ -105,7 +114,10 @@ Section "Install"
     !insertmacro CloseRunningApp "install"
 
     SetOutPath "$INSTDIR"
-    File "${EXE_NAME}"
+    ; Cleans up a leftover exe from an older install that still used
+    ; OLD_EXE_NAME - harmless no-op (no error) if it isn't there.
+    Delete "$INSTDIR\${OLD_EXE_NAME}"
+    File "/oname=${EXE_NAME}" "${OLD_EXE_NAME}"
 
     SetOutPath "$INSTDIR\dll"
     File "dll\Transit.dll"
@@ -133,6 +145,7 @@ Section "Uninstall"
     !insertmacro CloseRunningApp "uninstall"
 
     Delete "$INSTDIR\${EXE_NAME}"
+    Delete "$INSTDIR\${OLD_EXE_NAME}"
     Delete "$INSTDIR\dll\Transit.dll"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR\dll"
