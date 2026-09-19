@@ -1558,17 +1558,36 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         draw_app_logo_faded(hdc, (blend_rc.left + blend_rc.right) / 2,
                              (blend_rc.top + blend_rc.bottom) / 2, 70, 90);
 
-        /* Sensor location dot - a plain white filled circle marking
-         * exactly where each bay's reading is taken from (direct
-         * request/reference mockup), with a thin dark outline so it
-         * stays visible against the lighter end of the heat blend
-         * behind it. Drawn on top of the blobs/watermark, under the
-         * BAY/reading labels below. */
+        /* Sensor location marker - a soft accent-blue halo (same
+         * elliptic-clip + alpha_fill_rect idiom the heat blobs above
+         * use) behind a crisp white dot with an accent-blue ring, so it
+         * reads as a real instrument marker (matching the accent color
+         * used everywhere else in this app - Connect/Kill Switch/
+         * section headings) instead of a plain flat sticker. Drawn on
+         * top of the blobs/watermark, under the BAY/reading labels
+         * below. */
         for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-            HBRUSH dot_brush = CreateSolidBrush(RGB(255, 255, 255));
-            HPEN dot_pen = CreatePen(PS_SOLID, 1, RGB(20, 20, 22));
-            HBRUSH old_brush = (HBRUSH)SelectObject(hdc, dot_brush);
-            HPEN old_dot_pen = (HPEN)SelectObject(hdc, dot_pen);
+            static const int halo_r = 13;
+            RECT halo_bounds;
+            HRGN halo_rgn;
+            HBRUSH dot_brush;
+            HPEN dot_pen;
+            HBRUSH old_brush;
+            HPEN old_dot_pen;
+
+            halo_rgn = CreateEllipticRgn(dot_x[i] - halo_r, dot_y[i] - halo_r, dot_x[i] + halo_r, dot_y[i] + halo_r);
+            halo_bounds.left = dot_x[i] - halo_r; halo_bounds.top = dot_y[i] - halo_r;
+            halo_bounds.right = dot_x[i] + halo_r; halo_bounds.bottom = dot_y[i] + halo_r;
+            SelectClipRgn(hdc, panel_rgn);
+            ExtSelectClipRgn(hdc, halo_rgn, RGN_AND);
+            alpha_fill_rect(hdc, halo_bounds, COLOR_APP_ACCENT, 110);
+            DeleteObject(halo_rgn);
+            SelectClipRgn(hdc, panel_rgn);
+
+            dot_brush = CreateSolidBrush(RGB(255, 255, 255));
+            dot_pen = CreatePen(PS_SOLID, 2, COLOR_APP_ACCENT);
+            old_brush = (HBRUSH)SelectObject(hdc, dot_brush);
+            old_dot_pen = (HPEN)SelectObject(hdc, dot_pen);
             Ellipse(hdc, dot_x[i] - dot_r, dot_y[i] - dot_r, dot_x[i] + dot_r, dot_y[i] + dot_r);
             SelectObject(hdc, old_brush);
             SelectObject(hdc, old_dot_pen);
@@ -1686,12 +1705,17 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 lrc.bottom = lrc.top + label_h;
             }
 
+            /* BAY label tinted with the same blue used for every other
+             * section heading in this app (COLOR_APP_HEADER) instead of
+             * plain white - reads as a caption for the bold white
+             * reading below it, a clearer label/value hierarchy than
+             * two same-weight white lines. */
             old_font = (HFONT)SelectObject(hdc, label_font ? label_font : g_font);
             SetTextColor(hdc, RGB(10, 10, 12));
             OffsetRect(&lrc, 1, 1);
             DrawTextA(hdc, blabel, -1, &lrc, align);
             OffsetRect(&lrc, -1, -1);
-            SetTextColor(hdc, RGB(255, 255, 255));
+            SetTextColor(hdc, COLOR_APP_HEADER);
             DrawTextA(hdc, blabel, -1, &lrc, align);
 
             SelectObject(hdc, num_font ? num_font : g_font);
