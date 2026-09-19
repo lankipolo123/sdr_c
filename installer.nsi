@@ -60,8 +60,50 @@ UninstallIcon "src\app.ico"
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
+!include "WinMessages.nsh"
+
+; Used by both Section "Install" and Section "Uninstall" below - closes
+; a running copy of the app first so File/Delete never hits a locked-
+; file error. That error (same Abort/Retry/Ignore dialog as a real
+; permissions failure) is the actual cause of a real report: "the
+; installer says done but the app still looks old" - clicking Ignore
+; on it (instead of closing the app and Retry) makes NSIS silently
+; skip that one file while still reporting overall success, so nothing
+; visibly failed even though the exe never actually got replaced.
+; WM_CLOSE on the main window falls through to DefWindowProc's default
+; DestroyWindow, which this app's own WM_DESTROY handler (main.c)
+; already cleans up and exits from cleanly - there's no "unsaved
+; changes?" prompt to get stuck behind. Capped at 20 tries (~4s) so a
+; genuinely stuck window can't hang the installer forever; the File/
+; Delete calls that follow still run either way, just back to hitting
+; the original locked-file prompt if closing it really didn't work.
+; Takes a unique tag (used only to build unique label names below,
+; since this macro is inserted twice - Install and Uninstall - and
+; NSIS labels aren't macro-scoped, so reusing the same label names
+; both places would be a duplicate-label compile error).
+!macro CloseRunningApp UNIQ
+    StrCpy $1 0
+    close_loop_${UNIQ}:
+        FindWindow $0 "DigitalNoiseConfigMultiMainWindow"
+        StrCmp $0 0 close_done_${UNIQ}
+        IntCmp $1 20 close_done_${UNIQ} keep_trying_${UNIQ} close_done_${UNIQ}
+        keep_trying_${UNIQ}:
+        ; A bare SendMessage blocks until the target's message loop
+        ; handles it, with no time limit - fine for this app's own
+        ; trivial WM_CLOSE handling, but a genuinely hung process could
+        ; otherwise hang the INSTALLER itself despite the retry cap
+        ; above (which only helps once SendMessage actually returns).
+        ; /TIMEOUT bounds that.
+        SendMessage $0 ${WM_CLOSE} 0 0 /TIMEOUT=2000
+        Sleep 200
+        IntOp $1 $1 + 1
+        Goto close_loop_${UNIQ}
+    close_done_${UNIQ}:
+!macroend
 
 Section "Install"
+    !insertmacro CloseRunningApp "install"
+
     SetOutPath "$INSTDIR"
     File "${EXE_NAME}"
 
@@ -88,6 +130,8 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+    !insertmacro CloseRunningApp "uninstall"
+
     Delete "$INSTDIR\${EXE_NAME}"
     Delete "$INSTDIR\dll\Transit.dll"
     Delete "$INSTDIR\Uninstall.exe"
