@@ -24,10 +24,9 @@
 #include "channels.h"
 #include "sensor.h"
 
-/* Widened 1403 -> 1660 so the dead-space strip right of the grid
- * (get_signal_area_rect()) always has room for the Ambient Temperature
- * heatmap + its moved controls (see build_controls()) even at the
- * window's minimum/design size. */
+/* Widened 1403 -> 1660 so the header row always has room for the
+ * Ambient Temperature heatmap + its moved controls (see
+ * build_controls()) even at the window's minimum/design size. */
 /* Was 1904 briefly (1804 + 100 more so the heatmap read wider), then
  * 1804 - both pushed the window's own MINIMUM size past what fits on a
  * real screen, so the window (which starts maximized, but can never
@@ -38,9 +37,8 @@
  * direct follow-up request to shrink the heatmap specifically: it
  * fills whatever's left of this width (see add_sensor_heatmap()'s own
  * call), so this also takes it back to its original ~430px size,
- * while CARD_W stays at its own wider 260 (kept - the grid + row
- * labels still fit inside 1660 with room to spare, see GRID_RIGHT's
- * own comment). */
+ * while CARD_W still fits inside 1660 with room to spare, see
+ * GRID_RIGHT's own comment). */
 #define CLIENT_WIDTH  1660
 #define CLIENT_HEIGHT 702
 
@@ -169,18 +167,16 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * for why). CARD_H sizes to fit the level gauge/tick-label column now
  * - the bottom-row Bandwidth/Address statics that used to extend it
  * are gone too, removed at the same time as the temperature/humidity
- * readouts before them.
- * Widened again 224 -> 260 - direct request for more width. CLIENT_WIDTH
- * grows by 4x this delta (one per column) so GRID_RIGHT-anchored things
- * (the signal-wave strip) keep the same margin they had before. */
-#define CARD_W 236 /* was 260 - shrunk a bit now that the level tick labels
-                     * read "Mid" instead of "Medium" and no longer need as
-                     * much width; SIDEBAR_W grew into the space this and
-                     * the removed row labels gave back (see its own
-                     * comment). */
+ * readouts before them. */
+#define CARD_W 272 /* was 236 - the HelixDefender mark + signal-wave pulse
+                     * that used to animate in the dead space right of the
+                     * grid are gone (direct request - it wasn't doing
+                     * anything but decoration), so that space went into
+                     * making the cards themselves a little bigger instead
+                     * of sitting unused. */
 #define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
-#define GRID_LEFT 420 /* was 380 - shifted right by the same 40px SIDEBAR_W grew by */
+#define GRID_LEFT 450 /* was 420 - shifted right by the same 30px SIDEBAR_W grew by */
 #define GRID_TOP CONTENT_TOP
 
 /* Cards used to stay fixed at CARD_W x CARD_H no matter how tall the
@@ -196,26 +192,17 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
 
 /* Right edge of the 4-column grid - GRID_LEFT plus 4 card widths and 3
  * gaps between them (no trailing gap after the last column). Anything
- * wider than this, the grid itself never uses (see CARD_H_MAX's
- * comment on why cards don't grow sideways) - see
- * get_signal_area_rect() for what fills that space instead. */
+ * wider than this (up to CLIENT_WIDTH - SIDEBAR_X) is now just plain
+ * background - see CARD_H_MAX's comment on why cards don't grow
+ * sideways instead, and CARD_W's own comment on why that margin isn't
+ * as wide as it used to be. */
 #define GRID_RIGHT (GRID_LEFT + GRID_COLS * (CARD_W + CARD_GAP) - CARD_GAP)
-#define SIGNAL_TICKS_PER_STEP 3 /* 300ms per pulse step at ID_POLL_TIMER's 100ms */
-
-/* Left edge of the dead-space strip right of the grid (same anchor
- * get_signal_area_rect() uses) - the red-boxed area Ambient
- * Temperature's heatmap and its moved Port/Refresh/Connect/status/Avg
- * controls now live in. The 1st/2nd/3rd/4th row labels that used to be
- * carved out of this strip are gone (direct request) - SIDEBAR_W grew
- * into the width that freed up instead (see its own comment). */
-#define SIG_STRIP_X (GRID_RIGHT + CARD_GAP)
-#define SIG_STRIP_CONTENT_X (SIG_STRIP_X + 6)
 
 #define SIDEBAR_X 10
-#define SIDEBAR_W 400 /* was 360 - grown into the width the removed
-                        * 1st/2nd/3rd/4th row labels freed up; GRID_LEFT
-                        * shifted right by the same 40px to keep its gap
-                        * off the sidebar's own right edge. */
+#define SIDEBAR_W 430 /* was 400 - grew along with CARD_W once the signal-
+                        * wave dead space wasn't needed for anything else;
+                        * GRID_LEFT shifted right by the same 30px to keep
+                        * its gap off the sidebar's own right edge. */
 
 /* Flush against the bottom of the sidebar box (itself pinned to the
  * grid's height) rather than added below it - keeps the sidebar's
@@ -368,14 +355,6 @@ static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the sidebar's static labels these need
                                  * their own handle to reposition. */
 static HWND g_log_header_lbl;
-/* Drives the signal-wave pulse drawn in the dead space right of the
- * grid (see get_signal_area_rect()) - advances every
- * SIGNAL_TICKS_PER_STEP ticks of ID_POLL_TIMER while active, see
- * WM_TIMER's handling below. */
-static int g_signal_wave_phase;
-static int g_signal_tick_counter;
-static bool g_signal_active_prev; /* so WM_TIMER can repaint once, not every
-                                    * tick, on the transition to inactive */
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
@@ -614,36 +593,10 @@ static void make_combo_readonly(HWND combo) {
     make_combo_readonly_ex(combo, NULL);
 }
 
-/* Used by the signal-wave draw (is there anything to show a "signal"
- * for?) and WM_TIMER's animation gating. */
-static bool any_channel_on(void) {
-    int i;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        if (channels_get(i)->output_on) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* How many of the 16 channels are actually transmitting right now -
- * feeds the ring count in draw_signal_waves() so the icon reads as
- * "how much is live", not just "something is live". */
-static int count_channels_on(void) {
-    int i, n = 0;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        if (channels_get(i)->output_on) {
-            n++;
-        }
-    }
-    return n;
-}
-
 /* Forward declaration - defined further down, but panel_subclass_proc
  * below needs it for the header's logo mark. */
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
 static void draw_app_logo_silhouette(HDC hdc, int cx, int cy, int scale, COLORREF color);
-static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase, int active_count, const RECT *bounds);
 
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
@@ -1101,10 +1054,9 @@ static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale) {
     SelectObject(hdc, old_pen);
 }
 
-/* Faded/idle rendering of the logo mark (halo + mark, no signal-wave
- * arcs) - used in the dead-space area when nothing's actually
- * transmitting, so that spot always shows something rather than
- * flipping between "the icon" and "totally blank". True per-pixel
+/* Faded/idle rendering of the logo mark (halo + mark) - watermarked
+ * over the Ambient Temperature heatmap's blend so that spot always
+ * shows something rather than being totally blank. True per-pixel
  * alpha isn't available here (no PNG/32bpp-alpha pipeline in this
  * app), so this fakes constant-opacity fade the standard GDI way:
  * snapshot the real background into an off-screen bitmap, draw the
@@ -1138,90 +1090,6 @@ static void draw_app_logo_faded(HDC hdc, int cx, int cy, int scale, BYTE alpha) 
     SelectObject(mem_dc, old_bmp);
     DeleteObject(mem_bmp);
     DeleteDC(mem_dc);
-}
-
-/* Unit-circle points for a 0deg-180deg sweep (west -> north -> east),
- * 15deg apart - a lookup table instead of calling sin()/cos() at
- * paint time, since nothing else in this file links libm and this
- * avoids being the first thing that needs to. Used to trace an upward-
- * opening "signal wave" arc above the logo mark: y is subtracted (not
- * added) because screen Y increases downward, so "north" needs to
- * read as smaller y. */
-static const double WAVE_ARC_COS[13] = {
-    1.0, 0.966, 0.866, 0.707, 0.5, 0.259, 0.0,
-    -0.259, -0.5, -0.707, -0.866, -0.966, -1.0
-};
-static const double WAVE_ARC_SIN[13] = {
-    0.0, 0.259, 0.5, 0.707, 0.866, 0.966, 1.0,
-    0.966, 0.866, 0.707, 0.5, 0.259, 0.0
-};
-
-static void draw_wave_arc(HDC hdc, int cx, int apex_y, int r, COLORREF color) {
-    POINT pts[13];
-    HPEN pen, old_pen;
-    int i;
-
-    for (i = 0; i < 13; i++) {
-        pts[i].x = cx - (int)(r * WAVE_ARC_COS[i] + 0.5);
-        pts[i].y = apex_y - (int)(r * WAVE_ARC_SIN[i] + 0.5);
-    }
-    pen = CreatePen(PS_SOLID, 2, color);
-    old_pen = (HPEN)SelectObject(hdc, pen);
-    Polyline(hdc, pts, 13);
-    SelectObject(hdc, old_pen);
-    DeleteObject(pen);
-}
-
-/* Concentric "broadcast" arcs above the logo mark's own top vertex
- * (see logo_points()/LOGO_LEFT_BASE - the mark's highest point is
- * (cx, cy - 32*scale/100)), one lit blue at a time cycling outward
- * with phase - a traveling pulse rather than all rings static, since a
- * static set reads as decoration while the animation reads as "this
- * is live". Dim gray (RGB(90,93,98), roughly mid-way between the
- * panel background and the diamonds' own dark gray) for the rest so
- * they're still visible as context, not just gone.
- *
- * How many rings show scales with active_count (how many of the 16
- * channels are actually ON, from count_channels_on()) rather than
- * always drawing the same fixed set - a handful of live channels
- * still reads as a real broadcast (not a single lonely ring - that
- * read as broken, not "just started"), the whole rack going up reads
- * as a bigger one. Capped by bounds (the reserved signal area - see
- * get_signal_area_rect()) so a narrow/short window never grows rings
- * out past the space actually reserved for them. */
-#define SIGNAL_WAVE_MIN_RINGS 3
-#define SIGNAL_WAVE_MAX_RINGS 8
-static void draw_signal_waves(HDC hdc, int cx, int cy, int scale, int phase, int active_count, const RECT *bounds) {
-    static const int base_r[SIGNAL_WAVE_MAX_RINGS] = { 16, 28, 40, 52, 64, 76, 88, 100 };
-    int apex_y = cy - (32 * scale / 100);
-    int margin = 6;
-    int max_r_h = (bounds->right - bounds->left) / 2 - margin;
-    int max_r_v = apex_y - bounds->top - margin;
-    int max_r = max_r_h < max_r_v ? max_r_h : max_r_v;
-    int span = SIGNAL_WAVE_MAX_RINGS - SIGNAL_WAVE_MIN_RINGS;
-    int want = SIGNAL_WAVE_MIN_RINGS
-        + ((active_count - 1) * span + (MAX_CHANNELS - 2)) / (MAX_CHANNELS - 1);
-    int n = 0, i;
-
-    if (want < SIGNAL_WAVE_MIN_RINGS) {
-        want = SIGNAL_WAVE_MIN_RINGS;
-    } else if (want > SIGNAL_WAVE_MAX_RINGS) {
-        want = SIGNAL_WAVE_MAX_RINGS;
-    }
-    for (i = 0; i < want; i++) {
-        if (base_r[i] * scale / 100 > max_r) {
-            break;
-        }
-        n++;
-    }
-    if (n == 0) {
-        n = 1; /* still show the innermost ring even in a cramped area */
-    }
-    for (i = 0; i < n; i++) {
-        int r = base_r[i] * scale / 100;
-        bool lit = (phase % n) == i;
-        draw_wave_arc(hdc, cx, apex_y, r, lit ? COLOR_APP_ACCENT : RGB(90, 93, 98));
-    }
 }
 
 static void draw_header_icon(HDC hdc, int x, int y, int type) {
@@ -1957,10 +1825,16 @@ static void on_connect_clicked(void) {
         return;
     }
 
-    if (GetDlgItemTextA(g_hwnd, IDC_PORT_COMBO, port, sizeof(port)) == 0) {
-        MessageBoxA(g_hwnd, "Select a port first", "No port", MB_OK | MB_ICONWARNING);
-        return;
-    }
+    /* No "select a port first" gate here on purpose - unlike the sensor
+     * connection below, this one's port_name is accepted only for
+     * interface compatibility and never actually used (see
+     * connection.h's comment on conn_connect(): AutoConnectSDR finds
+     * the RS422 dongle itself). The dongle isn't a standard Windows COM
+     * port device, so on a machine with nothing else serial attached,
+     * IDC_PORT_COMBO is correctly empty - requiring text here used to
+     * block Connect entirely on exactly that machine, over a field the
+     * DLL never reads. */
+    GetDlgItemTextA(g_hwnd, IDC_PORT_COMBO, port, sizeof(port));
 
     baud_idx = (int)SendDlgItemMessageA(g_hwnd, IDC_BAUD_COMBO, CB_GETCURSEL, 0, 0);
     baud = BAUD_OPTIONS[baud_idx];
@@ -4441,34 +4315,6 @@ static int log_panel_y_for(int card_h) {
     return CONTENT_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H;
 }
 
-/* Where the HelixDefender mark + signal-wave pulse draw, in the dead
- * space right of the grid (see CARD_H_MAX's comment on why the grid
- * itself never widens to fill it) - drawn straight onto the main
- * window's own background in WM_ERASEBKGND, not a separate child
- * window/panel: an earlier version used a child window there and even
- * borderless it still read as a distinct box sitting in the
- * background (direct feedback: "why is there a card here"), because
- * its own fill could never quite be the SAME paint call as the
- * surrounding dot pattern. Drawing inline after that same fill has no
- * seam to see, because there isn't a second rect at all. Returns false
- * (nothing to draw) when there isn't SIGNAL_AREA_MIN_W of room, using
- * the last size relayout_for_size() actually ran for. */
-#define SIGNAL_AREA_MIN_W 100
-static bool get_signal_area_rect(RECT *out) {
-    int card_h = channel_card_height(g_last_client_h);
-    int log_y = log_panel_y_for(card_h);
-    int x = SIG_STRIP_X;
-    int w = g_last_client_w - SIDEBAR_X - x;
-    if (w < SIGNAL_AREA_MIN_W) {
-        return false;
-    }
-    out->left = x;
-    out->top = CONTENT_TOP;
-    out->right = x + w;
-    out->bottom = log_y + LOG_PANEL_H;
-    return true;
-}
-
 /* Recomputes the whole layout for a new client size: the header bar
  * stretches horizontally to fill the wider client area, and the 16
  * cards grow TALLER (never wider - see CARD_H_MAX's comment on why
@@ -4644,9 +4490,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         case WM_TIMER:
             if (wParam == ID_POLL_TIMER) {
-                bool signal_active;
-                RECT sig_rc;
-
                 conn_poll(&g_conn);
                 channels_poll();
                 ui_refresh_all_channels();
@@ -4694,33 +4537,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
 
                 InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
-
-                /* Signal-wave pulse - stepped every SIGNAL_TICKS_PER_STEP
-                 * ticks (slower than the 100ms poll itself would give a
-                 * distractingly fast flicker), plus one extra repaint
-                 * right on any active<->inactive edge (in either
-                 * direction) so the switch between the dim idle icon
-                 * and the full lit-up mark+arcs is immediate instead of
-                 * waiting up to SIGNAL_TICKS_PER_STEP ticks. Only that
-                 * one small rect is invalidated (with erase, so
-                 * WM_ERASEBKGND's draw actually reruns), not the whole
-                 * window. */
-                signal_active = conn_is_connected(&g_conn) && any_channel_on();
-                if (signal_active) {
-                    g_signal_tick_counter++;
-                    if (!g_signal_active_prev || g_signal_tick_counter >= SIGNAL_TICKS_PER_STEP) {
-                        g_signal_tick_counter = 0;
-                        g_signal_wave_phase++;
-                        if (get_signal_area_rect(&sig_rc)) {
-                            InvalidateRect(hwnd, &sig_rc, TRUE);
-                        }
-                    }
-                } else if (g_signal_active_prev) {
-                    if (get_signal_area_rect(&sig_rc)) {
-                        InvalidateRect(hwnd, &sig_rc, TRUE);
-                    }
-                }
-                g_signal_active_prev = signal_active;
             }
             return 0;
 
@@ -4767,44 +4583,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             /* Pattern brush already encodes the page background color
              * in its tile - no separate full-rect FillRect needed. */
             FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
-
-            /* HelixDefender mark + signal-wave pulse, straight over the
-             * dot pattern just filled above - see
-             * get_signal_area_rect()'s comment for why this is drawn
-             * inline here rather than as a separate window. Always
-             * shows the mark itself (so that spot isn't just blank
-             * background) - full brightness with the pulsing arcs
-             * while actually connected and transmitting, faded to a
-             * dim idle icon (no arcs - nothing to show a signal for)
-             * otherwise. */
-            {
-                RECT sig_rc;
-                if (get_signal_area_rect(&sig_rc)) {
-                    /* Sits below the moved Ambient Temperature commands
-                     * in this same strip (title/Port/Connect/status/Avg/
-                     * Kill Switch - see build_controls()), not vertically
-                     * centered in the whole strip like before - direct
-                     * request once those became real controls sharing
-                     * the space instead of the mark owning all of it.
-                     * Horizontally centered on the strip's OWN actual
-                     * width (sig_rc.left/right), not a fixed offset from
-                     * the left edge - a fixed offset put the mark right
-                     * up against the strip's right edge at the default
-                     * window width, direct complaint. sig_rc itself is
-                     * unchanged (still the full strip) - also used as
-                     * draw_signal_waves()'s clip bounds, which is
-                     * harmless to leave generous. */
-                    int cx = (sig_rc.left + sig_rc.right) / 2;
-                    int cy = CONTENT_TOP + 370;
-                    if (conn_is_connected(&g_conn) && any_channel_on()) {
-                        draw_app_logo_silhouette(hdc, cx, cy, 64, RGB(255, 255, 255));
-                        draw_app_logo_mark(hdc, cx, cy, 60);
-                        draw_signal_waves(hdc, cx, cy, 60, g_signal_wave_phase, count_channels_on(), &sig_rc);
-                    } else {
-                        draw_app_logo_faded(hdc, cx, cy, 60, 110); /* ~43% opacity */
-                    }
-                }
-            }
             return 1;
         }
 
