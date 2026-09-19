@@ -105,7 +105,7 @@ static const char *const PARITY_LABELS[] = { "None", "Odd", "Even", "Mark", "Spa
 static const char PARITY_CODES[] = { 'N', 'O', 'E', 'M', 'S' };
 #define PARITY_OPTIONS_COUNT 5
 
-static const char *const LEVEL_LABELS[] = { "Off", "Low", "Medium", "High" };
+static const char *const LEVEL_LABELS[] = { "Off", "Low", "Mid", "High" };
 
 /* Kill switch: rack-wide, not per-channel - there are only 6 physical
  * sensors scanning the area, not one per RF channel, so there's no
@@ -179,7 +179,10 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * Widened again 224 -> 260 - direct request for more width. CLIENT_WIDTH
  * grows by 4x this delta (one per column) so GRID_RIGHT-anchored things
  * (row labels, signal-wave strip) keep the same margin they had before. */
-#define CARD_W 260
+#define CARD_W 236 /* was 260 - shrunk a bit now that the level tick labels
+                     * read "Mid" instead of "Medium" and no longer need as
+                     * much width; the row-label strip gets that space back
+                     * (see ROW_LABEL_STRIP_W below). */
 #define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
 #define GRID_LEFT 380
@@ -211,20 +214,19 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * signal-wave mark (get_signal_area_rect()) is shifted right by this
  * same width and drawn a little smaller to make room, rather than the
  * strip eating into its existing space. */
-#define ROW_LABEL_STRIP_W 52
-/* Vertical (one upright character per line, via '\n' in the string -
- * see row_lbl_text[] in build_controls()) stays - a "Rows" heading
- * above the column only shortened the text itself to "1st"/"2nd"/
- * "3rd"/"4th" instead of spelling out "row" on every one of them; it
- * was never a request to go horizontal. 3 lines ("1"/"s"/"t") at the
- * normal UI font. */
+#define ROW_LABEL_STRIP_W 64 /* was 52 - widened for plain horizontal
+                               * "1st"/"2nd"/"3rd"/"4th" text (see
+                               * row_lbl_text[] in build_controls()),
+                               * replacing the old one-character-per-line
+                               * vertical layout. CARD_W gave back the
+                               * width this needed (see its own comment). */
 /* A small fixed gap off the card edge, not centered in the middle of
  * the wider ROW_LABEL_STRIP_W dead space - direct complaint that the
  * labels read as floating, detached from the cards they're labeling,
  * rather than sitting snug next to them. */
 #define ROW_LABEL_GAP 4
-#define ROW_LABEL_W 24
-#define ROW_LABEL_H 52
+#define ROW_LABEL_W 48 /* was 24 - wide enough for horizontal "2nd"/"3rd" text */
+#define ROW_LABEL_H 18 /* was 52 - a single text line now, not 3 stacked characters */
 /* Wider than ROW_LABEL_W - "Rows" is one line of real text (not one
  * character per line like the labels below it) and clips inside a
  * box that narrow. Centered over the label column below it. */
@@ -2911,7 +2913,7 @@ static void add_channel_card(HWND hwnd, int index) {
     add_channel_gauge(hwnd, x + 148, y + 24, 22, 72, channel_track_id(index));
 
     add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 174, y + 24, 44, 14, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Medium", SS_LEFT | SS_NOPREFIX, x + 174, y + 42, 44, 14, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Mid",    SS_LEFT | SS_NOPREFIX, x + 174, y + 42, 44, 14, channel_lbl_medium_id(index));
     add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 174, y + 60, 44, 14, channel_lbl_low_id(index));
     add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 174, y + 78, 44, 14, channel_lbl_off_id(index));
 
@@ -3234,11 +3236,10 @@ static void spectrum_draw_grid(HDC hdc, RECT rc) {
 static void draw_spectrum_freq_axis(HDC hdc, RECT axis_rc, RECT grid_rc, int channel_index) {
     int freq = channel_freq_mhz(channel_index);
     int half_bw = channel_bandwidth_mhz(channel_index) / 2;
-    char lo_label[16], mid_label[16], hi_label[16];
+    char lo_label[16], hi_label[16];
     HFONT old_font;
 
     wsprintfA(lo_label, "%d", freq - half_bw);
-    wsprintfA(mid_label, "%d MHz", freq);
     wsprintfA(hi_label, "%d", freq + half_bw);
 
     old_font = (HFONT)SelectObject(hdc, g_font);
@@ -3246,11 +3247,8 @@ static void draw_spectrum_freq_axis(HDC hdc, RECT axis_rc, RECT grid_rc, int cha
     SetBkMode(hdc, TRANSPARENT);
     {
         RECT lo_rc = axis_rc; lo_rc.left = grid_rc.left; lo_rc.right = grid_rc.left + 60;
-        RECT mid_rc = axis_rc; mid_rc.left = (grid_rc.left + grid_rc.right) / 2 - 40;
-        mid_rc.right = mid_rc.left + 80;
         RECT hi_rc = axis_rc; hi_rc.right = grid_rc.right; hi_rc.left = hi_rc.right - 60;
         DrawTextA(hdc, lo_label, -1, &lo_rc, DT_SINGLELINE | DT_NOCLIP | DT_LEFT | DT_VCENTER);
-        DrawTextA(hdc, mid_label, -1, &mid_rc, DT_SINGLELINE | DT_NOCLIP | DT_CENTER | DT_VCENTER);
         DrawTextA(hdc, hi_label, -1, &hi_rc, DT_SINGLELINE | DT_NOCLIP | DT_RIGHT | DT_VCENTER);
     }
     SelectObject(hdc, old_font);
@@ -4251,7 +4249,7 @@ static void build_controls(HWND hwnd) {
 
         add_ctrl(hwnd, "BUTTON", "High", BS_OWNERDRAW | WS_TABSTOP,
                  790 + BULK_X_SHIFT, 54, 84, 18, IDC_BULK_HIGH_BTN);
-        add_ctrl(hwnd, "BUTTON", "Medium", BS_OWNERDRAW | WS_TABSTOP,
+        add_ctrl(hwnd, "BUTTON", "Mid", BS_OWNERDRAW | WS_TABSTOP,
                  790 + BULK_X_SHIFT, 76, 84, 18, IDC_BULK_MEDIUM_BTN);
         add_ctrl(hwnd, "BUTTON", "Low", BS_OWNERDRAW | WS_TABSTOP,
                  790 + BULK_X_SHIFT, 98, 84, 18, IDC_BULK_LOW_BTN);
@@ -4340,12 +4338,14 @@ static void build_controls(HWND hwnd) {
     }
 
     /* Plain "1st"/"2nd"/"3rd"/"4th" per row, no "Rows" heading above
-     * them (removed - direct request). Design-time positions
-     * (card_h == CARD_H); relayout_for_size() repositions the four
-     * ordinal labels alongside the cards themselves as the window
-     * resizes. */
+     * them (removed - direct request). Horizontal, one line each (was
+     * one character per line, e.g. "1\ns\nt" - direct request to widen
+     * ROW_LABEL_STRIP_W and go back to normal horizontal text). Design-
+     * time positions (card_h == CARD_H); relayout_for_size() repositions
+     * the four ordinal labels alongside the cards themselves as the
+     * window resizes. */
     {
-        static const char *const row_lbl_text[GRID_ROWS] = { "1\ns\nt", "2\nn\nd", "3\nr\nd", "4\nt\nh" };
+        static const char *const row_lbl_text[GRID_ROWS] = { "1st", "2nd", "3rd", "4th" };
         int row;
         for (row = 0; row < GRID_ROWS; row++) {
             int row_cy = CONTENT_TOP + row * (CARD_H + CARD_GAP) + CARD_H / 2;
