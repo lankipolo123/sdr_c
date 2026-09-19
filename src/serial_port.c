@@ -113,32 +113,70 @@ int serial_list_ports(char names[][16], int max_ports) {
     HKEY key;
     int count = 0;
     DWORD index = 0;
+    int i;
 
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM",
-                       0, KEY_READ, &key) != ERROR_SUCCESS) {
-        return 0;
-    }
-
-    for (;;) {
-        char value_name[256];
-        DWORD value_name_len = sizeof(value_name);
-        char data[16];
-        DWORD data_len = sizeof(data);
-        DWORD type;
-        LONG rc = RegEnumValueA(key, index, value_name, &value_name_len,
-                                 NULL, &type, (BYTE *)data, &data_len);
-        if (rc == ERROR_NO_MORE_ITEMS) {
-            break;
-        }
-        if (rc == ERROR_SUCCESS && type == REG_SZ) {
-            if (count < max_ports) {
-                snprintf(names[count], 16, "%s", data);
+                       0, KEY_READ, &key) == ERROR_SUCCESS) {
+        for (;;) {
+            char value_name[256];
+            DWORD value_name_len = sizeof(value_name);
+            char data[16];
+            DWORD data_len = sizeof(data);
+            DWORD type;
+            LONG rc = RegEnumValueA(key, index, value_name, &value_name_len,
+                                     NULL, &type, (BYTE *)data, &data_len);
+            if (rc == ERROR_NO_MORE_ITEMS) {
+                break;
             }
-            count++;
+            if (rc == ERROR_SUCCESS && type == REG_SZ) {
+                if (count < max_ports) {
+                    snprintf(names[count], 16, "%s", data);
+                }
+                count++;
+            }
+            index++;
         }
-        index++;
+        RegCloseKey(key);
     }
 
-    RegCloseKey(key);
+    /* HARDWARE\DEVICEMAP\SERIALCOMM is normally reliable, but it's a
+     * mirror the serial class driver writes to - not the actual source
+     * of truth - and on at least one real machine (a Lenovo ThinkPad)
+     * it came back empty for a USB-to-serial adapter's COM port even
+     * though the port was genuinely present, openable, and visible in
+     * Device Manager. QueryDosDeviceA checks the same DOS device
+     * symlink table CreateFileA("\\\\.\\COMn") itself resolves through,
+     * so it catches every port that actually works, not just the ones
+     * a particular driver bothered to mirror into that key. Run as a
+     * supplement after the registry pass (not a replacement) so the
+     * common case keeps the registry's natural ordering, with anything
+     * missed filled in and deduped against it. */
+    for (i = 1; i <= 256; i++) {
+        char com_name[16];
+        char target[64];
+        int j;
+        bool already_have = false;
+
+        snprintf(com_name, sizeof(com_name), "COM%d", i);
+        if (QueryDosDeviceA(com_name, target, sizeof(target)) == 0) {
+            continue;
+        }
+
+        for (j = 0; j < count && j < max_ports; j++) {
+            if (lstrcmpiA(names[j], com_name) == 0) {
+                already_have = true;
+                break;
+            }
+        }
+        if (already_have) {
+            continue;
+        }
+
+        if (count < max_ports) {
+            snprintf(names[count], 16, "%s", com_name);
+        }
+        count++;
+    }
+
     return count;
 }
