@@ -1414,6 +1414,7 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         RECT rc;
         COLORREF corner[SENSOR_MAX_UNITS]; /* 0=BAY1 top-left, 1=BAY2 top-right,
                                               * 2=BAY3 bottom-left, 3=BAY4 bottom-right */
+        int dot_x[SENSOR_MAX_UNITS], dot_y[SENSOR_MAX_UNITS]; /* see below, where blend_rc is set */
         HFONT label_font, num_font, old_font;
         HPEN pen, old_pen;
         HRGN panel_rgn;
@@ -1422,6 +1423,7 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         RECT blend_rc;
         static const int panel_radius = 14;
         static const int legend_h = 22;
+        static const int dot_r = 6;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -1457,6 +1459,29 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * actually is, so the scan stays honest to read at a glance. */
         blend_rc = rc;
         blend_rc.bottom -= legend_h;
+
+        /* Where each bay's sensor dot actually sits - pulled well in
+         * from blend_rc's literal corners (direct request/reference
+         * mockup: a marker dot with its label above/below it and the
+         * heat blooming outward from THAT point, not from the panel's
+         * bare edge). Shared by the heat blob origins below, the dot
+         * itself, and the BAY/reading label placement, so all three
+         * agree on exactly where "the sensor" is. */
+        {
+            int blend_w = blend_rc.right - blend_rc.left;
+            int blend_h = blend_rc.bottom - blend_rc.top;
+            int inset_x = blend_w * 22 / 100;
+            /* Tall enough that the label stacked above a top-row dot
+             * (gap + reading + gap + label, ~44px - see the BAY/reading
+             * drawing loop below) still fits inside the panel instead of
+             * getting clipped against its top edge (direct report: "BAY
+             * 1"/"BAY 2" were showing as "AY 1"/"AY 2"). */
+            int inset_y = blend_h * 40 / 100;
+            dot_x[0] = blend_rc.left + inset_x;  dot_y[0] = blend_rc.top + inset_y;    /* BAY1 */
+            dot_x[1] = blend_rc.right - inset_x; dot_y[1] = blend_rc.top + inset_y;    /* BAY2 */
+            dot_x[2] = blend_rc.left + inset_x;  dot_y[2] = blend_rc.bottom - inset_y; /* BAY3 */
+            dot_x[3] = blend_rc.right - inset_x; dot_y[3] = blend_rc.bottom - inset_y; /* BAY4 */
+        }
 
         /* Corners the round-rect clip cuts off still need to show the
          * surrounding panel's own background, not whatever the blend
@@ -1506,17 +1531,15 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
              * outside the panel's own rounded bounds, however large its
              * radius is computed to be. */
             int blob_radius = (blend_w < blend_h ? blend_w : blend_h) * 7 / 10;
-            int corner_x[SENSOR_MAX_UNITS] = { blend_rc.left, blend_rc.right, blend_rc.left, blend_rc.right };
-            int corner_y[SENSOR_MAX_UNITS] = { blend_rc.top, blend_rc.top, blend_rc.bottom, blend_rc.bottom };
             int c, ri;
 
             for (c = 0; c < SENSOR_MAX_UNITS; c++) {
                 for (ri = 0; ri < (int)(sizeof(rings) / sizeof(rings[0])); ri++) {
                     int r = blob_radius * rings[ri].radius_pct / 100;
                     RECT bounds;
-                    HRGN blob_rgn = CreateEllipticRgn(corner_x[c] - r, corner_y[c] - r, corner_x[c] + r, corner_y[c] + r);
-                    bounds.left = corner_x[c] - r; bounds.top = corner_y[c] - r;
-                    bounds.right = corner_x[c] + r; bounds.bottom = corner_y[c] + r;
+                    HRGN blob_rgn = CreateEllipticRgn(dot_x[c] - r, dot_y[c] - r, dot_x[c] + r, dot_y[c] + r);
+                    bounds.left = dot_x[c] - r; bounds.top = dot_y[c] - r;
+                    bounds.right = dot_x[c] + r; bounds.bottom = dot_y[c] + r;
                     SelectClipRgn(hdc, panel_rgn);
                     ExtSelectClipRgn(hdc, blob_rgn, RGN_AND);
                     alpha_fill_rect(hdc, bounds, corner[c], rings[ri].alpha);
@@ -1534,6 +1557,24 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * text stays fully legible on top of it. */
         draw_app_logo_faded(hdc, (blend_rc.left + blend_rc.right) / 2,
                              (blend_rc.top + blend_rc.bottom) / 2, 70, 90);
+
+        /* Sensor location dot - a plain white filled circle marking
+         * exactly where each bay's reading is taken from (direct
+         * request/reference mockup), with a thin dark outline so it
+         * stays visible against the lighter end of the heat blend
+         * behind it. Drawn on top of the blobs/watermark, under the
+         * BAY/reading labels below. */
+        for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+            HBRUSH dot_brush = CreateSolidBrush(RGB(255, 255, 255));
+            HPEN dot_pen = CreatePen(PS_SOLID, 1, RGB(20, 20, 22));
+            HBRUSH old_brush = (HBRUSH)SelectObject(hdc, dot_brush);
+            HPEN old_dot_pen = (HPEN)SelectObject(hdc, dot_pen);
+            Ellipse(hdc, dot_x[i] - dot_r, dot_y[i] - dot_r, dot_x[i] + dot_r, dot_y[i] + dot_r);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_dot_pen);
+            DeleteObject(dot_brush);
+            DeleteObject(dot_pen);
+        }
 
         /* Legend strip: the reserved bottom band, filled with the panel
          * background, then a thin multi-stop gradient bar (the same 4
@@ -1595,11 +1636,14 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
-        /* Floating "BAY N" / reading at each corner, no boxed chip -
-         * drawn right over the blend, so every string is drawn twice:
-         * once 1px offset in near-black, then the real (white) text on
-         * top, a cheap drop-shadow that keeps it legible over both the
-         * light and dark ends of the blend. */
+        /* "BAY N" / reading, centered on and stacked out from the dot -
+         * direct request/reference mockup: the label reads as the
+         * outermost element (above the dot for the top row, below it
+         * for the bottom row, mirrored), with the live reading tucked
+         * between the label and the dot itself. Every string is drawn
+         * twice: once 1px offset in near-black, then the real (white)
+         * text on top, a cheap drop-shadow that keeps it legible over
+         * both the light and dark ends of the blend. */
         label_font = CreateFontA(-11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                   ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                   DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
@@ -1612,9 +1656,12 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             const SensorState *st = sensor_get_state(&g_sensor, i);
             char blabel[8], num_label[16];
             RECT lrc, nrc;
-            bool left_side = (i == 0 || i == 2);
             bool top_half = (i == 0 || i == 1);
-            UINT lalign, nalign;
+            UINT align = DT_SINGLELINE | DT_NOCLIP | DT_CENTER | DT_TOP;
+            static const int gap_from_dot = 10; /* dot_r (6) + a little breathing room */
+            static const int num_h = 18;
+            static const int label_h = 14;
+            static const int gap_between = 2;
 
             wsprintfA(blabel, "BAY %d", sensor_get_unit_address(&g_sensor, i));
             if (st->has_reading) {
@@ -1623,35 +1670,37 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 lstrcpynA(num_label, "-", (int)sizeof(num_label));
             }
 
-            /* Pulled in further from the literal corner (14/10/26 ->
-             * 24/18/34) - direct request for the BAY label to read as
-             * more centered in its quadrant instead of hugging the edge. */
-            lrc.left = left_side ? rc.left + 24 : rc.left;
-            lrc.right = left_side ? rc.right : rc.right - 24;
-            lrc.top = top_half ? rc.top + 18 : rc.top;
-            lrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 34;
-            lalign = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
-
+            lrc.left = dot_x[i] - 60;
+            lrc.right = dot_x[i] + 60;
             nrc = lrc;
-            nrc.top = top_half ? lrc.top + 13 : lrc.top;
-            nrc.bottom = top_half ? blend_rc.bottom : blend_rc.bottom - 20;
-            nalign = DT_SINGLELINE | DT_NOCLIP | (left_side ? DT_LEFT : DT_RIGHT) | (top_half ? DT_TOP : DT_BOTTOM);
+
+            if (top_half) {
+                nrc.top = dot_y[i] - gap_from_dot - num_h;
+                nrc.bottom = nrc.top + num_h;
+                lrc.bottom = nrc.top - gap_between;
+                lrc.top = lrc.bottom - label_h;
+            } else {
+                nrc.top = dot_y[i] + gap_from_dot;
+                nrc.bottom = nrc.top + num_h;
+                lrc.top = nrc.bottom + gap_between;
+                lrc.bottom = lrc.top + label_h;
+            }
 
             old_font = (HFONT)SelectObject(hdc, label_font ? label_font : g_font);
             SetTextColor(hdc, RGB(10, 10, 12));
             OffsetRect(&lrc, 1, 1);
-            DrawTextA(hdc, blabel, -1, &lrc, lalign);
+            DrawTextA(hdc, blabel, -1, &lrc, align);
             OffsetRect(&lrc, -1, -1);
             SetTextColor(hdc, RGB(255, 255, 255));
-            DrawTextA(hdc, blabel, -1, &lrc, lalign);
+            DrawTextA(hdc, blabel, -1, &lrc, align);
 
             SelectObject(hdc, num_font ? num_font : g_font);
             SetTextColor(hdc, RGB(10, 10, 12));
             OffsetRect(&nrc, 1, 1);
-            DrawTextA(hdc, num_label, -1, &nrc, nalign);
+            DrawTextA(hdc, num_label, -1, &nrc, align);
             OffsetRect(&nrc, -1, -1);
             SetTextColor(hdc, RGB(255, 255, 255));
-            DrawTextA(hdc, num_label, -1, &nrc, nalign);
+            DrawTextA(hdc, num_label, -1, &nrc, align);
 
             SelectObject(hdc, old_font);
         }
