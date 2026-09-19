@@ -176,33 +176,33 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
                      * of sitting unused. */
 #define CARD_H 110 /* was 102 - grown by what HEADER_H gave up above */
 #define CARD_GAP 12 /* was 8 - "Direction B" wants more generous spacing */
-#define GRID_LEFT 450 /* was 420 - shifted right by the same 30px SIDEBAR_W grew by */
+#define GRID_LEFT 450 /* was 420 - shifted right by the same 30px SIDEBAR_W grew by.
+                        * Base/minimum value now - see grid_left_for(). */
 #define GRID_TOP CONTENT_TOP
 
-/* Cards used to stay fixed at CARD_W x CARD_H no matter how tall the
- * window got, leaving a dead strip below row 4 on anything taller than
- * the designed minimum (see relayout_for_size()) - growing them to fill
- * that space was tried once before and reverted because it scaled BOTH
- * dimensions, which looked oversized at fullscreen. This time only
- * height grows (card_w is always passed as CARD_W - see
- * relayout_for_size()); CARD_H_MAX caps it so a very tall window
- * doesn't turn each card into an absurd strip. */
+/* Cards used to stay fixed at CARD_W x CARD_H no matter how tall (or
+ * wide) the window got, leaving dead space below row 4 and/or right of
+ * the grid on anything bigger than the designed minimum. Height-only
+ * growth was tried once, alone, and reverted for looking oversized at
+ * fullscreen - but that was before this app had anything else to do
+ * with extra WIDTH (the dead strip used to hold the animated
+ * HelixDefender mark/signal-wave pulse, since removed - direct report
+ * of it just sitting there as wasted blank background once the strip's
+ * only occupant was gone). channel_card_width()/sidebar_width_for()
+ * below now grow CARD_W/SIDEBAR_W together with the window, each capped
+ * by its own _MAX so a very wide window doesn't turn either into
+ * something absurd - see relayout_for_size(). */
 #define CARD_H_MAX 220
+#define CARD_W_MAX 340
 #define GRID_BOTTOM_MARGIN 20 /* matches the visual weight of CONTENT_TOP's own top margin */
-
-/* Right edge of the 4-column grid - GRID_LEFT plus 4 card widths and 3
- * gaps between them (no trailing gap after the last column). Anything
- * wider than this (up to CLIENT_WIDTH - SIDEBAR_X) is now just plain
- * background - see CARD_H_MAX's comment on why cards don't grow
- * sideways instead, and CARD_W's own comment on why that margin isn't
- * as wide as it used to be. */
-#define GRID_RIGHT (GRID_LEFT + GRID_COLS * (CARD_W + CARD_GAP) - CARD_GAP)
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 430 /* was 400 - grew along with CARD_W once the signal-
                         * wave dead space wasn't needed for anything else;
                         * GRID_LEFT shifted right by the same 30px to keep
-                        * its gap off the sidebar's own right edge. */
+                        * its gap off the sidebar's own right edge. Base/
+                        * minimum value now - see sidebar_width_for(). */
+#define SIDEBAR_W_MAX 600
 
 /* Flush against the bottom of the sidebar box (itself pinned to the
  * grid's height) rather than added below it - keeps the sidebar's
@@ -4212,8 +4212,8 @@ static void build_controls(HWND hwnd) {
  * scales. Every offset here must match add_channel_card()'s creation
  * offsets exactly - keep the two in sync if either changes.
  *
- * card_w is always passed as CARD_W (sx is always 1.0 in practice) -
- * see CARD_H_MAX's comment for why only card_h actually varies.
+ * card_w and card_h both vary now - see channel_card_width()/
+ * channel_card_height() - which is exactly what sx/sy above exist for.
  *
  * Plain MoveWindow with bRepaint=FALSE - relayout_for_size() does one
  * InvalidateRect over the whole window after moving everything, so
@@ -4292,8 +4292,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 /* How tall a channel card should be to make the 4-row grid's bottom
  * edge land GRID_BOTTOM_MARGIN above the client area's bottom, for a
  * given client height - clamped to [CARD_H, CARD_H_MAX] (see that
- * constant's comment for why growth is capped, and card_w is never
- * varied alongside it). */
+ * constant's comment for why growth is capped). */
 static int channel_card_height(int client_h) {
     int avail = client_h - CONTENT_TOP - GRID_BOTTOM_MARGIN - (GRID_ROWS - 1) * CARD_GAP;
     int h = avail / GRID_ROWS;
@@ -4303,6 +4302,48 @@ static int channel_card_height(int client_h) {
         h = CARD_H_MAX;
     }
     return h;
+}
+
+/* How wide a channel card should be for a given client width - extra
+ * width beyond CLIENT_WIDTH (the designed minimum) splits 60/40 between
+ * the 4-column grid and the sidebar (see sidebar_width_for()), so both
+ * actually grow into a wider window instead of leaving a dead strip
+ * right of the grid (see CARD_W's own comment). Clamped to
+ * [CARD_W, CARD_W_MAX]. position_channel_card() already scales every
+ * control inside a card proportionally to whatever width it's given. */
+static int channel_card_width(int client_w) {
+    int extra = client_w - CLIENT_WIDTH;
+    int w = CARD_W;
+    if (extra > 0) {
+        w += (extra * 60 / 100) / GRID_COLS;
+    }
+    if (w > CARD_W_MAX) {
+        w = CARD_W_MAX;
+    }
+    return w;
+}
+
+/* How wide the sidebar (Spectrum + Activity Log) should be for a given
+ * client width - the other 40% of any extra width beyond CLIENT_WIDTH,
+ * see channel_card_width(). Clamped to [SIDEBAR_W, SIDEBAR_W_MAX]. */
+static int sidebar_width_for(int client_w) {
+    int extra = client_w - CLIENT_WIDTH;
+    int w = SIDEBAR_W;
+    if (extra > 0) {
+        w += extra * 40 / 100;
+    }
+    if (w > SIDEBAR_W_MAX) {
+        w = SIDEBAR_W_MAX;
+    }
+    return w;
+}
+
+/* Left edge of the channel grid for a given (already computed) sidebar
+ * width - the same 10px gap off the sidebar's right edge GRID_LEFT's
+ * own comment describes, just following sidebar_width_for() instead of
+ * the fixed SIDEBAR_W when the sidebar has grown. */
+static int grid_left_for(int sidebar_w) {
+    return SIDEBAR_X + sidebar_w + 10;
 }
 
 /* LOG_PANEL_Y's own formula (CONTENT_TOP + GRID_ROWS*CARD_H + ... -
@@ -4316,17 +4357,21 @@ static int log_panel_y_for(int card_h) {
 }
 
 /* Recomputes the whole layout for a new client size: the header bar
- * stretches horizontally to fill the wider client area, and the 16
- * cards grow TALLER (never wider - see CARD_H_MAX's comment on why
- * only height varies) to use up vertical space instead of leaving it
- * empty below row 4. The sidebar (Spectrum + Activity Log) grows to
- * match, its bottom edge tracking the grid's via log_panel_y_for() the
- * same way it always has against the fixed design height. Never
- * shrinks below the designed CARD_W x CARD_H (see WM_GETMINMAXINFO,
- * which stops the window itself getting that small). */
+ * stretches horizontally to fill the wider client area, the 16 cards
+ * grow both taller (channel_card_height()) and wider
+ * (channel_card_width()) to use up extra space instead of leaving it
+ * empty below row 4 or as a dead strip right of the grid, and the
+ * sidebar (Spectrum + Activity Log) grows too (sidebar_width_for()),
+ * its bottom edge tracking the grid's via log_panel_y_for() the same
+ * way it always has. Never shrinks below the designed CARD_W x CARD_H
+ * (see WM_GETMINMAXINFO, which stops the window itself getting that
+ * small). */
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int i;
     int card_h = channel_card_height(client_h);
+    int card_w = channel_card_width(client_w);
+    int sidebar_w = sidebar_width_for(client_w);
+    int grid_left = grid_left_for(sidebar_w);
     int log_y = log_panel_y_for(card_h);
 
     if (!g_layout_ready) {
@@ -4337,23 +4382,23 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     /* Stretches right along with the header panel itself, filling the
      * gap that opens up next to it on resize (see build_controls()). */
     MoveWindow(g_sensor_heatmap, 1190, 14, client_w - SIDEBAR_X - 1190 - 30, 150, FALSE);
-    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
     MoveWindow(g_log_header_lbl, 40, log_y + 10, 200, 18, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, log_y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, log_y + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, log_y + 34, sidebar_w + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + sidebar_w - 12 - 60, log_y + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO), 236, CONTENT_TOP + 8, 56, 140, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + sidebar_w - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
-               SIDEBAR_W + SIDEBAR_X - 34, log_y - 12 - (CONTENT_TOP + 34), FALSE);
+               sidebar_w + SIDEBAR_X - 34, log_y - 12 - (CONTENT_TOP + 34), FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
         int row = i / GRID_COLS;
-        int card_x = GRID_LEFT + col * (CARD_W + CARD_GAP);
+        int card_x = grid_left + col * (card_w + CARD_GAP);
         int card_y = CONTENT_TOP + row * (card_h + CARD_GAP);
-        position_channel_card(hwnd, i, card_x, card_y, CARD_W, card_h);
+        position_channel_card(hwnd, i, card_x, card_y, card_w, card_h);
     }
 
     /* One coalesced repaint for the whole window AND every child control
@@ -4552,19 +4597,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_bulk_select_mode) {
                 int x = (short)LOWORD(lParam);
                 int y = (short)HIWORD(lParam);
-                /* Cards can be taller than the designed CARD_H now (see
-                 * channel_card_height()) - reuse the same actual height
+                /* Cards can be taller AND wider than the designed
+                 * CARD_H/CARD_W now (see channel_card_height()/
+                 * channel_card_width()) - reuse the same actual size
                  * relayout_for_size() last computed, not the fixed
-                 * design constant, or clicks on any row past the first
-                 * would hit-test against the wrong rect. */
+                 * design constants, or clicks on any row/column past the
+                 * first would hit-test against the wrong rect. */
                 int card_h = channel_card_height(g_last_client_h);
+                int card_w = channel_card_width(g_last_client_w);
+                int grid_left = grid_left_for(sidebar_width_for(g_last_client_w));
                 int idx;
                 for (idx = 0; idx < MAX_CHANNELS; idx++) {
                     int col = idx % GRID_COLS;
                     int row = idx / GRID_COLS;
-                    int cx = GRID_LEFT + col * (CARD_W + CARD_GAP);
+                    int cx = grid_left + col * (card_w + CARD_GAP);
                     int cy = CONTENT_TOP + row * (card_h + CARD_GAP);
-                    if (x >= cx && x < cx + CARD_W && y >= cy && y < cy + card_h) {
+                    if (x >= cx && x < cx + card_w && y >= cy && y < cy + card_h) {
                         g_channel_selected[idx] = !g_channel_selected[idx];
                         ui_invalidate_card(idx);
                         ui_refresh_bulk_selected_label();
