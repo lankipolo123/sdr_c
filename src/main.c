@@ -1426,7 +1426,10 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         RECT blend_rc;
         static const int panel_radius = 14;
         static const int legend_h = 22;
-        static const int dot_r = 6;
+        static const int dot_r = 4; /* was 6 - direct request to make the
+                                      * sensor marker smaller (halo_r
+                                      * below shrunk to match, same ratio
+                                      * as before); panel size untouched */
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -1570,7 +1573,9 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * top of the blobs/watermark, under the BAY/reading labels
          * below. */
         for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-            static const int halo_r = 13;
+            static const int halo_r = 9; /* was 13 - scaled down to match
+                                           * dot_r's own shrink above, same
+                                           * ~2.2x dot_r ratio as before */
             RECT halo_bounds;
             HRGN halo_rgn;
             HBRUSH dot_brush;
