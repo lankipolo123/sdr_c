@@ -10,11 +10,25 @@
 ;                                     whoever builds the installer needs their own
 ;                                     copy of it locally, same as building the app
 ;                                     itself does)
+;   vcredist\msvcp140.dll, vcredist\vcruntime140.dll, vcredist\vcruntime140_1.dll
+;                                     (Microsoft's own VC++ runtime DLLs, committed
+;                                     to this repo - see vcredist/README below)
 ;   src\app.ico                     (installer/uninstaller icon, same mark as the app)
 ;
 ; Installs both the exe and dll\Transit.dll under it, keeping the same
 ; relative layout (dll\Transit.dll next to the exe) the app's own
 ; TRANSIT_DLL_PATH ("dll\\Transit.dll", connection.c) expects at runtime.
+;
+; Also installs the 3 vcredist\*.dll files next to the exe (NOT inside
+; dll\) - Transit.dll is built with MSVC and dynamically links against
+; msvcp140.dll/vcruntime140.dll/vcruntime140_1.dll (the VC++
+; Redistributable), which real-world testing found is NOT present on
+; every Windows machine (confirmed cause of a real "Transit.dll not
+; found/loadable, error 126" report). Windows' standard DLL search
+; order resolves a loaded DLL's own dependencies (Transit.dll's, here)
+; against the directory of the main EXE first - not Transit.dll's own
+; dll\ folder - so these 3 files belong next to ECMController.exe
+; itself for LoadLibraryA to find them without any code change.
 ;
 ; Installs to a plain top-level C:\ECM Controller, NOT Program
 ; Files - direct consequence of a real bug found in testing: the app
@@ -119,6 +133,13 @@ Section "Install"
     Delete "$INSTDIR\${OLD_EXE_NAME}"
     File "/oname=${EXE_NAME}" "${OLD_EXE_NAME}"
 
+    ; See this file's top comment - Transit.dll's own VC++ runtime
+    ; dependency, installed next to the exe (not dll\) so the standard
+    ; DLL search order finds it.
+    File "vcredist\msvcp140.dll"
+    File "vcredist\vcruntime140.dll"
+    File "vcredist\vcruntime140_1.dll"
+
     SetOutPath "$INSTDIR\dll"
     File "dll\Transit.dll"
 
@@ -146,6 +167,9 @@ Section "Uninstall"
 
     Delete "$INSTDIR\${EXE_NAME}"
     Delete "$INSTDIR\${OLD_EXE_NAME}"
+    Delete "$INSTDIR\msvcp140.dll"
+    Delete "$INSTDIR\vcruntime140.dll"
+    Delete "$INSTDIR\vcruntime140_1.dll"
     Delete "$INSTDIR\dll\Transit.dll"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR\dll"
