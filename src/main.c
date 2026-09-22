@@ -1521,8 +1521,18 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             DeleteObject(base_brush);
         }
         {
+            /* 220/160 prepended - direct follow-up: even with blob_radius
+             * back to 7/10, the panel's corners and the gap between left-
+             * and right-column bays (behind the watermark) still stayed
+             * flat COLOR_APP_FIELD_BG past the old 100%-radius edge,
+             * reading as "non-color" dead space against the reference's
+             * fully-tinted floor plan. Two extra oversized, very faint
+             * rings extend the glow's reach into that space without
+             * changing how the already-good saturated core near each dot
+             * looks - drawn first (biggest/faintest), so every smaller/
+             * more-opaque ring after them still layers on top as before. */
             static const struct { int radius_pct; BYTE alpha; } rings[] = {
-                { 100, 22 }, { 78, 26 }, { 58, 32 }, { 40, 42 }, { 24, 56 }, { 12, 72 }
+                { 220, 8 }, { 160, 14 }, { 100, 22 }, { 78, 26 }, { 58, 32 }, { 40, 42 }, { 24, 56 }, { 12, 72 }
             };
             int blend_w = blend_rc.right - blend_rc.left;
             int blend_h = blend_rc.bottom - blend_rc.top;
