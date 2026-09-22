@@ -1539,14 +1539,22 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
              * ExtSelectClipRgn so a blob's circle can never paint
              * outside the panel's own rounded bounds, however large its
              * radius is computed to be. */
-            int blob_radius = (blend_w < blend_h ? blend_w : blend_h) * 25 / 100; /* was
-                                      * 7/10, then 4/10 - reference image
-                                      * (a WiFi-survey-style heatmap, AP-1..4
-                                      * markers each with a small, tightly
-                                      * localized hot zone fading fast to
-                                      * background rather than a broad soft
-                                      * cloud) called for noticeably tighter
-                                      * still */
+            int blob_radius = (blend_w < blend_h ? blend_w : blend_h) * 7 / 10; /* back to
+                                      * the original 7/10, after 4/10 and
+                                      * 25/100 both went too far the other
+                                      * way: at 25% each bay's glow no longer
+                                      * reached its neighbors, leaving flat
+                                      * COLOR_APP_FIELD_BG gaps between them
+                                      * instead of one continuous blended
+                                      * gradient - direct report ("removed
+                                      * the gradient"). The reference image
+                                      * fills its WHOLE floor plan with a
+                                      * green base tint, concentrating
+                                      * intensity near each AP rather than
+                                      * leaving bare background between
+                                      * markers - full coverage back at
+                                      * 7/10 is what actually matches that,
+                                      * not a smaller radius. */
             int c, ri;
 
             for (c = 0; c < SENSOR_MAX_UNITS; c++) {
