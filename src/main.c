@@ -1221,8 +1221,11 @@ static COLORREF temp_band_color(float temp_c) {
     return COLOR_APP_DISCONNECTED;
 }
 
-/* Continuous 4-stop version of temp_band_color()'s cool-to-hot hues
- * (blue -> orange -> darker orange -> red), for the heatmap only. A
+/* Continuous 4-stop version of temp_band_color()'s cool-to-hot hues -
+ * green -> yellow -> orange -> red, WiFi-survey-heatmap style (direct
+ * reference image: AP markers each with a small hot zone fading
+ * through yellow/orange out to a green background), replacing the
+ * previous blue -> orange -> red scale - for the heatmap only. A
  * discrete band function is the wrong tool there: 4 real bay readings
  * a couple degrees apart (the normal case) usually land in the SAME
  * band, so all 4 corners would get an identical color and the "scan"
@@ -1233,7 +1236,7 @@ static COLORREF temp_band_color(float temp_c) {
  * stays visibly distinct instead of vanishing into one band. */
 static COLORREF vivid_thermal_color(float t) {
     static const COLORREF stops[] = {
-        RGB(58, 133, 224), RGB(224, 146, 34), RGB(196, 110, 24), RGB(224, 90, 90)
+        RGB(46, 174, 85), RGB(216, 204, 58), RGB(230, 148, 40), RGB(214, 62, 48)
     };
     const int n = (int)(sizeof(stops) / sizeof(stops[0]));
     float scaled;
@@ -1633,8 +1636,12 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             bar_rc.bottom = bar_rc.top + 5;
             if (bar_rc.right > bar_rc.left) {
                 int seg, seg_w = (bar_rc.right - bar_rc.left) / 3;
+                /* Same green/yellow/orange/red stops as vivid_thermal_color()
+                 * above - kept as its own literal array (not shared) since
+                 * this one feeds GradientFill segments, not per-bay lookup,
+                 * same as before the color swap. */
                 static const COLORREF stops[] = {
-                    RGB(58, 133, 224), RGB(224, 146, 34), RGB(196, 110, 24), RGB(224, 90, 90)
+                    RGB(46, 174, 85), RGB(216, 204, 58), RGB(230, 148, 40), RGB(214, 62, 48)
                 };
                 for (seg = 0; seg < 3; seg++) {
                     RECT seg_rc = bar_rc;
@@ -1663,7 +1670,14 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         SelectClipRgn(hdc, NULL);
         DeleteObject(panel_rgn);
 
-        pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+        /* Silver border, replacing the plain COLOR_APP_PANEL_BORDER
+         * hairline every other panel in this app uses - direct request,
+         * this panel only. 2px (not 1px) so the silver tone actually
+         * reads instead of anti-aliasing away to a thin gray line. */
+        {
+            static const COLORREF silver = RGB(200, 203, 208);
+            pen = CreatePen(PS_SOLID, 2, silver);
+        }
         old_pen = (HPEN)SelectObject(hdc, pen);
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
         RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, panel_radius, panel_radius);
