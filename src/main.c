@@ -1426,7 +1426,11 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         RECT blend_rc;
         static const int panel_radius = 14;
         static const int legend_h = 22;
-        static const int dot_r = 6;
+        static const int dot_r = 4; /* was 6 - direct request to make the
+                                      * sensor marker smaller, alongside
+                                      * halo_r below and the panel itself
+                                      * shrinking (see add_sensor_heatmap()'s
+                                      * call in build_controls()) */
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
@@ -1570,7 +1574,9 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * top of the blobs/watermark, under the BAY/reading labels
          * below. */
         for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-            static const int halo_r = 13;
+            static const int halo_r = 9; /* was 13 - scaled down to match
+                                           * dot_r's own shrink above, same
+                                           * ~2.2x dot_r ratio as before */
             RECT halo_bounds;
             HRGN halo_rgn;
             HBRUSH dot_brush;
@@ -4219,16 +4225,20 @@ static void build_controls(HWND hwnd) {
      * unused strip to their right. Horizontal, right of those controls,
      * stretching to track the panel's right edge on resize instead of
      * a fixed width. */
-    /* Left edge moved 1320 -> 1190 -> 1240 - the 1190 value used the
-     * space the narrower commands block freed up, but left Ambient
+    /* Left edge moved 1320 -> 1190 -> 1240 -> 1280 - the 1190 value used
+     * the space the narrower commands block freed up, but left Ambient
      * Temperature's own Port/Connect/Kill Switch column cramped right
      * up against the heatmap with barely any gap (direct request for
-     * more room there) - 1240 gives that column ~50px more breathing
-     * space (its widest control, Kill Switch, ends at x=1135) and
-     * narrows the heatmap by the same amount. Right margin widened
-     * 15 -> 30 so it clears the panel's corner rivet decoration
-     * instead of running under it. */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
+     * more room there) - 1240 gave that column ~50px more breathing
+     * space (its widest control, Kill Switch, ends at x=1135). 1280 is a
+     * direct follow-up request to make the whole panel read smaller -
+     * another 40px off the left edge (height 150 -> 120 alongside it,
+     * see the matching MoveWindow call in relayout_for_size()), on top
+     * of the same panel already having been narrowed once before (see
+     * CLIENT_WIDTH's own comment). Right margin widened 15 -> 30 so it
+     * clears the panel's corner rivet decoration instead of running
+     * under it. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1280, 14, CLIENT_WIDTH - SIDEBAR_X - 1280 - 30, 120);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4482,8 +4492,10 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     /* Stretches right along with the header panel itself, filling the
-     * gap that opens up next to it on resize (see build_controls()). */
-    MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
+     * gap that opens up next to it on resize (see build_controls()) -
+     * same 1280/120 position/size build_controls() itself now uses, see
+     * its own comment on add_sensor_heatmap()'s call. */
+    MoveWindow(g_sensor_heatmap, 1280, 14, client_w - SIDEBAR_X - 1280 - 30, 120, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
