@@ -10,38 +10,15 @@
 ;                                     whoever builds the installer needs their own
 ;                                     copy of it locally, same as building the app
 ;                                     itself does)
-;   vcruntime\msvcp140.dll           Microsoft's own VC++ runtime DLLs -
-;   vcruntime\vcruntime140.dll       Transit.dll (MSVC-built) imports these
-;   vcruntime\vcruntime140_1.dll     and they're not present on Windows by
-;                                     default; without them, LoadLibraryA on
-;                                     Transit.dll fails with
-;                                     ERROR_MOD_NOT_FOUND even though the
-;                                     file is right there at the correct
-;                                     path, which conn_connect() (see
-;                                     connection.c) reports as "Transit.dll
-;                                     not found/loadable" - a real report
-;                                     traced to exactly this missing
-;                                     dependency on the target machine.
-;                                     Extracted from Microsoft's official
-;                                     vc_redist.x64.exe (the 3 actual files
-;                                     Transit.dll needs are ~700KB total,
-;                                     inside a ~25MB installer bundling
-;                                     every VC++ workload, ARM64 included -
-;                                     not committed to git, same "get your
-;                                     own copy locally" rule as Transit.dll
-;                                     above). Shipped app-local (next to the
-;                                     exe, not run as a system-wide
-;                                     installer) - Microsoft's own
-;                                     documented private/local CRT
-;                                     deployment method: the app's own
-;                                     directory is always the first place
-;                                     Windows' loader searches for a
-;                                     dependency, whether it's the main exe
-;                                     loading Transit.dll or Transit.dll
-;                                     loading these. No UAC prompt, no
-;                                     system-wide install, ~700KB instead of
-;                                     ~25MB.
 ;   src\app.ico                     (installer/uninstaller icon, same mark as the app)
+;
+; Does NOT bundle the VC++ runtime (msvcp140.dll/vcruntime140.dll/
+; vcruntime140_1.dll) Transit.dll imports - tried both a full
+; vc_redist.x64.exe bundle+silent-install (~25MB) and an app-local
+; 3-DLL copy (~700KB) in earlier revisions of this script, direct
+; request to drop both and keep the installer minimal instead. A
+; machine that's missing that runtime will still hit "Transit.dll not
+; found/loadable" on Connect - known, accepted tradeoff for now.
 ;
 ; Installs both the exe and dll\Transit.dll under it, keeping the same
 ; relative layout (dll\Transit.dll next to the exe) the app's own
@@ -150,15 +127,6 @@ Section "Install"
     Delete "$INSTDIR\${OLD_EXE_NAME}"
     File "/oname=${EXE_NAME}" "${OLD_EXE_NAME}"
 
-    ; Transit.dll (MSVC-built) needs these 3 - see the header comment
-    ; above for why they're here (app-local, next to the exe) instead of
-    ; bundling+running the full vc_redist.x64.exe installer this used to
-    ; do. No ExecWait, no UAC prompt, no exit-code handling needed - it's
-    ; just 3 more files, same as Transit.dll itself.
-    File "vcruntime\msvcp140.dll"
-    File "vcruntime\vcruntime140.dll"
-    File "vcruntime\vcruntime140_1.dll"
-
     SetOutPath "$INSTDIR\dll"
     File "dll\Transit.dll"
 
@@ -187,9 +155,6 @@ Section "Uninstall"
     Delete "$INSTDIR\${EXE_NAME}"
     Delete "$INSTDIR\${OLD_EXE_NAME}"
     Delete "$INSTDIR\dll\Transit.dll"
-    Delete "$INSTDIR\msvcp140.dll"
-    Delete "$INSTDIR\vcruntime140.dll"
-    Delete "$INSTDIR\vcruntime140_1.dll"
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR\dll"
     RMDir "$INSTDIR"
