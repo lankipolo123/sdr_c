@@ -13,9 +13,14 @@ back empty for something just installed. Recovery: re-clone, reinstall the
 toolchain via apt, and **re-request any uploaded file from the user** —
 uploads never survive a reset and can't be recovered locally.
 
-**`Transit_2.dll` may be missing** (wiped in a past reset, not yet
-re-uploaded as of the last session). Don't ship a real installer without it —
-ask the user for it before doing a "final" build.
+**`Transit.dll` may be missing** after a reset (uploads never survive one) —
+ask the user for it before doing a "final" build; a copy also isn't in git
+(`dll/` is gitignored, proprietary vendor file). As of the last session the
+real DLL is small (68KB) and dynamically links against the VC++ runtime
+(`msvcp140.dll`/`vcruntime140.dll`/`vcruntime140_1.dll`) - see the vcredist/
+section below, and transit_dll.h's header comment for which exports a given
+DLL build has (`GetDllPassword` vs `ValidateDllPassword` - it's changed
+between builds already, check before assuming either exists).
 
 ## Build commands (plain dev exe)
 
@@ -49,6 +54,18 @@ things the script doesn't handle automatically:
 Skipping any of these breaks the protected build silently or at runtime, not
 at compile time.
 
+## vcredist/ - Transit.dll's own runtime dependency
+
+`vcredist/` holds 3 genuine Microsoft DLLs (`msvcp140.dll`, `vcruntime140.dll`,
+`vcruntime140_1.dll`), committed to git (not proprietary, unlike Transit.dll -
+see `vcredist/README.md` for exactly how they were extracted straight from
+Microsoft's own `vc_redist.x64.exe` and why this is legitimate). `installer.nsi`
+installs them next to the exe. This exists because Transit.dll is an MSVC
+build that fails to load with error 126 ("module not found") on a machine
+missing the VC++ Redistributable - a real, confirmed report, not a
+hypothetical. If Microsoft ships a newer Transit.dll build requiring a newer
+runtime version, re-run the extraction steps in `vcredist/README.md`.
+
 ## Testing in this sandbox (no real Windows available)
 
 - `wine64` binary is at `/usr/lib/wine/wine64`, **not on PATH** - call it by
@@ -74,3 +91,13 @@ at compile time.
 - Rebuild + screenshot + get explicit confirmation before considering a
   visual/UI request done. Don't mark something finished on your own
   judgment alone when it was a direct visual request.
+- **The user sometimes pastes in a summary from a different Claude session
+  working on this same repo, asking whether it's accurate.** Don't take it at
+  face value - check it against real `git log`/`git show` output. A past
+  instance of this pasted a detailed, specific-sounding claim ("tried
+  bundling the VC++ redistributable two ways, both reverted per direct
+  request") that turned out to be entirely fabricated - zero matching
+  commits anywhere in the repo's history, on any branch. It also mislabeled
+  a real commit's content. Confident, detailed prose is not evidence; grep
+  the actual history before repeating or acting on a claim about "what was
+  already tried."
