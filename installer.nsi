@@ -10,6 +10,25 @@
 ;                                     whoever builds the installer needs their own
 ;                                     copy of it locally, same as building the app
 ;                                     itself does)
+;   vc_redist.x64.exe               (Microsoft's official VC++ 2015-2022
+;                                     x64 redistributable, from
+;                                     https://aka.ms/vs/17/release/vc_redist.x64.exe -
+;                                     not committed to git (*.exe is
+;                                     gitignored), same "get your own copy
+;                                     locally" rule as Transit.dll above.
+;                                     Transit.dll is an MSVC-built C++ DLL
+;                                     that imports MSVCP140.dll/
+;                                     VCRUNTIME140.dll/VCRUNTIME140_1.dll -
+;                                     not present on Windows by default.
+;                                     Without it, LoadLibraryA on
+;                                     Transit.dll fails with
+;                                     ERROR_MOD_NOT_FOUND even though the
+;                                     file is right there at the correct
+;                                     path, which conn_connect() (see
+;                                     connection.c) reports as "Transit.dll
+;                                     not found/loadable" - a real report
+;                                     traced to exactly this missing
+;                                     dependency on the target machine.
 ;   src\app.ico                     (installer/uninstaller icon, same mark as the app)
 ;
 ; Installs both the exe and dll\Transit.dll under it, keeping the same
@@ -112,6 +131,42 @@ UninstallIcon "src\app.ico"
 
 Section "Install"
     !insertmacro CloseRunningApp "install"
+
+    ; Transit.dll (MSVC-built) needs the VC++ 2015-2022 x64 runtime
+    ; (MSVCP140.dll/VCRUNTIME140.dll/VCRUNTIME140_1.dll), which is not
+    ; part of Windows by default - a machine missing it makes
+    ; LoadLibraryA on Transit.dll fail with ERROR_MOD_NOT_FOUND, which
+    ; conn_connect() (connection.c) surfaces as "Transit.dll not found/
+    ; loadable" even though the file is present at the right path. Run
+    ; before touching app files so the dependency exists before anyone
+    ; can hit Connect. vc_redist.x64.exe carries its own manifest
+    ; requesting elevation, so this triggers its own UAC prompt even
+    ; though this installer itself runs as a plain user
+    ; (RequestExecutionLevel user above) - expected, not a bug.
+    ; /install /quiet /norestart: no UI beyond the UAC prompt, and never
+    ; force a reboot out from under the user mid-install.
+    SetOutPath "$TEMP"
+    File "vc_redist.x64.exe"
+    DetailPrint "Installing Visual C++ Runtime (required by Transit.dll)..."
+    ExecWait '"$TEMP\vc_redist.x64.exe" /install /quiet /norestart' $1
+    ; 0 = installed. 3010 = installed, reboot recommended (not required
+    ; for this app to work). 1638/5100 = an equal-or-newer copy is
+    ; already present - also success, just nothing to do. Anything else
+    ; is a real failure worth surfacing, but not worth aborting the
+    ; whole install over - Connect will still report the same clear
+    ; "Transit.dll not found/loadable" error later if this genuinely
+    ; didn't take, same as it always has.
+    StrCmp $1 "0" vcredist_ok vcredist_check_3010
+    vcredist_check_3010:
+    StrCmp $1 "3010" vcredist_ok vcredist_check_1638
+    vcredist_check_1638:
+    StrCmp $1 "1638" vcredist_ok vcredist_check_5100
+    vcredist_check_5100:
+    StrCmp $1 "5100" vcredist_ok vcredist_warn
+    vcredist_warn:
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Visual C++ Runtime setup returned an unexpected result (code $1).$\r$\n$\r$\nIf ${APP_NAME} can't connect later with a 'Transit.dll not found/loadable' error, install the Visual C++ Redistributable (x64) manually from Microsoft and try again."
+    vcredist_ok:
+    Delete "$TEMP\vc_redist.x64.exe"
 
     SetOutPath "$INSTDIR"
     ; Cleans up a leftover exe from an older install that still used
