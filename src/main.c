@@ -192,8 +192,11 @@ static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
  * below now grow CARD_W/SIDEBAR_W together with the window, each capped
  * by its own _MAX so a very wide window doesn't turn either into
  * something absurd - see relayout_for_size(). */
-#define CARD_H_MAX 220
-#define CARD_W_MAX 340
+#define CARD_H_MAX 160 /* was 220 - direct request for shorter, wider cards
+                         * instead of tall/squarish ones once extra window
+                         * height was available to grow into. */
+#define CARD_W_MAX 400 /* was 340 - raised alongside the grid's bigger share
+                         * of extra width below (was 60%, now 75%). */
 #define GRID_BOTTOM_MARGIN 20 /* matches the visual weight of CONTENT_TOP's own top margin */
 
 #define SIDEBAR_X 10
@@ -4197,11 +4200,16 @@ static void build_controls(HWND hwnd) {
      * unused strip to their right. Horizontal, right of those controls,
      * stretching to track the panel's right edge on resize instead of
      * a fixed width. */
-    /* Left edge moved 1320 -> 1190 to actually use the space the
-     * narrower commands block just freed up; right margin widened
+    /* Left edge moved 1320 -> 1190 -> 1240 - the 1190 value used the
+     * space the narrower commands block freed up, but left Ambient
+     * Temperature's own Port/Connect/Kill Switch column cramped right
+     * up against the heatmap with barely any gap (direct request for
+     * more room there) - 1240 gives that column ~50px more breathing
+     * space (its widest control, Kill Switch, ends at x=1135) and
+     * narrows the heatmap by the same amount. Right margin widened
      * 15 -> 30 so it clears the panel's corner rivet decoration
      * instead of running under it. */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1190, 14, CLIENT_WIDTH - SIDEBAR_X - 1190 - 30, 150);
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4378,17 +4386,19 @@ static int channel_card_height(int client_h) {
 }
 
 /* How wide a channel card should be for a given client width - extra
- * width beyond CLIENT_WIDTH (the designed minimum) splits 60/40 between
+ * width beyond CLIENT_WIDTH (the designed minimum) splits 75/25 between
  * the 4-column grid and the sidebar (see sidebar_width_for()), so both
  * actually grow into a wider window instead of leaving a dead strip
- * right of the grid (see CARD_W's own comment). Clamped to
- * [CARD_W, CARD_W_MAX]. position_channel_card() already scales every
- * control inside a card proportionally to whatever width it's given. */
+ * right of the grid (see CARD_W's own comment) - weighted toward the
+ * grid (was 60/40) since 16 cards benefit more visibly from the extra
+ * width than the sidebar does. Clamped to [CARD_W, CARD_W_MAX].
+ * position_channel_card() already scales every control inside a card
+ * proportionally to whatever width it's given. */
 static int channel_card_width(int client_w) {
     int extra = client_w - CLIENT_WIDTH;
     int w = CARD_W;
     if (extra > 0) {
-        w += (extra * 60 / 100) / GRID_COLS;
+        w += (extra * 75 / 100) / GRID_COLS;
     }
     if (w > CARD_W_MAX) {
         w = CARD_W_MAX;
@@ -4397,13 +4407,13 @@ static int channel_card_width(int client_w) {
 }
 
 /* How wide the sidebar (Spectrum + Activity Log) should be for a given
- * client width - the other 40% of any extra width beyond CLIENT_WIDTH,
+ * client width - the other 25% of any extra width beyond CLIENT_WIDTH,
  * see channel_card_width(). Clamped to [SIDEBAR_W, SIDEBAR_W_MAX]. */
 static int sidebar_width_for(int client_w) {
     int extra = client_w - CLIENT_WIDTH;
     int w = SIDEBAR_W;
     if (extra > 0) {
-        w += extra * 40 / 100;
+        w += extra * 25 / 100;
     }
     if (w > SIDEBAR_W_MAX) {
         w = SIDEBAR_W_MAX;
@@ -4454,7 +4464,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
     /* Stretches right along with the header panel itself, filling the
      * gap that opens up next to it on resize (see build_controls()). */
-    MoveWindow(g_sensor_heatmap, 1190, 14, client_w - SIDEBAR_X - 1190 - 30, 150, FALSE);
+    MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
