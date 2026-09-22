@@ -1463,23 +1463,23 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         blend_rc = rc;
         blend_rc.bottom -= legend_h;
 
-        /* Where each bay's sensor dot actually sits - pulled well in
-         * from blend_rc's literal corners (direct request/reference
-         * mockup: a marker dot with its label above/below it and the
-         * heat blooming outward from THAT point, not from the panel's
-         * bare edge). Shared by the heat blob origins below, the dot
-         * itself, and the BAY/reading label placement, so all three
-         * agree on exactly where "the sensor" is. */
+        /* Where each bay's sensor dot actually sits - independent of
+         * where its "BAY N" label sits (the label is now pinned to the
+         * panel's own corner, see the drawing loop below - the two are
+         * deliberately NOT coupled). Pulled in further than the label's
+         * corner margin specifically so the dot reads as its own free-
+         * floating marker with real daylight around it, not a tag stuck
+         * to the label. Shared by the heat blob origins below and the
+         * dot itself, so both agree on exactly where "the sensor" is. */
         {
             int blend_w = blend_rc.right - blend_rc.left;
-            int blend_h = blend_rc.bottom - blend_rc.top;
-            int inset_x = blend_w * 22 / 100;
-            /* Tall enough that the label stacked above a top-row dot
-             * (gap + reading + gap + label, ~44px - see the BAY/reading
-             * drawing loop below) still fits inside the panel instead of
-             * getting clipped against its top edge (direct report: "BAY
-             * 1"/"BAY 2" were showing as "AY 1"/"AY 2"). */
-            int inset_y = blend_h * 40 / 100;
+            int inset_x = blend_w * 34 / 100;
+            /* Fixed (not a % of blend_h) - the panel's height never
+             * actually varies (add_sensor_heatmap() is always called
+             * with h=150), so a flat pixel inset is simpler. Kept small
+             * so the two dot rows stay well spread apart vertically -
+             * direct request ("make it spreadout and cleaner"). */
+            int inset_y = 28;
             dot_x[0] = blend_rc.left + inset_x;  dot_y[0] = blend_rc.top + inset_y;    /* BAY1 */
             dot_x[1] = blend_rc.right - inset_x; dot_y[1] = blend_rc.top + inset_y;    /* BAY2 */
             dot_x[2] = blend_rc.left + inset_x;  dot_y[2] = blend_rc.bottom - inset_y; /* BAY3 */
@@ -1658,14 +1658,17 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
-        /* "BAY N" / reading, centered on and stacked out from the dot -
-         * direct request/reference mockup: the label reads as the
-         * outermost element (above the dot for the top row, below it
-         * for the bottom row, mirrored), with the live reading tucked
-         * between the label and the dot itself. Every string is drawn
-         * twice: once 1px offset in near-black, then the real (white)
-         * text on top, a cheap drop-shadow that keeps it legible over
-         * both the light and dark ends of the blend. */
+        /* "BAY N" / reading, sitting beside the dot (left column's text
+         * to the left of its dot, right column's to the right) instead
+         * of stacked above/below it - direct request/reference mockup:
+         * a label right next to its dot, spread out and uncramped. The
+         * two-line block (label over reading) is centered vertically on
+         * dot_y, so it needs no extra top/bottom clearance beyond its
+         * own half-height regardless of row - what lets inset_y above
+         * stay small and the two rows genuinely spread apart. Every
+         * string is drawn twice: once 1px offset in near-black, then
+         * the real (white) text on top, a cheap drop-shadow that keeps
+         * it legible over both the light and dark ends of the blend. */
         label_font = CreateFontA(-11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                   ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                   DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
@@ -1678,9 +1681,11 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             const SensorState *st = sensor_get_state(&g_sensor, i);
             char blabel[8], num_label[16];
             RECT lrc, nrc;
-            bool top_half = (i == 0 || i == 1);
-            UINT align = DT_SINGLELINE | DT_NOCLIP | DT_CENTER | DT_TOP;
-            static const int gap_from_dot = 10; /* dot_r (6) + a little breathing room */
+            bool left_col = (i == 0 || i == 2);
+            bool top_row = (i == 0 || i == 1);
+            UINT align = DT_SINGLELINE | DT_NOCLIP | DT_TOP | (left_col ? DT_LEFT : DT_RIGHT);
+            static const int margin = 12; /* clear of the panel's own rounded corner */
+            static const int block_w = 64;
             static const int num_h = 18;
             static const int label_h = 14;
             static const int gap_between = 2;
@@ -1692,20 +1697,34 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 lstrcpynA(num_label, "-", (int)sizeof(num_label));
             }
 
-            lrc.left = dot_x[i] - 60;
-            lrc.right = dot_x[i] + 60;
+            /* Pinned to the panel's own corner - NOT to the dot's
+             * position - so the label reads like a map legend entry
+             * ("top-left = BAY 1") rather than a tag glued to the
+             * marker. Direct correction: the reference mockup that
+             * inspired the dot/heat-blob redesign never actually showed
+             * the label touching the dot either - it sat off at the
+             * panel's edge, which is what this restores. The label is
+             * always the outermost line (right at the corner); the
+             * reading sits tucked just inside it. */
+            if (left_col) {
+                lrc.left = blend_rc.left + margin;
+                lrc.right = lrc.left + block_w;
+            } else {
+                lrc.right = blend_rc.right - margin;
+                lrc.left = lrc.right - block_w;
+            }
             nrc = lrc;
 
-            if (top_half) {
-                nrc.top = dot_y[i] - gap_from_dot - num_h;
-                nrc.bottom = nrc.top + num_h;
-                lrc.bottom = nrc.top - gap_between;
-                lrc.top = lrc.bottom - label_h;
-            } else {
-                nrc.top = dot_y[i] + gap_from_dot;
-                nrc.bottom = nrc.top + num_h;
-                lrc.top = nrc.bottom + gap_between;
+            if (top_row) {
+                lrc.top = blend_rc.top + margin;
                 lrc.bottom = lrc.top + label_h;
+                nrc.top = lrc.bottom + gap_between;
+                nrc.bottom = nrc.top + num_h;
+            } else {
+                lrc.bottom = blend_rc.bottom - margin;
+                lrc.top = lrc.bottom - label_h;
+                nrc.bottom = lrc.top - gap_between;
+                nrc.top = nrc.bottom - num_h;
             }
 
             /* BAY label tinted with the same blue used for every other
