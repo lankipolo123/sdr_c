@@ -159,8 +159,39 @@ int main(void) {
 
     printf("Step 6: probe GetDllPassword (probably unrelated/licensing, checking anyway)\n");
     ZeroMemory(buf, sizeof(buf));
-    try_candidate("GetDllPassword", dll.get_dll_password, "(buf, 256)",
+    try_candidate("GetDllPassword", (FARPROC)dll.get_dll_password, "(buf, 256)",
                    (long long)(intptr_t)buf, sizeof(buf), 0, 0, "a", buf);
+    printf("\n");
+
+    printf("Step 6b: probe ValidateDllPassword (replaces GetDllPassword in this build -\n"
+           "         it dropped the old export entirely, so the app's unlock_cw() call\n"
+           "         needs to switch to whichever shape actually works here)\n");
+    {
+        static const char candidate_pw[] = "millawave888"; /* the old build's known password - long shot, may not carry over */
+        char pw_buf[64];
+
+        lstrcpynA(pw_buf, candidate_pw, (int)sizeof(pw_buf));
+        try_candidate("ValidateDllPassword", (FARPROC)dll.validate_dll_password, "no args",
+                       0, 0, 0, 0, NULL, NULL);
+
+        lstrcpynA(pw_buf, candidate_pw, (int)sizeof(pw_buf));
+        try_candidate("ValidateDllPassword", (FARPROC)dll.validate_dll_password, "(password_ptr=\"millawave888\")",
+                       (long long)(intptr_t)pw_buf, 0, 0, 0, NULL, NULL);
+
+        lstrcpynA(pw_buf, candidate_pw, (int)sizeof(pw_buf));
+        try_candidate("ValidateDllPassword", (FARPROC)dll.validate_dll_password, "(password_ptr=\"wrong-password-xyz\")",
+                       (long long)(intptr_t)"wrong-password-xyz", 0, 0, 0, NULL, NULL);
+
+        ZeroMemory(buf, sizeof(buf));
+        lstrcpynA(pw_buf, candidate_pw, (int)sizeof(pw_buf));
+        try_candidate("ValidateDllPassword", (FARPROC)dll.validate_dll_password,
+                       "(password_ptr=\"millawave888\", out_buf, 256)",
+                       (long long)(intptr_t)pw_buf, (long long)(intptr_t)buf, sizeof(buf), 0, "b", buf);
+
+        ZeroMemory(buf, sizeof(buf));
+        try_candidate("ValidateDllPassword", (FARPROC)dll.validate_dll_password, "(out_buf, 256) - no password arg",
+                       (long long)(intptr_t)buf, sizeof(buf), 0, 0, "a", buf);
+    }
     printf("\n");
 
     printf("Step 7: disconnect\n");

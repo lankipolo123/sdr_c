@@ -19,13 +19,28 @@
  * wrapped in SEH (__try/__except) specifically so a wrong guess reports
  * a failure instead of crashing the process.
  *
- * GetDllPassword's shape IS now confirmed (probed directly under Wine -
- * it never touches the dongle, so no real hardware was needed): takes no
- * arguments and returns a pointer to a static string literal baked into
- * the DLL binary ("millawave888" in the 2026-09 build) - not a status
- * code, not hardware/connection-state dependent. Used to gate
- * Continuous Wave mode - see unlock_cw() in main.c. The other four
- * (DevTemp etc.) are still unconfirmed.
+ * GetDllPassword's shape IS confirmed on the DLL build that exports it
+ * (probed directly under Wine - it never touches the dongle, so no real
+ * hardware was needed): takes no arguments and returns a pointer to a
+ * static string literal baked into the DLL binary ("millawave888" in
+ * that build) - not a status code, not hardware/connection-state
+ * dependent. Used to gate Continuous Wave mode - see unlock_cw() in
+ * main.c. The other four (DevTemp etc.) are still unconfirmed.
+ *
+ * A later DLL build (uploaded 2026-09-22, linker-timestamped 2026-09-12)
+ * drops GetDllPassword entirely and exports ValidateDllPassword instead.
+ * Probed the same way under Wine: every argument-count/type guess
+ * returned a flat 0 with no crash, including a bare no-args call - most
+ * likely because it's gated behind an actual hardware connection and
+ * short-circuits before ever touching its arguments while disconnected
+ * (AutoConnectSDR also failed under Wine, no real dongle attached), not
+ * proof of the true signature. Best guess from the export name and the
+ * flat-0-when-disconnected behavior: it takes the CANDIDATE password and
+ * validates it itself (nonzero = correct), replacing the old get-then-
+ * compare-locally flow - see unlock_cw()'s two code paths. Confirm
+ * against real connected hardware before trusting this; if it turns out
+ * backwards (nonzero = wrong) or the argument isn't what's guessed here,
+ * unlock_cw() will need a one-line fix once that's known.
  */
 #pragma once
 #include <windows.h>
@@ -35,6 +50,7 @@ typedef long (*TransitStatusFn)(char *buf, long buf_size);              /* AutoC
 typedef long (*TransitCommandTokensFn)(char *cmd, char *out_buf, long buf_size);
 typedef long (*TransitSendCommandFn)(char *cmd, long len);
 typedef const char *(*TransitGetPasswordFn)(void);
+typedef long (*TransitValidatePasswordFn)(const char *candidate_password); /* best guess - see header comment above */
 
 typedef struct {
     HMODULE handle;
@@ -56,6 +72,7 @@ typedef struct {
     TransitCommandTokensFn command_tokens;
     TransitSendCommandFn send_command_to_sdr;
     TransitGetPasswordFn get_dll_password; /* NULL on a DLL build that doesn't export it */
+    TransitValidatePasswordFn validate_dll_password; /* NULL on a DLL build that doesn't export it (the older GetDllPassword-only build) */
 
     /* Unconfirmed shape - raw pointers only. Do not call directly; go
      * through transit_probe.c's SEH-guarded attempts until one is

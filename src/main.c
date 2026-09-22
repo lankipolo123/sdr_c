@@ -3965,41 +3965,63 @@ static INT_PTR CALLBACK cw_password_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam,
  * (a fixed, undithered carrier - the one mode this app gates behind a
  * password before a channel's Set/Bulk Set can arm it), now also
  * covering the logo lock badge (IDC_LOGO_LOCK_BTN, revealing Change
- * Logo/Reset). Checked against the real password Transit.dll itself
- * reports via GetDllPassword (see transit_dll.h) - not anything this
- * app invents or stores. Authorized once per run: unlocking through
+ * Logo/Reset). Checked against Transit.dll itself, not anything this
+ * app invents or stores - but which export does that depends on the DLL
+ * build (see transit_dll.h): the older build exports GetDllPassword
+ * (fetch the real password, compare locally), a newer one drops that
+ * and exports ValidateDllPassword instead (best guess: hand it the
+ * candidate password, it tells you if that's correct) - so the prompt
+ * has to come first here and the two paths diverge only in how the
+ * entered text gets checked. Authorized once per run: unlocking through
  * either entry point covers both for the rest of the session, via the
  * one shared g_cw_authorized flag. */
 static bool unlock_cw(HWND hwnd) {
-    const char *real_password;
     INT_PTR result;
 
     if (g_cw_authorized) {
         return true;
     }
 
-    if (!transit_dll_is_loaded(&g_conn.dll) || g_conn.dll.get_dll_password == NULL) {
+    if (!transit_dll_is_loaded(&g_conn.dll) ||
+        (g_conn.dll.get_dll_password == NULL && g_conn.dll.validate_dll_password == NULL)) {
         ui_show_warning("Admin password check needs Transit.dll loaded first - "
                          "connect to the RS422 dongle, then try again.");
         return false;
     }
 
-    real_password = g_conn.dll.get_dll_password();
-    if (real_password == NULL || real_password[0] == '\0') {
-        ui_show_warning("Admin password check failed - GetDllPassword returned nothing.");
-        return false;
-    }
+    if (g_conn.dll.get_dll_password != NULL) {
+        const char *real_password = g_conn.dll.get_dll_password();
+        if (real_password == NULL || real_password[0] == '\0') {
+            ui_show_warning("Admin password check failed - GetDllPassword returned nothing.");
+            return false;
+        }
 
-    g_cw_pw_input[0] = '\0';
-    result = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CW_PASSWORD), hwnd, cw_password_dlg_proc, 0);
-    if (result != IDOK) {
-        return false; /* cancelled */
-    }
+        g_cw_pw_input[0] = '\0';
+        result = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CW_PASSWORD), hwnd, cw_password_dlg_proc, 0);
+        if (result != IDOK) {
+            return false; /* cancelled */
+        }
 
-    if (lstrcmpA(g_cw_pw_input, real_password) != 0) {
-        ui_show_warning("Wrong password.");
-        SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
-        return false;
+        if (lstrcmpA(g_cw_pw_input, real_password) != 0) {
+            ui_show_warning("Wrong password.");
+            SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
+            return false;
+        }
+    } else {
+        long valid;
+
+        g_cw_pw_input[0] = '\0';
+        result = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CW_PASSWORD), hwnd, cw_password_dlg_proc, 0);
+        if (result != IDOK) {
+            return false; /* cancelled */
+        }
+
+        valid = g_conn.dll.validate_dll_password(g_cw_pw_input);
+        if (valid == 0) {
+            ui_show_warning("Wrong password.");
+            SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
+            return false;
+        }
     }
 
     SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
