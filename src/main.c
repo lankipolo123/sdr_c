@@ -1536,7 +1536,13 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
              * ExtSelectClipRgn so a blob's circle can never paint
              * outside the panel's own rounded bounds, however large its
              * radius is computed to be. */
-            int blob_radius = (blend_w < blend_h ? blend_w : blend_h) * 7 / 10;
+            int blob_radius = (blend_w < blend_h ? blend_w : blend_h) * 4 / 10; /* was 7/10 -
+                                      * direct follow-up: shrinking dot_r/
+                                      * halo_r alone didn't read as smaller
+                                      * because THIS glow cloud, not the
+                                      * small dot at its center, is what
+                                      * actually dominates each bay's
+                                      * visual footprint */
             int c, ri;
 
             for (c = 0; c < SENSOR_MAX_UNITS; c++) {
