@@ -1,5 +1,16 @@
 #include "serial_port.h"
+#include <setupapi.h>
 #include <stdio.h>
+
+/* GUID_DEVCLASS_PORTS ({4D36E978-E325-11CE-BFC1-08002BE10318}) - the
+ * device SETUP class Ports (COM & LPT) lives under, the exact same
+ * grouping Device Manager itself lists. Defined locally instead of
+ * pulling it from <devguid.h> (which needs initguid.h included first,
+ * or -luuid, to get an actual symbol rather than just an extern
+ * declaration) - a plain local constant sidesteps that entirely. */
+static const GUID GUID_DEVCLASS_PORTS_LOCAL =
+    { 0x4d36e978, 0xe325, 0x11ce, { 0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18 } };
+
 
 static BYTE parity_to_win32(char parity) {
     switch (parity) {
@@ -113,7 +124,6 @@ int serial_list_ports(char names[][16], int max_ports) {
     HKEY key;
     int count = 0;
     DWORD index = 0;
-    int i;
 
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM",
                        0, KEY_READ, &key) == ERROR_SUCCESS) {
@@ -144,38 +154,61 @@ int serial_list_ports(char names[][16], int max_ports) {
      * of truth - and on at least one real machine (a Lenovo ThinkPad)
      * it came back empty for a USB-to-serial adapter's COM port even
      * though the port was genuinely present, openable, and visible in
-     * Device Manager. QueryDosDeviceA checks the same DOS device
-     * symlink table CreateFileA("\\\\.\\COMn") itself resolves through,
-     * so it catches every port that actually works, not just the ones
-     * a particular driver bothered to mirror into that key. Run as a
-     * supplement after the registry pass (not a replacement) so the
-     * common case keeps the registry's natural ordering, with anything
-     * missed filled in and deduped against it. */
-    for (i = 1; i <= 256; i++) {
-        char com_name[16];
-        char target[64];
-        int j;
-        bool already_have = false;
-
-        snprintf(com_name, sizeof(com_name), "COM%d", i);
-        if (QueryDosDeviceA(com_name, target, sizeof(target)) == 0) {
-            continue;
-        }
-
-        for (j = 0; j < count && j < max_ports; j++) {
-            if (lstrcmpiA(names[j], com_name) == 0) {
-                already_have = true;
-                break;
+     * Device Manager. SetupAPI's device enumeration (GUID_DEVCLASS_PORTS,
+     * DIGCF_PRESENT) is the same data Device Manager itself reads, so it
+     * catches every port that's actually there without also catching
+     * ports that AREN'T - an earlier QueryDosDeviceA-based version of
+     * this fallback fixed the ThinkPad's empty list but then listed
+     * every ghost/reserved COM number Windows keeps registered whether
+     * or not real hardware backs it (Bluetooth's own reserved SPP
+     * virtual ports being the most common - direct report: "com port
+     * becoming 3 more" that didn't actually read anything when picked,
+     * since there's no real device behind them). DIGCF_PRESENT only
+     * enumerates devices Windows currently considers physically present,
+     * matching Device Manager's default (non-"show hidden devices")
+     * view. Run as a supplement after the registry pass (not a
+     * replacement) so the common case keeps the registry's natural
+     * ordering, with anything missed filled in and deduped against it. */
+    {
+        HDEVINFO hdi = SetupDiGetClassDevsA(&GUID_DEVCLASS_PORTS_LOCAL, NULL, NULL, DIGCF_PRESENT);
+        if (hdi != INVALID_HANDLE_VALUE) {
+            SP_DEVINFO_DATA devinfo;
+            DWORD idx;
+            devinfo.cbSize = sizeof(devinfo);
+            for (idx = 0; SetupDiEnumDeviceInfo(hdi, idx, &devinfo); idx++) {
+                HKEY hkey = SetupDiOpenDevRegKey(hdi, &devinfo, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
+                if (hkey != INVALID_HANDLE_VALUE) {
+                    char port_name[16];
+                    DWORD size = sizeof(port_name);
+                    DWORD type = 0;
+                    /* The Ports class also holds LPT (parallel) devices -
+                     * PortName reads "LPT1" etc. for those. Only "COMn"
+                     * entries are what this function promises callers. */
+                    if (RegQueryValueExA(hkey, "PortName", NULL, &type, (BYTE *)port_name, &size) == ERROR_SUCCESS &&
+                        type == REG_SZ &&
+                        (port_name[0] == 'C' || port_name[0] == 'c') &&
+                        (port_name[1] == 'O' || port_name[1] == 'o') &&
+                        (port_name[2] == 'M' || port_name[2] == 'm')) {
+                        int j;
+                        bool already_have = false;
+                        for (j = 0; j < count && j < max_ports; j++) {
+                            if (lstrcmpiA(names[j], port_name) == 0) {
+                                already_have = true;
+                                break;
+                            }
+                        }
+                        if (!already_have) {
+                            if (count < max_ports) {
+                                snprintf(names[count], 16, "%s", port_name);
+                            }
+                            count++;
+                        }
+                    }
+                    RegCloseKey(hkey);
+                }
             }
+            SetupDiDestroyDeviceInfoList(hdi);
         }
-        if (already_have) {
-            continue;
-        }
-
-        if (count < max_ports) {
-            snprintf(names[count], 16, "%s", com_name);
-        }
-        count++;
     }
 
     return count;
