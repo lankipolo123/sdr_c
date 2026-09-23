@@ -1525,6 +1525,50 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             HBRUSH base_brush = CreateSolidBrush(COLOR_APP_FIELD_BG);
             FillRect(hdc, &blob_full, base_brush);
             DeleteObject(base_brush);
+
+            /* A soft, muted 4-corner wash UNDER the dot-centered rings
+             * below - direct report/reference image: the panel's own
+             * corners (behind each "BAY N" label, well outside any
+             * ring's reach since the dots sit pulled inward from the
+             * corners - see dot_x/dot_y above) were reading as flat
+             * black instead of carrying even a faint tint of that
+             * corner's own color, unlike the reference. Deliberately
+             * muted (each corner's color mixed only 35% into the dark
+             * field color, not the full saturated color) so this reads
+             * as ambient wash, not a return to the flat, no-sense-of-
+             * where-the-heat-is full-panel smear an earlier version of
+             * this heatmap was replaced away from (see this block's own
+             * earlier comment). GradientFill's TRIANGLE mode is GDI's
+             * only native bilinear-ish corner blend - no alpha needed,
+             * so the muted colors are pre-mixed instead. */
+            {
+                TRIVERTEX v[4];
+                GRADIENT_TRIANGLE tri[2];
+                int vi;
+                COLORREF wash[SENSOR_MAX_UNITS];
+
+                for (vi = 0; vi < SENSOR_MAX_UNITS; vi++) {
+                    wash[vi] = RGB(
+                        (GetRValue(corner[vi]) * 35 + GetRValue(COLOR_APP_FIELD_BG) * 65) / 100,
+                        (GetGValue(corner[vi]) * 35 + GetGValue(COLOR_APP_FIELD_BG) * 65) / 100,
+                        (GetBValue(corner[vi]) * 35 + GetBValue(COLOR_APP_FIELD_BG) * 65) / 100);
+                }
+
+                v[0].x = blob_full.left;  v[0].y = blob_full.top;    /* BAY1 */
+                v[1].x = blob_full.right; v[1].y = blob_full.top;    /* BAY2 */
+                v[2].x = blob_full.left;  v[2].y = blob_full.bottom; /* BAY3 */
+                v[3].x = blob_full.right; v[3].y = blob_full.bottom; /* BAY4 */
+                for (vi = 0; vi < 4; vi++) {
+                    COLORREF col = wash[vi];
+                    v[vi].Red   = (COLOR16)(GetRValue(col) << 8);
+                    v[vi].Green = (COLOR16)(GetGValue(col) << 8);
+                    v[vi].Blue  = (COLOR16)(GetBValue(col) << 8);
+                    v[vi].Alpha = 0;
+                }
+                tri[0].Vertex1 = 0; tri[0].Vertex2 = 1; tri[0].Vertex3 = 2; /* BAY1-BAY2-BAY3 */
+                tri[1].Vertex1 = 1; tri[1].Vertex2 = 3; tri[1].Vertex3 = 2; /* BAY2-BAY4-BAY3 */
+                GradientFill(hdc, v, 4, tri, 2, GRADIENT_FILL_TRIANGLE);
+            }
         }
         {
             /* Roughly doubled from the original values - direct report
