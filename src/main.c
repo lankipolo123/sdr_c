@@ -1527,8 +1527,14 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             DeleteObject(base_brush);
         }
         {
+            /* Roughly doubled from the original values - direct report
+             * that the blend looked visibly washed out/muted on real
+             * hardware compared to how it renders here (Wine's
+             * AlphaBlend vs real Windows' own - not something this
+             * sandbox can directly compare), so pushed noticeably more
+             * saturated to not depend on that difference. */
             static const struct { int radius_pct; BYTE alpha; } rings[] = {
-                { 100, 22 }, { 78, 26 }, { 58, 32 }, { 40, 42 }, { 24, 56 }, { 12, 72 }
+                { 100, 45 }, { 78, 52 }, { 58, 65 }, { 40, 85 }, { 24, 110 }, { 12, 140 }
             };
             int blend_w = blend_rc.right - blend_rc.left;
             int blend_h = blend_rc.bottom - blend_rc.top;
