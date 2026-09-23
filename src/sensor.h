@@ -38,6 +38,21 @@
  * i.e. a real "invalid register" answer, not a timeout) - consistent
  * with this off-by-one theory. Confirmed working against real hardware
  * with a single sensor at address 1. */
+/* Fixed connection parameters confirmed against the real XY-MD02
+ * sensor (9600 8N1) - not user-editable in the GUI, and shared with
+ * the background service (sensor_service.c), which needs to open the
+ * exact same hardware the exact same way. */
+#define SENSOR_BAUD 9600
+#define SENSOR_PARITY 'N'
+#define SENSOR_DATABITS 8
+
+/* Modbus slave address each of the 4 physical sensors is wired to,
+ * 1-indexed by default - edit this table once real wiring is known,
+ * since it's very likely not sequential. Shared between main.c (pushed
+ * into g_sensor at WM_CREATE) and sensor_service.c (same table, same
+ * reason) so the two never drift apart. */
+static const uint8_t SENSOR_UNIT_ADDR_DEFAULT[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
+
 #define SENSOR_START_REGISTER  1
 #define SENSOR_REGISTER_COUNT  2
 #define SENSOR_RESPONSE_TIMEOUT_MS 500

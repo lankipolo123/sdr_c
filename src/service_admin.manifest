@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity
+    type="win32"
+    name="ECMControllerSensorService.App"
+    version="1.0.0.0"
+    processorArchitecture="*"
+  />
+  <description>ECM Controller Sensor Logger Service</description>
+  <!-- requireAdministrator, not asInvoker - registering/removing a
+       Windows service (CreateServiceA/DeleteService, called from this
+       exe's own --install/--uninstall verbs) needs SC_MANAGER_CREATE_
+       SERVICE access, which a standard user token never has - Windows
+       shows this exe's own UAC prompt automatically because of this
+       manifest, instead of CreateServiceA just failing with
+       ERROR_ACCESS_DENIED and the person left wondering why. Harmless
+       when the Service Control Manager itself launches this same exe
+       later (as SYSTEM, for the service's actual runtime) - manifest
+       elevation only applies to an interactive CreateProcess/
+       ShellExecute launch, never to StartService. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}" />
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}" />
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}" />
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}" />
+    </application>
+  </compatibility>
+</assembly>

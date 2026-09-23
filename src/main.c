@@ -23,6 +23,8 @@
 #include "connection.h"
 #include "channels.h"
 #include "sensor.h"
+#include "sensor_log.h"
+#include "sensor_shared.h"
 
 /* Widened 1403 -> 1660 so the header row always has room for the
  * Ambient Temperature heatmap + its moved controls (see
@@ -112,11 +114,10 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Mid", "High" };
  * right at the boundary, defeating the point of a safety cutoff. */
 #define KILL_SWITCH_THRESHOLD_C 40.0f
 
-/* Modbus slave address each of the 6 physical sensors is wired to.
- * Defaults to the unit number, 1-indexed - edit this table once the real
- * wiring is known, since it's very likely not sequential. Pushed into
- * the sensor at WM_CREATE via sensor_set_unit_address(). */
-static const uint8_t UNIT_TEMP_ADDR[SENSOR_MAX_UNITS] = { 1, 2, 3, 4 };
+/* Modbus slave address each of the 4 physical sensors is wired to - now
+ * defined in sensor.h (SENSOR_UNIT_ADDR_DEFAULT) since sensor_service.c
+ * needs the exact same table; pushed into the sensor at WM_CREATE via
+ * sensor_set_unit_address(). */
 
 /* HelixDefender Dark palette - same as the single-channel app. */
 #define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
@@ -306,6 +307,13 @@ static HBITMAP g_dot_pattern_bmp;
 
 static Connection g_conn;
 static Sensor g_sensor;
+/* Read-only view onto the background sensor service's shared-memory
+ * block (see sensor_shared.h) - opened lazily/retried below (the
+ * service may install or start after this app already has), never
+ * written to from here. When its data is fresh, WM_TIMER prefers it
+ * over polling the sensor port directly, since the service (once
+ * installed) owns that port exclusively. */
+static SensorShared g_sensor_shared;
 static bool g_kill_switch_tripped[MAX_CHANNELS];
 
 /* Bulk Actions selection - click a card's checkbox to toggle it in/out,
@@ -1945,10 +1953,10 @@ static void on_connect_clicked(void) {
  * second, independent serial connection. Baud/parity/data bits aren't
  * user-editable here: they're fixed at the values confirmed against the
  * real XY-MD02 sensor (9600 8N1), so there's nothing to expose that would
- * ever need changing - fewer knobs, matching the "user friendly" ask. */
-#define SENSOR_BAUD 9600
-#define SENSOR_PARITY 'N'
-#define SENSOR_DATABITS 8
+ * ever need changing - fewer knobs, matching the "user friendly" ask.
+ * SENSOR_BAUD/PARITY/DATABITS themselves now live in sensor.h - the
+ * background service (sensor_service.c) needs the exact same values to
+ * open the same hardware the same way. */
 
 static void refresh_sensor_port_list(void) {
     refresh_combo_ports(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), serial_list_ports);
@@ -1989,7 +1997,7 @@ static bool g_sensor_connect_btn_connected;
 
 static void ui_refresh_sensor(void) {
     /* Rack-wide summary - the average across the 6 physical sensors that
-     * currently have a reading (see UNIT_TEMP_ADDR) - not tied to the 16
+     * currently have a reading (see SENSOR_UNIT_ADDR_DEFAULT) - not tied to the 16
      * RF channels. The Connect button has its own small change-detection
      * gate below, separate from the average. */
     bool connected = sensor_is_connected(&g_sensor);
@@ -3935,156 +3943,6 @@ static void load_channel_settings(void) {
     }
 }
 
-/* ---- sensor CSV log: BAY1-4 temperature/humidity readings, one row
- * every ~60s, appended to a plain CSV next to the exe - same portable/
- * no-installer reasoning as get_ini_path(). Direct request: a WEEKLY
- * log, not an ever-growing one - once 7 days have passed since the
- * current file's first row, it's wiped back to just the header instead
- * of keeping every week that's ever run. The 7-day anchor has to
- * survive an app restart to mean anything (a restart-only reset would
- * never actually reach 7 days if the app gets restarted more often than
- * that), so it's persisted in the .ini right alongside the RS422/Sensor
- * settings - written immediately whenever a new week starts, not just
- * on the periodic ~30s save_settings() tick. ---- */
-
-#define SENSOR_LOG_INTERVAL_TICKS 600 /* ID_POLL_TIMER fires every 100ms - 600 ticks = one row every ~60s */
-/* 7 days, expressed in FILETIME's own unit (100ns intervals) - what
- * GetSystemTimeAsFileTime()/the ULARGE_INTEGER comparison below need. */
-#define SENSOR_LOG_WEEK_100NS ((ULONGLONG)7 * 24 * 60 * 60 * 10000000ULL)
-
-static ULARGE_INTEGER g_sensor_log_week_start;
-static int g_sensor_log_tick_counter = 0;
-
-static void get_sensor_log_path(char *path /* at least MAX_PATH + 16 bytes */) {
-    char *dot;
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    dot = strrchr(path, '.');
-    if (dot) {
-        *dot = '\0';
-    }
-    lstrcatA(path, "_sensor_log.csv");
-}
-
-static void sensor_log_now(ULARGE_INTEGER *out) {
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    out->LowPart = ft.dwLowDateTime;
-    out->HighPart = ft.dwHighDateTime;
-}
-
-/* Rewrites the CSV down to just its header row (the "past data deleted"
- * half of the weekly reset) and records the new week's start time, both
- * in memory and in the .ini so a restart mid-week doesn't lose it. */
-static void sensor_log_start_new_week(void) {
-    char path[MAX_PATH + 16];
-    char ini_path[MAX_PATH + 8];
-    char buf[24];
-    HANDLE file;
-    DWORD written;
-    static const char header[] =
-        "Timestamp,Bay1_C,Bay2_C,Bay3_C,Bay4_C,Bay1_RH,Bay2_RH,Bay3_RH,Bay4_RH\r\n";
-
-    get_sensor_log_path(path);
-    file = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file != INVALID_HANDLE_VALUE) {
-        WriteFile(file, header, (DWORD)(sizeof(header) - 1), &written, NULL);
-        CloseHandle(file);
-    }
-
-    sensor_log_now(&g_sensor_log_week_start);
-
-    get_ini_path(ini_path);
-    wsprintfA(buf, "%lu", (unsigned long)g_sensor_log_week_start.LowPart);
-    WritePrivateProfileStringA("SensorLog", "WeekStartLow", buf, ini_path);
-    wsprintfA(buf, "%lu", (unsigned long)g_sensor_log_week_start.HighPart);
-    WritePrivateProfileStringA("SensorLog", "WeekStartHigh", buf, ini_path);
-}
-
-/* Call once at startup, after get_ini_path()'s file is available to
- * read - resumes the current week's anchor if one was saved (so a
- * restart mid-week keeps appending to the same file instead of
- * resetting it early), or starts a fresh week on a genuinely first
- * run (no saved anchor at all). */
-static void load_sensor_log_state(void) {
-    char ini_path[MAX_PATH + 8];
-    int has_saved_week;
-
-    get_ini_path(ini_path);
-
-    /* Same -1-sentinel idiom load_channel_settings() uses: nDefault (-1)
-     * only comes back if the key is genuinely missing. (A real saved
-     * FILETIME high-part could theoretically also be exactly
-     * 0xFFFFFFFF and get misread as "missing" here, same negligible
-     * risk this codebase already accepts for Mode/Level above.) */
-    has_saved_week = GetPrivateProfileIntA("SensorLog", "WeekStartHigh", -1, ini_path);
-    if (has_saved_week < 0) {
-        sensor_log_start_new_week();
-        return;
-    }
-    g_sensor_log_week_start.LowPart = (DWORD)GetPrivateProfileIntA("SensorLog", "WeekStartLow", 0, ini_path);
-    g_sensor_log_week_start.HighPart = (DWORD)GetPrivateProfileIntA("SensorLog", "WeekStartHigh", 0, ini_path);
-}
-
-static void sensor_log_append_row(void) {
-    char path[MAX_PATH + 16];
-    char line[256];
-    char ts[24];
-    char temp_str[SENSOR_MAX_UNITS][16];
-    char rh_str[SENSOR_MAX_UNITS][16];
-    SYSTEMTIME st;
-    HANDLE file;
-    DWORD written;
-    int i;
-    int len;
-
-    GetLocalTime(&st);
-    wsprintfA(ts, "%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-
-    for (i = 0; i < SENSOR_MAX_UNITS; i++) {
-        const SensorState *s = sensor_get_state(&g_sensor, i);
-        if (s->has_reading) {
-            wsprintfA(temp_str[i], "%d.%d", (int)s->temperature_c, (int)(s->temperature_c * 10) % 10);
-            wsprintfA(rh_str[i], "%d.%d", (int)s->humidity_pct, (int)(s->humidity_pct * 10) % 10);
-        } else {
-            temp_str[i][0] = '\0';
-            rh_str[i][0] = '\0';
-        }
-    }
-
-    len = wsprintfA(line, "%s,%s,%s,%s,%s,%s,%s,%s,%s\r\n", ts,
-                     temp_str[0], temp_str[1], temp_str[2], temp_str[3],
-                     rh_str[0], rh_str[1], rh_str[2], rh_str[3]);
-
-    get_sensor_log_path(path);
-    /* FILE_APPEND_DATA alone (not combined with GENERIC_WRITE) is the
-     * standard Win32 idiom for "writes always land at the current end
-     * of file" - no separate SetFilePointer needed. */
-    file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file != INVALID_HANDLE_VALUE) {
-        WriteFile(file, line, (DWORD)len, &written, NULL);
-        CloseHandle(file);
-    }
-}
-
-/* Called every ID_POLL_TIMER tick, same pattern as the uptime accounting
- * right below it in WM_TIMER - cheap enough (one subtraction/comparison)
- * to run every 100ms so a week boundary is never missed by more than a
- * tick, with the actual file I/O throttled to SENSOR_LOG_INTERVAL_TICKS. */
-static void sensor_log_tick(void) {
-    ULARGE_INTEGER now;
-
-    sensor_log_now(&now);
-    if (now.QuadPart - g_sensor_log_week_start.QuadPart >= SENSOR_LOG_WEEK_100NS) {
-        sensor_log_start_new_week();
-    }
-
-    g_sensor_log_tick_counter++;
-    if (g_sensor_log_tick_counter >= SENSOR_LOG_INTERVAL_TICKS) {
-        g_sensor_log_tick_counter = 0;
-        sensor_log_append_row();
-    }
-}
-
 /* IDD_CW_PASSWORD's DLGPROC - just collects whatever was typed into
  * IDC_CW_PW_EDIT on OK, leaves g_cw_pw_input untouched on Cancel (caller
  * checks the DialogBoxParamA return value to tell the two apart). */
@@ -4761,10 +4619,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             {
                 int addr_i;
                 for (addr_i = 0; addr_i < SENSOR_MAX_UNITS; addr_i++) {
-                    sensor_set_unit_address(&g_sensor, addr_i, UNIT_TEMP_ADDR[addr_i]);
+                    sensor_set_unit_address(&g_sensor, addr_i, SENSOR_UNIT_ADDR_DEFAULT[addr_i]);
                 }
             }
-            load_sensor_log_state();
+            sensor_log_load_state();
+            /* Fine if this fails (returns false, g_sensor_shared stays
+             * zeroed) - the service may not be installed at all, or
+             * hasn't started yet; WM_TIMER retries this periodically. */
+            sensor_shared_open_reader(&g_sensor_shared);
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
             /* Starts disconnected - every channel control starts
              * disabled too, same as conn_on_connected_changed() would
@@ -4816,9 +4678,44 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 conn_poll(&g_conn);
                 channels_poll();
                 ui_refresh_all_channels();
-                sensor_poll(&g_sensor);
+                /* The background sensor service (once installed) polls
+                 * the sensor port itself and publishes readings via
+                 * shared memory - prefer that when it's fresh instead
+                 * of also opening the same port here (a serial port
+                 * can't be opened by two processes at once). Falls back
+                 * to this app's own direct poll whenever the service
+                 * isn't installed, hasn't started yet, or has gone
+                 * stale (crashed/stopped) - sensor_poll() is already a
+                 * cheap no-op if this app's own Connect was never
+                 * clicked, so this is safe either way. */
+                if (g_sensor_shared.mapping == NULL) {
+                    static int retry_counter = 0;
+                    /* Retried roughly once a second, not every 100ms
+                     * tick - OpenFileMappingA failing is cheap, but no
+                     * reason to hammer it while no service is installed
+                     * at all (the common case for anyone who hasn't
+                     * opted into the background logger). */
+                    retry_counter++;
+                    if (retry_counter >= 10) {
+                        retry_counter = 0;
+                        sensor_shared_open_reader(&g_sensor_shared);
+                    }
+                }
+                {
+                    bool using_service_data = sensor_shared_read_if_fresh(&g_sensor_shared, &g_sensor);
+                    if (!using_service_data) {
+                        sensor_poll(&g_sensor);
+                    }
+                    /* The service does its own CSV logging continuously
+                     * (GUI open or not) once it owns the data - this
+                     * app only logs when IT'S the one actually polling,
+                     * or two processes would race truncating/appending
+                     * the same file every week. */
+                    if (!using_service_data) {
+                        sensor_log_tick(&g_sensor);
+                    }
+                }
                 ui_refresh_sensor();
-                sensor_log_tick();
                 check_kill_switch();
                 ui_refresh_kill_switch();
 

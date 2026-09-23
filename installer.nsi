@@ -13,6 +13,14 @@
 ;   vcredist\msvcp140.dll, vcredist\vcruntime140.dll, vcredist\vcruntime140_1.dll
 ;                                     (Microsoft's own VC++ runtime DLLs, committed
 ;                                     to this repo - see vcredist/README below)
+;   ECMControllerSensorService.exe   (background BAY1-4 logger service - built from
+;                                     src\sensor_service.c, keeps logging/live-view
+;                                     data flowing even while the app itself is
+;                                     closed; NOT auto-installed as a service by
+;                                     this installer - see the Start Menu shortcuts
+;                                     below, since registering a service needs
+;                                     admin rights this base install deliberately
+;                                     doesn't require)
 ;   src\app.ico                     (installer/uninstaller icon, same mark as the app)
 ;
 ; Installs both the exe and dll\Transit.dll under it, keeping the same
@@ -56,6 +64,7 @@
 ; having released the old one in time.
 !define EXE_NAME "ECMController.exe"
 !define OLD_EXE_NAME "digital_noise_config_multi.exe"
+!define SERVICE_EXE_NAME "ECMControllerSensorService.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
 Name "${APP_NAME}"
@@ -143,12 +152,25 @@ Section "Install"
     SetOutPath "$INSTDIR\dll"
     File "dll\Transit.dll"
 
+    ; The background sensor logger - installed alongside the app but NOT
+    ; registered as a running service by this step (that needs admin
+    ; rights, see this file's top comment). The Start Menu shortcut
+    ; below runs it with --install, which triggers its OWN UAC prompt
+    ; via service_admin.manifest - opt-in, not forced on every install.
+    SetOutPath "$INSTDIR"
+    File "${SERVICE_EXE_NAME}"
+
     WriteRegStr HKCU "Software\${COMPANY_NAME}\${APP_NAME}" "InstallDir" "$INSTDIR"
 
     CreateDirectory "$SMPROGRAMS\${APP_NAME}"
     CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
     CreateShortCut "$SMPROGRAMS\${APP_NAME}\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
     CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
+    ; Separate, clearly-labeled, opt-in shortcuts for the background
+    ; logger - each launch UAC-prompts on its own (service_admin.manifest),
+    ; independent of this installer's own (unprivileged) execution level.
+    CreateShortCut "$SMPROGRAMS\${APP_NAME}\Install Background Logger Service.lnk" "$INSTDIR\${SERVICE_EXE_NAME}" "--install"
+    CreateShortCut "$SMPROGRAMS\${APP_NAME}\Uninstall Background Logger Service.lnk" "$INSTDIR\${SERVICE_EXE_NAME}" "--uninstall"
 
     WriteUninstaller "$INSTDIR\Uninstall.exe"
 
@@ -165,18 +187,36 @@ SectionEnd
 Section "Uninstall"
     !insertmacro CloseRunningApp "uninstall"
 
+    ; Best-effort - if the service was ever installed, ask its own exe
+    ; to remove it (triggers its own UAC prompt, independent of this
+    ; uninstaller's own unprivileged level) before deleting that exe out
+    ; from under it. A "Cancel" on that prompt just leaves an orphaned
+    ; service pointing at a soon-to-be-missing binary - harmless (it
+    ; simply fails to start next time), not worth blocking the rest of
+    ; the uninstall over.
+    IfFileExists "$INSTDIR\${SERVICE_EXE_NAME}" 0 skip_service_uninstall
+        ExecWait '"$INSTDIR\${SERVICE_EXE_NAME}" --uninstall'
+    skip_service_uninstall:
+
     Delete "$INSTDIR\${EXE_NAME}"
     Delete "$INSTDIR\${OLD_EXE_NAME}"
+    Delete "$INSTDIR\${SERVICE_EXE_NAME}"
     Delete "$INSTDIR\msvcp140.dll"
     Delete "$INSTDIR\vcruntime140.dll"
     Delete "$INSTDIR\vcruntime140_1.dll"
     Delete "$INSTDIR\dll\Transit.dll"
+    ; sensor_log.csv/sensor_log_state.ini and the app's own settings
+    ; .ini are all deliberately left behind, same reasoning either way -
+    ; a reinstall (or just running the exe fresh) picks them back up
+    ; rather than silently losing logged history/settings on uninstall.
     Delete "$INSTDIR\Uninstall.exe"
     RMDir "$INSTDIR\dll"
     RMDir "$INSTDIR"
 
     Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
     Delete "$SMPROGRAMS\${APP_NAME}\Uninstall.lnk"
+    Delete "$SMPROGRAMS\${APP_NAME}\Install Background Logger Service.lnk"
+    Delete "$SMPROGRAMS\${APP_NAME}\Uninstall Background Logger Service.lnk"
     RMDir "$SMPROGRAMS\${APP_NAME}"
     Delete "$DESKTOP\${APP_NAME}.lnk"
 
