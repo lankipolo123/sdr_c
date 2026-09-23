@@ -22,6 +22,11 @@
  * Direct request - the CSV logging existed with no way to actually
  * get to the file from inside the app. */
 #define IDC_OPEN_LOG_BTN         1018
+/* Light/Dark toggle - see apply_theme()/create_theme_brushes() in
+ * main.c. Runtime-only + persisted to the .ini's [UI] LightMode key,
+ * same GetPrivateProfileIntA/WritePrivateProfileStringA pattern as
+ * every other saved setting (load_settings()/save_settings()). */
+#define IDC_THEME_TOGGLE_BTN     1019
 /* Manual trip - same slot as IDC_KILL_RESET_BTN, mutually exclusive
  * visibility (armed shows this, tripped shows Reset instead) - see
  * ui_refresh_kill_switch() in main.c. */

@@ -43,12 +43,14 @@
  * while CARD_W still fits inside 1660 with room to spare, see
  * GRID_RIGHT's own comment). */
 #define CLIENT_WIDTH  1660
-#define CLIENT_HEIGHT 770 /* was 702 - grown by the new Quick Actions panel's
-                            * own footprint (QUICK_PANEL_H + CARD_GAP) above
-                            * Spectrum, so the minimum window size still
+#define CLIENT_HEIGHT 794 /* was 702, then 770 - grown by the Quick Actions
+                            * panel's own footprint (QUICK_PANEL_H + CARD_GAP)
+                            * above Spectrum, so the minimum window size still
                             * leaves Spectrum/Activity Log exactly as much
                             * room as before instead of shrinking to make
-                            * space for the new panel. */
+                            * space for the new panel (770 was QUICK_PANEL_H=56;
+                            * 794 accounts for its 2nd row, QUICK_PANEL_H=80,
+                            * added for the Light/Dark toggle). */
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -125,26 +127,35 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Mid", "High" };
  * needs the exact same table; pushed into the sensor at WM_CREATE via
  * sensor_set_unit_address(). */
 
-/* HelixDefender Dark palette - same as the single-channel app. */
-#define COLOR_APP_PAGE_BG   RGB(32, 33, 36)
-#define COLOR_APP_PANEL_BG  RGB(43, 45, 49)
-#define COLOR_APP_TEXT      RGB(232, 233, 234)
-#define COLOR_APP_MUTED     RGB(154, 156, 160)
-#define COLOR_APP_ACCENT    RGB(26, 133, 184)
-/* Was RGB(58,74,82) - close enough in hue to COLOR_APP_ACCENT's blue
- * that a disabled/muted button and an enabled one read as "the same
- * color" at a glance (reported directly, re: Bulk Actions at 0
- * selected). A flat neutral gray, no blue tint at all, actually
- * contrasts against every accent color this app uses instead of just
- * being a darker shade of one of them. */
-#define COLOR_APP_ACCENT_DIS RGB(90, 90, 94)
-#define COLOR_APP_HEADER    RGB(58, 168, 221)
-#define COLOR_APP_FIELD_BG  RGB(23, 24, 26)
-#define COLOR_APP_CONNECTED RGB(58, 181, 94)
-#define COLOR_APP_DISCONNECTED RGB(224, 90, 90)
-#define COLOR_APP_DOT       RGB(50, 52, 57)
-#define COLOR_APP_PANEL_BORDER RGB(63, 66, 71)
-#define COLOR_APP_SHADOW    RGB(14, 15, 17)
+/* HelixDefender Dark palette - same as the single-channel app. Was a
+ * block of #define constants; now runtime-mutable globals so
+ * apply_theme() can swap every one of them to its Light equivalent on
+ * a Light/Dark toggle (see IDC_THEME_TOGGLE_BTN) - values set once,
+ * unconditionally, by apply_theme() at startup (WinMain, before the
+ * window is even created) rather than duplicated here as initializers,
+ * so there's exactly one place (apply_theme()) that ever needs both
+ * palettes. Every one of these was checked for a compile-time-constant
+ * use (static array initializer, switch case, #if) before converting -
+ * there were none except g_shadow_color's own initializer just below,
+ * which had to change from `static const` to plain `static` for the
+ * same reason. */
+static COLORREF COLOR_APP_PAGE_BG;
+static COLORREF COLOR_APP_PANEL_BG;
+static COLORREF COLOR_APP_TEXT;
+static COLORREF COLOR_APP_MUTED;
+static COLORREF COLOR_APP_ACCENT;
+/* Light mode still keeps this a flat neutral gray, not a lighter shade
+ * of COLOR_APP_ACCENT's blue - same reasoning as the dark palette's own
+ * comment (a disabled/muted control must not read as "the same color"
+ * as an enabled one). */
+static COLORREF COLOR_APP_ACCENT_DIS;
+static COLORREF COLOR_APP_HEADER;
+static COLORREF COLOR_APP_FIELD_BG;
+static COLORREF COLOR_APP_CONNECTED;
+static COLORREF COLOR_APP_DISCONNECTED;
+static COLORREF COLOR_APP_DOT;
+static COLORREF COLOR_APP_PANEL_BORDER;
+static COLORREF COLOR_APP_SHADOW;
 
 /* "Direction B" from the UI design proposal, applied app-wide: rounded
  * corners everywhere instead of the old chamfer (panel_subclass_proc
@@ -214,11 +225,12 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Mid", "High" };
                         * minimum value now - see sidebar_width_for(). */
 #define SIDEBAR_W_MAX 600
 
-/* Small panel above Spectrum - Kill Switch status/trip/reset + Open Log,
- * moved out of the Ambient Temperature header (direct request: "a small
- * panel that will consist Kill switch and open logs on the above the
- * spectrum"). SIDEBAR_CONTENT_TOP is where Spectrum itself now starts. */
-#define QUICK_PANEL_H 56
+/* Small panel above Spectrum - Kill Switch status/trip/reset + Open Log
+ * on row 1, Light/Dark toggle on row 2 - moved out of the Ambient
+ * Temperature header (direct request: "a small panel that will consist
+ * Kill switch and open logs on the above the spectrum"). SIDEBAR_CONTENT_TOP
+ * is where Spectrum itself now starts. */
+#define QUICK_PANEL_H 80
 #define SIDEBAR_CONTENT_TOP (CONTENT_TOP + QUICK_PANEL_H + CARD_GAP)
 
 /* Bottom edge now tracks the window's own client height directly (see
@@ -321,9 +333,13 @@ static HBRUSH g_brush_disconnected;
 static HBRUSH g_brush_level_medium; /* matches ch_gauge_stop_color(LEVEL_MEDIUM) */
 static HBRUSH g_brush_level_off;    /* matches ch_gauge_stop_color(LEVEL_OFF) */
 static HBRUSH g_brush_shadow;
-static const COLORREF g_shadow_color = COLOR_APP_SHADOW;
+static COLORREF g_shadow_color; /* was `static const` - now set by
+                                  * create_theme_brushes(), see its own
+                                  * comment on why COLOR_APP_SHADOW can no
+                                  * longer be a compile-time constant. */
 static HBRUSH g_brush_dot_pattern; /* tiled DOT_GRID_SPACING x DOT_GRID_SPACING bitmap brush */
 static HBITMAP g_dot_pattern_bmp;
+static bool g_light_mode;
 
 static Connection g_conn;
 static Sensor g_sensor;
@@ -1233,6 +1249,81 @@ static void build_dot_pattern_brush(void) {
     DeleteDC(mem_dc);
 
     g_brush_dot_pattern = CreatePatternBrush(g_dot_pattern_bmp);
+}
+
+/* Sets every COLOR_APP_* global to its Dark or Light value based on
+ * g_light_mode - the only place either palette is spelled out, so a
+ * color only ever needs updating here. Does NOT touch any GDI object
+ * (brushes bake in a color at creation, they don't track a variable) -
+ * callers always follow this with create_theme_brushes(). */
+static void apply_theme(void) {
+    if (g_light_mode) {
+        COLOR_APP_PAGE_BG = RGB(242, 243, 245);
+        COLOR_APP_PANEL_BG = RGB(255, 255, 255);
+        COLOR_APP_TEXT = RGB(28, 30, 33);
+        COLOR_APP_MUTED = RGB(110, 113, 118);
+        COLOR_APP_ACCENT = RGB(15, 110, 158);
+        COLOR_APP_ACCENT_DIS = RGB(206, 208, 212);
+        COLOR_APP_HEADER = RGB(20, 120, 170);
+        COLOR_APP_FIELD_BG = RGB(236, 237, 240);
+        COLOR_APP_CONNECTED = RGB(46, 155, 78);
+        COLOR_APP_DISCONNECTED = RGB(198, 60, 60);
+        COLOR_APP_DOT = RGB(214, 216, 220);
+        COLOR_APP_PANEL_BORDER = RGB(219, 221, 225);
+        COLOR_APP_SHADOW = RGB(210, 211, 214);
+    } else {
+        COLOR_APP_PAGE_BG = RGB(32, 33, 36);
+        COLOR_APP_PANEL_BG = RGB(43, 45, 49);
+        COLOR_APP_TEXT = RGB(232, 233, 234);
+        COLOR_APP_MUTED = RGB(154, 156, 160);
+        COLOR_APP_ACCENT = RGB(26, 133, 184);
+        COLOR_APP_ACCENT_DIS = RGB(90, 90, 94);
+        COLOR_APP_HEADER = RGB(58, 168, 221);
+        COLOR_APP_FIELD_BG = RGB(23, 24, 26);
+        COLOR_APP_CONNECTED = RGB(58, 181, 94);
+        COLOR_APP_DISCONNECTED = RGB(224, 90, 90);
+        COLOR_APP_DOT = RGB(50, 52, 57);
+        COLOR_APP_PANEL_BORDER = RGB(63, 66, 71);
+        COLOR_APP_SHADOW = RGB(14, 15, 17);
+    }
+}
+
+/* (Re)creates every persistent GDI object derived from the COLOR_APP_*
+ * globals - safe to call again after a theme toggle (deletes the old
+ * ones first if they exist) as well as once at startup. The many OTHER
+ * CreateSolidBrush(COLOR_APP_*) calls scattered through this file are
+ * all local/transient (created and destroyed within a single WM_PAINT/
+ * WM_DRAWITEM), so they read the current value on their own with no
+ * extra work - only these long-lived globals need explicit rebuilding.
+ * g_brush_level_medium is deliberately NOT touched here - it's a fixed
+ * status color (matches ch_gauge_stop_color(LEVEL_MEDIUM)), not part of
+ * either theme, created once at real startup and left alone. */
+static void create_theme_brushes(void) {
+    if (g_brush_page) DeleteObject(g_brush_page);
+    if (g_brush_panel) DeleteObject(g_brush_panel);
+    if (g_brush_field) DeleteObject(g_brush_field);
+    if (g_brush_accent) DeleteObject(g_brush_accent);
+    if (g_brush_accent_dis) DeleteObject(g_brush_accent_dis);
+    if (g_brush_dot) DeleteObject(g_brush_dot);
+    if (g_brush_connected) DeleteObject(g_brush_connected);
+    if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
+    if (g_brush_level_off) DeleteObject(g_brush_level_off);
+    if (g_brush_shadow) DeleteObject(g_brush_shadow);
+    if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
+    if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
+
+    g_brush_page = CreateSolidBrush(COLOR_APP_PAGE_BG);
+    g_brush_panel = CreateSolidBrush(COLOR_APP_PANEL_BG);
+    g_brush_field = CreateSolidBrush(COLOR_APP_FIELD_BG);
+    g_brush_accent = CreateSolidBrush(COLOR_APP_ACCENT);
+    g_brush_accent_dis = CreateSolidBrush(COLOR_APP_ACCENT_DIS);
+    g_brush_dot = CreateSolidBrush(COLOR_APP_DOT);
+    g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
+    g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
+    g_brush_level_off = CreateSolidBrush(COLOR_APP_MUTED);
+    g_brush_shadow = CreateSolidBrush(COLOR_APP_SHADOW);
+    g_shadow_color = COLOR_APP_SHADOW;
+    build_dot_pattern_brush();
 }
 
 /* Which of the 6 confirmed bands a reading falls in - real safe/caution/
@@ -2284,6 +2375,19 @@ static void on_open_log_clicked(void) {
     } else if (result <= 32) {
         ui_show_warning("Could not open sensor_log.csv");
     }
+}
+
+/* Flips g_light_mode, rebuilds every theme color + the GDI objects
+ * derived from them, updates the button's own label, then repaints
+ * everything - RDW_ALLCHILDREN same as relayout_for_size() uses, since
+ * this changes what practically every control on screen paints with,
+ * not just this one control's own rect. */
+static void on_theme_toggle_clicked(void) {
+    g_light_mode = !g_light_mode;
+    apply_theme();
+    create_theme_brushes();
+    SetWindowTextA(GetDlgItem(g_hwnd, IDC_THEME_TOGGLE_BTN), g_light_mode ? "Dark Mode" : "Light Mode");
+    RedrawWindow(g_hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
 /* Per-unit reset - resets just this one unit, independent of the others.
@@ -3959,6 +4063,8 @@ static void save_settings(void) {
     GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, buf, sizeof(buf));
     WritePrivateProfileStringA("Sensor", "Port", buf, path);
 
+    WritePrivateProfileStringA("UI", "LightMode", g_light_mode ? "1" : "0", path);
+
     /* Per-channel mode + resume-to level + output_on, never saved before -
      * reopening the app silently reset every channel back to White Noise/
      * no level/OFF with no way to get a saved setup back. Saving output_on
@@ -4009,6 +4115,17 @@ static void load_settings(void) {
     }
     if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) > 0) {
         select_combo_by_text(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), buf);
+    }
+
+    /* g_light_mode/every brush already defaulted dark in WinMain, before
+     * this .ini could even be read - only need to act here if the saved
+     * value disagrees. Runs before ShowWindow(), so no explicit repaint
+     * is needed for this first application. */
+    if (GetPrivateProfileIntA("UI", "LightMode", 0, path) != 0) {
+        g_light_mode = true;
+        apply_theme();
+        create_theme_brushes();
+        SetWindowTextA(GetDlgItem(g_hwnd, IDC_THEME_TOGGLE_BTN), "Dark Mode");
     }
 }
 
@@ -4375,12 +4492,15 @@ static void build_controls(HWND hwnd) {
      * instead of running under it. */
     g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
 
-    /* Quick Actions: Kill Switch status/trip/reset + Open Log, small
-     * panel of its own directly above Spectrum - moved out of Ambient
-     * Temperature's column (direct request). Single row: status label
-     * (left), Kill Switch/Reset button (middle, same shared slot as
-     * before), Open Log right-aligned to the panel's own right edge
-     * (same margin pattern as Spectrum's "All"/Activity Log's "Clear"). */
+    /* Quick Actions: Kill Switch status/trip/reset + Open Log on row 1,
+     * Light/Dark toggle on row 2 - small panel of its own directly above
+     * Spectrum, moved out of Ambient Temperature's column (direct
+     * request). Row 1: status label (left), Kill Switch/Reset button
+     * (middle, same shared slot as before), Open Log right-aligned to
+     * the panel's own right edge (same margin pattern as Spectrum's
+     * "All"/Activity Log's "Clear"). Row 2: the toggle, left-aligned -
+     * its own label swaps text (see on_theme_toggle_clicked()) so it
+     * never needs a second slot the way Kill Switch/Reset do. */
     g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
     add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 22, CONTENT_TOP + 19, 170, 16, IDC_KILL_STATUS_LBL);
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 200, CONTENT_TOP + 17, 80, 20, IDC_KILL_RESET_BTN);
@@ -4388,6 +4508,8 @@ static void build_controls(HWND hwnd) {
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
     add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP,
              SIDEBAR_X + SIDEBAR_W - 12 - 90, CONTENT_TOP + 17, 90, 20, IDC_OPEN_LOG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Light Mode", BS_OWNERDRAW | WS_TABSTOP,
+             22, CONTENT_TOP + 45, 110, 20, IDC_THEME_TOGGLE_BTN);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4655,6 +4777,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 200, CONTENT_TOP + 17, 80, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 200, CONTENT_TOP + 17, 110, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), SIDEBAR_X + sidebar_w - 12 - 90, CONTENT_TOP + 17, 90, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_THEME_TOGGLE_BTN), 22, CONTENT_TOP + 45, 110, 20, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
@@ -4974,6 +5097,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_OPEN_LOG_BTN && code == BN_CLICKED) {
                 on_open_log_clicked();
+                return 0;
+            }
+            if (id == IDC_THEME_TOGGLE_BTN && code == BN_CLICKED) {
+                on_theme_toggle_clicked();
                 return 0;
             }
             if (id == IDC_KILL_TRIP_BTN && code == BN_CLICKED) {
@@ -5511,18 +5638,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     g_hinst = hInstance;
 
-    g_brush_page = CreateSolidBrush(COLOR_APP_PAGE_BG);
-    g_brush_panel = CreateSolidBrush(COLOR_APP_PANEL_BG);
-    g_brush_field = CreateSolidBrush(COLOR_APP_FIELD_BG);
-    g_brush_accent = CreateSolidBrush(COLOR_APP_ACCENT);
-    g_brush_accent_dis = CreateSolidBrush(COLOR_APP_ACCENT_DIS);
-    g_brush_dot = CreateSolidBrush(COLOR_APP_DOT);
-    g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
-    g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
+    /* g_light_mode defaults false (dark) - the real "which theme did the
+     * user last pick" answer isn't known until load_settings() reads
+     * the .ini, well after this point (needs build_controls()'s combos
+     * to already exist). This first call just gets every brush into a
+     * valid, self-consistent dark state for the very first paint;
+     * WM_CREATE re-applies the theme afterward if the saved setting
+     * turns out to be Light. g_brush_level_medium is NOT part of either
+     * theme (see create_theme_brushes()'s own comment) - created once,
+     * here, and never touched again. */
+    apply_theme();
+    create_theme_brushes();
     g_brush_level_medium = CreateSolidBrush(RGB(224, 146, 34));
-    g_brush_level_off = CreateSolidBrush(COLOR_APP_MUTED);
-    g_brush_shadow = CreateSolidBrush(COLOR_APP_SHADOW);
-    build_dot_pattern_brush();
 
     /* NOT CS_HREDRAW | CS_VREDRAW - that forces the ENTIRE window to
      * repaint on every resize, on top of the explicit repaint
