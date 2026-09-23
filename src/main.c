@@ -689,23 +689,6 @@ static void make_combo_readonly(HWND combo) {
 static void draw_app_logo_mark(HDC hdc, int cx, int cy, int scale);
 static void draw_app_logo_silhouette(HDC hdc, int cx, int cy, int scale, COLORREF color);
 
-/* Which brush fills a panel/card body - g_brush_panel normally, but in
- * Light mode the dot texture moves onto card/panel content instead of
- * sitting on the page behind them (see WM_ERASEBKGND on the main
- * window), so panels/cards fill with the dot pattern here instead -
- * direct request to "reverse" which one gets the dots, scoped to Light
- * mode only (Dark mode keeps its original dotted-page/plain-panel
- * look, unchanged). Used by panel_subclass_proc (header/sidebar/quick
- * panels and the Bulk Actions inset card) and card_panel_subclass_proc
- * (the 16 channel cards) - every spot that used to just select
- * g_brush_panel unconditionally. */
-static HBRUSH panel_fill_brush(void) {
-    if (g_light_mode && g_brush_dot_pattern) {
-        return g_brush_dot_pattern;
-    }
-    return g_brush_panel;
-}
-
 /* Rounded-corner panel painting (header bar, sidebar) - same subclass
  * pattern as the channel cards' card_panel_subclass_proc below, just
  * with no per-item on/off state to light the border with. */
@@ -737,7 +720,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
         SelectObject(hdc, old_pen);
         DeleteObject(pen);
 
-        SelectObject(hdc, panel_fill_brush());
+        SelectObject(hdc, g_brush_panel);
         pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
         RoundRect(hdc, rc.left, rc.top, rc.right - PANEL_SHADOW_PX, rc.bottom - PANEL_SHADOW_PX,
@@ -851,7 +834,7 @@ static LRESULT CALLBACK panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, 
             SelectObject(hdc, old_pen);
             DeleteObject(pen);
 
-            SelectObject(hdc, panel_fill_brush());
+            SelectObject(hdc, g_brush_panel);
             pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
             old_pen = (HPEN)SelectObject(hdc, pen);
             RoundRect(hdc, brc.left, brc.top, brc.right - CARD_SHADOW_PX, brc.bottom - CARD_SHADOW_PX,
@@ -1011,7 +994,7 @@ static LRESULT CALLBACK card_panel_subclass_proc(HWND hwnd, UINT msg, WPARAM wPa
          * pick); otherwise a channel that's actually ON gets a green
          * stroke instead, direct request - the ON button alone lighting
          * up wasn't enough of a signal at a glance across all 16 cards. */
-        SelectObject(hdc, panel_fill_brush());
+        SelectObject(hdc, g_brush_panel);
         if (selected) {
             pen = CreatePen(PS_SOLID, 2, COLOR_APP_HEADER);
             old_pen = (HPEN)SelectObject(hdc, pen);
@@ -5588,19 +5571,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             HDC hdc = (HDC)wParam;
             RECT rc;
             GetClientRect(hwnd, &rc);
-            /* Light mode: the dot texture moves onto card/panel content
-             * instead of sitting on the page behind them - see
-             * panel_subclass_proc()/card_panel_subclass_proc() - direct
-             * request to "reverse" which one gets the dots. So the page
-             * itself paints plain here. Dark mode is untouched - still
-             * the original dotted page / plain panel look. Pattern
-             * brush already encodes the page background color in its
-             * tile - no separate full-rect FillRect needed for it. */
-            if (g_light_mode) {
-                FillRect(hdc, &rc, g_brush_page);
-            } else {
-                FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
-            }
+            /* Pattern brush already encodes the page background color
+             * in its tile - no separate full-rect FillRect needed. */
+            FillRect(hdc, &rc, g_brush_dot_pattern ? g_brush_dot_pattern : g_brush_page);
             return 1;
         }
 
