@@ -2870,24 +2870,24 @@ static void add_channel_card(HWND hwnd, int index) {
     make_combo_readonly_ex(mode_combo, g_card_combo_overlays[index]);
 
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 94, y + 24, 40, 18, channel_set_id(index));
+             x + 94, y + 24, 40, 21, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-             x + 8, y + 44, 60, 18, channel_on_id(index));
+             x + 8, y + 47, 60, 21, channel_on_id(index));
     add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-             x + 72, y + 44, 60, 18, channel_off_id(index));
+             x + 72, y + 47, 60, 21, channel_off_id(index));
 
     /* SS_NOTIFY: this label doubles as the per-unit kill-switch reset -
      * see IDC_CH_STATUS_OFFSET's comment in resource.h. */
     add_ctrl(hwnd, "STATIC", "STANDBY", SS_LEFT | SS_NOPREFIX | SS_NOTIFY,
-             x + 8, y + 64, 130, 14, channel_status_id(index));
+             x + 8, y + 70, 130, 14, channel_status_id(index));
 
     /* Cumulative ON-time odometer, right below the status line - see
      * IDC_CH_UPTIME_OFFSET's comment in resource.h. Monospace so the
      * digits don't jitter/reflow width as they tick over. */
     {
         HWND uptime_ctrl = add_ctrl(hwnd, "STATIC", "Up 00:00:00", SS_LEFT | SS_NOPREFIX,
-                                     x + 8, y + 80, 130, 12, channel_uptime_id(index));
+                                     x + 8, y + 86, 130, 12, channel_uptime_id(index));
         if (uptime_ctrl) {
             SendMessageA(uptime_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
         }
@@ -4464,11 +4464,11 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
             MoveWindow(g_card_combo_overlays[index][4], crc.right - COMBO_BORDER_PX, crc.top, COMBO_BORDER_PX, ch2, FALSE);
         }
     }
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(44), SX(60), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(44), SX(60), SY(18));
-    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(64), SX(130), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(80), SX(130), SY(12));
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(21));
+    PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(47), SX(60), SY(21));
+    PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(47), SX(60), SY(21));
+    PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(70), SX(130), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(86), SX(130), SY(12));
 
     PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(90), y + SY(8), SX(106), SY(14));
     PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
