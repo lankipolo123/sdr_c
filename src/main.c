@@ -249,6 +249,8 @@ static COLORREF COLOR_APP_SHADOW;
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
+static HWND g_log_view_hwnd; /* NULL when no full-log popup is open - see
+                               * on_log_view_clicked()/log_view_wnd_proc(). */
 static HFONT g_font;
 static HFONT g_header_font;
 static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
@@ -1967,6 +1969,169 @@ static void log_add(const char *message) {
 
     count = (int)SendMessageA(list, LB_GETCOUNT, 0, 0);
     SendMessageA(list, LB_SETTOPINDEX, (WPARAM)(count > 0 ? count - 1 : 0), 0);
+}
+
+/* Forward declaration - defined below, needs log_add() to already
+ * exist; on_log_view_clicked() (also below) needs it sooner. */
+static void ui_show_warning(const char *message);
+
+/* Full-log popup's own WndProc - a plain secondary window (WS_POPUP,
+ * not a dialog resource), same "build it directly with CreateWindowEx"
+ * approach every other control in this app already uses rather than
+ * introducing a second, resource-file-based UI paradigm just for this.
+ * Native (non-owner-drawn) Close button is intentional, not an
+ * oversight - MessageBoxA's Kill Switch confirmation already establishes
+ * "native OS chrome is fine for an occasional secondary/utility window"
+ * as this app's own precedent. */
+static LRESULT CALLBACK log_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_ERASEBKGND: {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            FillRect((HDC)wParam, &rc, g_brush_panel);
+            return 1;
+        }
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, COLOR_APP_TEXT);
+            SetBkColor(hdc, COLOR_APP_FIELD_BG);
+            return (LRESULT)g_brush_field;
+        }
+        case WM_SIZE: {
+            int w = LOWORD(lParam);
+            int h = HIWORD(lParam);
+            MoveWindow(GetDlgItem(hwnd, IDC_LOG_VIEW_EDIT), 12, 12, w - 24, h - 52, TRUE);
+            MoveWindow(GetDlgItem(hwnd, IDC_LOG_VIEW_CLOSE_BTN), w - 12 - 80, h - 32, 80, 24, TRUE);
+            return 0;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDC_LOG_VIEW_CLOSE_BTN && HIWORD(wParam) == BN_CLICKED) {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        case WM_DESTROY:
+            g_log_view_hwnd = NULL;
+            return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
+/* IDC_LOG_VIEW_BTN's handler - a bigger, dedicated window showing the
+ * whole Activity Log as one scrollable block instead of the small
+ * embedded listbox (direct request: "a full view dialog logs"). A
+ * snapshot of whatever's in the listbox right now, not a live mirror -
+ * simplest correct behavior for a "let me actually read back through
+ * this" viewer; reopening it (or the existing window already stays
+ * open on a second click - just refocused) picks up anything new. */
+static void on_log_view_clicked(void) {
+    HWND list;
+    int count, i;
+    char *buf;
+    size_t buf_cap, buf_len;
+    RECT screen_rc;
+    int win_w = 900, win_h = 650;
+    int x, y;
+    HWND edit_ctrl, close_btn;
+    static bool class_registered;
+
+    if (g_log_view_hwnd) {
+        SetForegroundWindow(g_log_view_hwnd);
+        return;
+    }
+
+    if (!class_registered) {
+        WNDCLASSEXA wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = log_view_wnd_proc;
+        wc.hInstance = g_hinst;
+        wc.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(32512)); /* IDC_ARROW */
+        wc.lpszClassName = "ECMLogViewWnd";
+        RegisterClassExA(&wc);
+        class_registered = true;
+    }
+
+    list = GetDlgItem(g_hwnd, IDC_LOG_LISTBOX);
+    count = (int)SendMessageA(list, LB_GETCOUNT, 0, 0);
+    buf_cap = 4096;
+    buf = (char *)malloc(buf_cap);
+    buf_len = 0;
+    if (buf) {
+        buf[0] = '\0';
+    }
+    for (i = 0; i < count && buf; i++) {
+        char line[160];
+        size_t line_len;
+        SendMessageA(list, LB_GETTEXT, (WPARAM)i, (LPARAM)line);
+        line_len = (size_t)lstrlenA(line);
+        while (buf_len + line_len + 3 > buf_cap) {
+            char *grown;
+            buf_cap *= 2;
+            grown = (char *)realloc(buf, buf_cap);
+            if (!grown) {
+                free(buf);
+                buf = NULL;
+                break;
+            }
+            buf = grown;
+        }
+        if (!buf) break;
+        lstrcpynA(buf + buf_len, line, (int)(buf_cap - buf_len));
+        buf_len += line_len;
+        buf[buf_len++] = '\r';
+        buf[buf_len++] = '\n';
+        buf[buf_len] = '\0';
+    }
+    if (!buf) {
+        ui_show_warning("Could not open the full log view (out of memory)");
+        return;
+    }
+
+    {
+        /* CreateWindowExA's w/h below is the OUTER window size (title
+         * bar + borders included), but win_w/win_h and every child's
+         * position are sized for the CLIENT area (900x650) - without
+         * this adjustment the real client area comes out smaller than
+         * that, pushing IDC_LOG_VIEW_CLOSE_BTN (positioned near the
+         * client's own bottom edge) below the actual visible window
+         * entirely, invisible. */
+        RECT win_rc = { 0, 0, win_w, win_h };
+        AdjustWindowRectEx(&win_rc, WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME, FALSE, 0);
+
+        SystemParametersInfoA(SPI_GETWORKAREA, 0, &screen_rc, 0);
+        x = screen_rc.left + ((screen_rc.right - screen_rc.left) - (win_rc.right - win_rc.left)) / 2;
+        y = screen_rc.top + ((screen_rc.bottom - screen_rc.top) - (win_rc.bottom - win_rc.top)) / 2;
+
+        g_log_view_hwnd = CreateWindowExA(0, "ECMLogViewWnd", "Activity Log - Full View",
+                                           WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                                           x, y, win_rc.right - win_rc.left, win_rc.bottom - win_rc.top,
+                                           g_hwnd, NULL, g_hinst, NULL);
+    }
+    if (!g_log_view_hwnd) {
+        free(buf);
+        return;
+    }
+
+    edit_ctrl = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", buf,
+                                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
+                                 ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+                                 12, 12, win_w - 24, win_h - 52, g_log_view_hwnd,
+                                 (HMENU)(INT_PTR)IDC_LOG_VIEW_EDIT, g_hinst, NULL);
+    if (edit_ctrl) {
+        SendMessageA(edit_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
+    }
+    close_btn = CreateWindowExA(0, "BUTTON", "Close",
+                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                 win_w - 12 - 80, win_h - 32, 80, 24, g_log_view_hwnd,
+                                 (HMENU)(INT_PTR)IDC_LOG_VIEW_CLOSE_BTN, g_hinst, NULL);
+    if (close_btn) {
+        SendMessageA(close_btn, WM_SETFONT, (WPARAM)g_font, TRUE);
+    }
+
+    free(buf);
+    ShowWindow(g_log_view_hwnd, SW_SHOW);
+    SetFocus(edit_ctrl);
 }
 
 /* Errors used to pop into a separate ephemeral warning box; now they
@@ -4545,6 +4710,11 @@ static void build_controls(HWND hwnd) {
      * listbox 10px short of the button above it. */
     add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
              SIDEBAR_X + SIDEBAR_W - 12 - 60, LOG_PANEL_Y + 8, 60, 20, IDC_LOG_CLEAR_BTN);
+    /* Opens the whole log in its own bigger window - see
+     * on_log_view_clicked(). Left of Clear, same 8px gap pattern as
+     * everywhere else two buttons sit side by side on this panel. */
+    add_ctrl(hwnd, "BUTTON", "View Full", BS_OWNERDRAW | WS_TABSTOP,
+             SIDEBAR_X + SIDEBAR_W - 12 - 60 - 8 - 76, LOG_PANEL_Y + 8, 76, 20, IDC_LOG_VIEW_BTN);
     add_ctrl(hwnd, "LISTBOX", NULL, LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP | WS_BORDER,
              22, LOG_PANEL_Y + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_H - 46, IDC_LOG_LISTBOX);
     /* WS_HSCROLL alone does nothing on a listbox until it's told how far
@@ -4784,6 +4954,7 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     MoveWindow(g_log_header_lbl, 40, log_y + 10, 200, 18, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, log_y + 34, sidebar_w + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + sidebar_w - 12 - 60, log_y + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_LOG_VIEW_BTN), SIDEBAR_X + sidebar_w - 12 - 60 - 8 - 76, log_y + 8, 76, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO), 236, SIDEBAR_CONTENT_TOP + 8, 56, 140, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + sidebar_w - 12 - 60, SIDEBAR_CONTENT_TOP + 8, 60, 20, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, SIDEBAR_CONTENT_TOP + 34,
@@ -5114,6 +5285,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
                 SendDlgItemMessageA(hwnd, IDC_LOG_LISTBOX, LB_RESETCONTENT, 0, 0);
+                return 0;
+            }
+            if (id == IDC_LOG_VIEW_BTN && code == BN_CLICKED) {
+                on_log_view_clicked();
                 return 0;
             }
             if (id == IDC_CHANGE_LOGO_BTN && code == BN_CLICKED) {

@@ -34,6 +34,14 @@
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
+/* Opens a bigger, dedicated popup window showing the whole log as one
+ * scrollable block of text (not owned by the small embedded listbox) -
+ * direct request, the listbox itself is cramped for actually reading
+ * back through a long session. Snapshot, not live-updating - see
+ * on_log_view_clicked()'s own comment in main.c. */
+#define IDC_LOG_VIEW_BTN     1060
+#define IDC_LOG_VIEW_CLOSE_BTN 1061
+#define IDC_LOG_VIEW_EDIT    1062
 
 /* Lets the user swap the header's HelixDefender mark for their own .bmp -
  * see load_custom_logo()/save_custom_logo() in main.c. The picked file
