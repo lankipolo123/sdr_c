@@ -29,12 +29,29 @@ x86_64-w64-mingw32-windres src/app.rc -O coff -o src/app_res.o
 x86_64-w64-mingw32-gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -Wno-cast-function-type -mwindows -Os -s \
   -fno-ident -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections -Wl,--gc-sections \
   -o digital_noise_config_multi.exe src/main.c src/connection.c src/channels.c src/protocol.c \
-  src/serial_port.c src/modbus.c src/sensor.c src/transit_dll.c src/app_res.o \
+  src/serial_port.c src/modbus.c src/sensor.c src/sensor_log.c src/sensor_shared.c src/transit_dll.c src/app_res.o \
   -ladvapi32 -lgdi32 -luser32 -lmsimg32 -lgdiplus -lsetupapi
 ```
 
-`build.bat` in the repo root is stale (missing `-lgdiplus -lsetupapi`) —
-don't trust it blindly, it hasn't been kept in sync.
+`build.bat` in the repo root is stale (missing `-lgdiplus -lsetupapi`, and the
+`sensor_log.c`/`sensor_shared.c` files) — don't trust it blindly, it hasn't
+been kept in sync.
+
+### Background service exe (separate binary, separate build command)
+
+```
+x86_64-w64-mingw32-windres src/sensor_service.rc -O coff -o src/sensor_service_res.o
+x86_64-w64-mingw32-gcc -std=c99 -Wall -Wextra -Wpedantic -Werror -Wno-cast-function-type -Os -s \
+  -fno-ident -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections -Wl,--gc-sections \
+  -o ECMControllerSensorService.exe src/sensor_service.c src/serial_port.c src/modbus.c src/sensor.c \
+  src/sensor_log.c src/sensor_shared.c src/sensor_service_res.o \
+  -ladvapi32 -luser32
+```
+
+No `-mwindows` (console subsystem, so `printf` in `--debug` mode is actually
+visible) and it does NOT get obfuscated/protected - it has no vendor DLL path
+or password to hide, unlike the main exe. See "Background sensor service"
+below for what this is and how to test it.
 
 **Before shipping anything to the user: always rebuild the protected/
 obfuscated build AND the NSIS installer.** Never hand over the plain dev exe
@@ -54,6 +71,21 @@ things the script doesn't handle automatically:
 Skipping any of these breaks the protected build silently or at runtime, not
 at compile time.
 
+**A 5th case has bitten this twice now**: any `static const char foo[] =
+"literal";` at file/function scope that ISN'T in `KNOWN_ARRAY_NAMES` still
+gets auto-transformed into `static const char foo[] = obf_decode(...);` -
+which doesn't compile (a static initializer must be a compile-time constant,
+and a function call isn't one). This has happened to the CSV header string in
+`sensor_log.c`'s `sensor_log_start_new_week()` in both `build_obf/` regens so
+far. Fix: change `static const char x[] = ...` to `const char *x = ...` (drop
+`static`, use a pointer not an array) and switch any `sizeof(x)` on it to
+`lstrlenA(x)`. Check the build error - it will say "invalid initializer" at
+the exact line - rather than trying to spot these by eye beforehand.
+
+Only the GUI (`digital_noise_config_multi.exe`) gets obfuscated. The
+background service exe is built straight from `src/` (see its own build
+command above) - it has nothing worth hiding.
+
 ## vcredist/ - Transit.dll's own runtime dependency
 
 `vcredist/` holds 3 genuine Microsoft DLLs (`msvcp140.dll`, `vcruntime140.dll`,
@@ -65,6 +97,62 @@ build that fails to load with error 126 ("module not found") on a machine
 missing the VC++ Redistributable - a real, confirmed report, not a
 hypothetical. If Microsoft ships a newer Transit.dll build requiring a newer
 runtime version, re-run the extraction steps in `vcredist/README.md`.
+
+## Background sensor service (ECMControllerSensorService.exe)
+
+Direct request: keep BAY1-4 CSV logging running even after the GUI is
+closed. Solved with a real Windows Service (`src/sensor_service.c`), not a
+tray-minimize or a plain background process - see the commit that added
+this for the full tradeoff writeup the user chose between. Key points for
+picking this back up:
+
+- **Opt-in, not automatic.** `installer.nsi` bundles the service exe but
+  does NOT register it as a running service - that needs admin rights,
+  which the base app install deliberately doesn't require (see that file's
+  own top comment on why: writing to Program Files without elevation
+  silently breaks all persisted settings). Registration happens via
+  separate Start Menu shortcuts ("Install/Uninstall Background Logger
+  Service") that run the service exe with `--install`/`--uninstall`, each
+  triggering its own UAC prompt via `src/service_admin.manifest`
+  (`requireAdministrator`) - independent of the main installer's own
+  unprivileged level.
+- **Owns the sensor COM port exclusively once running** - a serial port
+  can't be opened by two processes at once. The GUI's own "Ambient
+  Temperature" Connect button still exists and still tries to open the
+  port directly; if the service already holds it, that attempt just fails
+  harmlessly (existing error handling), while the shared-memory path below
+  keeps the live display working regardless.
+- **Shared memory** (`src/sensor_shared.c/.h`) is how the GUI gets live
+  BAY readings without touching the port itself: a named file mapping
+  (`Global\ECMControllerSensorShared` - the `Global\` prefix is load-
+  bearing, not stylistic, since a service runs in Session 0 and a `Local\`
+  name wouldn't be visible to the interactive GUI's own session) the
+  service publishes into and the GUI reads, with a heartbeat timestamp so
+  the GUI can tell "service crashed/stopped" from "service running but sensor
+  disconnected" and fall back to polling the port itself.
+- **CSV logging** (`src/sensor_log.c/.h`) is shared code, not duplicated -
+  used by the service (the normal case once installed) and by the GUI
+  itself (fallback, only when it's the one actually polling - never both
+  at once, or two processes would race the weekly file rotation). Fixed
+  filenames (`sensor_log.csv`, `sensor_log_state.ini`) resolved next to
+  whichever exe is running the code, not derived from that exe's own name -
+  both binaries need to agree on the same path regardless of which one
+  is currently writing it.
+- **The service reads the GUI's configured sensor port from
+  `ECMController.ini`** (hardcoded filename in `sensor_service.c` -
+  matches `installer.nsi`'s `EXE_NAME`) since that's the only place the
+  chosen COM port lives; re-reads it every reconnect attempt (~5s), so
+  changing the port in the GUI takes effect without restarting the service.
+- **Not independently verified in this sandbox**: the actual SCM-managed
+  install/start/stop lifecycle. Wine's own `services.exe` didn't behave
+  like documented real-Windows behavior when this was tested
+  (`StartServiceCtrlDispatcherA` blocked instead of failing fast when not
+  actually SCM-launched) - which is exactly why `--debug` mode exists: it
+  bypasses the SCM path entirely and just runs the same loop in a plain
+  console, which IS how the core polling/shared-memory/CSV logic got
+  verified end-to-end (including a real cross-process shared-memory read
+  from a separately-launched GUI). The `--install`/`CreateServiceA`/real
+  service-running path itself needs a real Windows machine to confirm.
 
 ## Testing in this sandbox (no real Windows available)
 
