@@ -1549,9 +1549,9 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
 
                 for (vi = 0; vi < SENSOR_MAX_UNITS; vi++) {
                     wash[vi] = RGB(
-                        (GetRValue(corner[vi]) * 35 + GetRValue(COLOR_APP_FIELD_BG) * 65) / 100,
-                        (GetGValue(corner[vi]) * 35 + GetGValue(COLOR_APP_FIELD_BG) * 65) / 100,
-                        (GetBValue(corner[vi]) * 35 + GetBValue(COLOR_APP_FIELD_BG) * 65) / 100);
+                        (GetRValue(corner[vi]) * 9 + GetRValue(COLOR_APP_FIELD_BG) * 91) / 100,
+                        (GetGValue(corner[vi]) * 9 + GetGValue(COLOR_APP_FIELD_BG) * 91) / 100,
+                        (GetBValue(corner[vi]) * 9 + GetBValue(COLOR_APP_FIELD_BG) * 91) / 100);
                 }
 
                 v[0].x = blob_full.left;  v[0].y = blob_full.top;    /* BAY1 */
@@ -1571,14 +1571,13 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             }
         }
         {
-            /* Roughly doubled from the original values - direct report
-             * that the blend looked visibly washed out/muted on real
-             * hardware compared to how it renders here (Wine's
-             * AlphaBlend vs real Windows' own - not something this
-             * sandbox can directly compare), so pushed noticeably more
-             * saturated to not depend on that difference. */
+            /* Scaled back down from an earlier ~2x boost (which, combined
+             * with the corner wash below, read as overly saturated across
+             * the whole panel) - kept brighter near the dot than the
+             * original so the readout still pops, but the overlapping
+             * outer rings no longer blanket the corners on their own. */
             static const struct { int radius_pct; BYTE alpha; } rings[] = {
-                { 100, 45 }, { 78, 52 }, { 58, 65 }, { 40, 85 }, { 24, 110 }, { 12, 140 }
+                { 100, 28 }, { 78, 34 }, { 58, 42 }, { 40, 55 }, { 24, 72 }, { 12, 92 }
             };
             int blend_w = blend_rc.right - blend_rc.left;
             int blend_h = blend_rc.bottom - blend_rc.top;
