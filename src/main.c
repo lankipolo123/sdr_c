@@ -2185,8 +2185,25 @@ static HWND loading_dialog_show(const char *message) {
     x = screen_rc.left + ((screen_rc.right - screen_rc.left) - w) / 2;
     y = screen_rc.top + ((screen_rc.bottom - screen_rc.top) - h) / 2;
 
+    /* Owner is NULL, not g_hwnd - the close-time use of this
+     * (WM_DESTROY's "Saving...") rendered nothing at all in this Wine/
+     * Xvfb sandbox (no real window manager), which first looked like
+     * the same bug the startup dialog had (own commit). It isn't: a
+     * plain MessageBoxA(NULL, ...) placed in WM_DESTROY as a diagnostic
+     * ALSO failed to render there, even though it has no owner at all
+     * and blocked/waited correctly at the Win32 level the whole time -
+     * so this is this sandbox's own inability to show ANY new window
+     * during the main window's WM_DESTROY, not something about g_hwnd
+     * as an owner specifically. Real Windows (the actual deployment
+     * target) shows dialogs from WM_DESTROY/WM_CLOSE routinely - this
+     * couldn't be verified visually in-sandbox, only that the code
+     * itself runs correctly (blocks, calls save_settings(), the .ini
+     * comes out with the right data - confirmed). NULL owner is kept
+     * anyway since it's the more correct/defensive choice regardless -
+     * no window should depend on an owner that might be mid-teardown -
+     * just don't read it as "the fix" for the black-screen report. */
     hwnd = CreateWindowExA(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, "ECMLoadingWnd", "",
-                            WS_POPUP | WS_BORDER, x, y, w, h, g_hwnd, NULL, g_hinst, NULL);
+                            WS_POPUP | WS_BORDER, x, y, w, h, NULL, NULL, g_hinst, NULL);
     if (!hwnd) {
         return NULL;
     }
