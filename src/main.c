@@ -212,7 +212,10 @@ static COLORREF COLOR_APP_SHADOW;
  * something absurd - see relayout_for_size(). */
 #define CARD_H_MAX 160 /* was 220 - direct request for shorter, wider cards
                          * instead of tall/squarish ones once extra window
-                         * height was available to grow into. */
+                         * height was available to grow into. (Briefly
+                         * lowered to 130 on a misreading of a later
+                         * request about the Mode icon's size, not the
+                         * grid's - reverted.) */
 #define CARD_W_MAX 400 /* was 340 - raised alongside the grid's bigger share
                          * of extra width below (was 60%, now 75%). */
 #define GRID_BOTTOM_MARGIN 20 /* matches the visual weight of CONTENT_TOP's own top margin */
@@ -241,7 +244,12 @@ static COLORREF COLOR_APP_SHADOW;
  * more content is planned to join it there. Right-anchored to the
  * card's own right edge, same margin convention as Open Log/its
  * caption in the Command Panel. */
-#define MODE_ICON_SIZE 64
+#define MODE_ICON_SIZE 112 /* was 64 - direct request, "the icon of light
+                             * mode [should] go larger" - both the button's
+                             * own bounding box AND the glyph's hardcoded
+                             * pixel dimensions in WM_DRAWITEM scale
+                             * together (growing just the box would only
+                             * add padding around the same-size glyph). */
 #define MODE_ICON_MARGIN 12
 
 #define SIDEBAR_X 10
@@ -6026,20 +6034,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          * background color, masking a crescent out of
                          * it - same layering trick the padlock's
                          * shackle uses above. */
-                        Ellipse(dis->hDC, icx - 16, icy - 16, icx + 16, icy + 16);
+                        Ellipse(dis->hDC, icx - 28, icy - 28, icx + 28, icy + 28);
                         SelectObject(dis->hDC, g_brush_panel);
-                        Ellipse(dis->hDC, icx - 6, icy - 19, icx + 19, icy + 6);
+                        Ellipse(dis->hDC, icx - 10, icy - 33, icx + 33, icy + 10);
                     } else {
                         static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
                         static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
-                        HPEN ray_pen = CreatePen(PS_SOLID, 3, COLOR_APP_HEADER);
+                        HPEN ray_pen = CreatePen(PS_SOLID, 5, COLOR_APP_HEADER);
                         int ri;
 
-                        Ellipse(dis->hDC, icx - 10, icy - 10, icx + 10, icy + 10);
+                        Ellipse(dis->hDC, icx - 18, icy - 18, icx + 18, icy + 18);
                         SelectObject(dis->hDC, ray_pen);
                         for (ri = 0; ri < 8; ri++) {
-                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 13, icy + ray_dy[ri] * 13, NULL);
-                            LineTo(dis->hDC, icx + ray_dx[ri] * 19, icy + ray_dy[ri] * 19);
+                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 23, icy + ray_dy[ri] * 23, NULL);
+                            LineTo(dis->hDC, icx + ray_dx[ri] * 33, icy + ray_dy[ri] * 33);
                         }
                         DeleteObject(ray_pen);
                     }
