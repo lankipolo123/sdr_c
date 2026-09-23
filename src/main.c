@@ -2134,6 +2134,114 @@ static void on_log_view_clicked(void) {
     SetFocus(edit_ctrl);
 }
 
+/* ---- loading dialog (startup auto-connect, close-time save) ---- */
+
+static LRESULT CALLBACK loading_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        FillRect((HDC)wParam, &rc, g_brush_panel);
+        return 1;
+    }
+    if (msg == WM_CTLCOLORSTATIC) {
+        HDC hdc = (HDC)wParam;
+        SetTextColor(hdc, COLOR_APP_TEXT);
+        SetBkMode(hdc, TRANSPARENT);
+        return (LRESULT)GetStockObject(NULL_BRUSH);
+    }
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
+/* Small borderless popup, no title bar/Close of its own - genuinely
+ * transient (a few hundred ms), not something the user is meant to
+ * interact with or dismiss. Direct request: a loading dialog while the
+ * app connects on open and while it saves on close ("fetch loading...
+ * saving a load dialog and closing loading saving dialog"). Forces its
+ * own paint via the PeekMessage pump below - normally a freshly shown
+ * window's first paint waits for the next natural idle in the message
+ * loop, which wouldn't come until AFTER the blocking connect/save call
+ * below already finished, defeating the entire point. */
+static HWND loading_dialog_show(const char *message) {
+    static bool class_registered;
+    RECT screen_rc;
+    int w = 240, h = 80;
+    int x, y;
+    HWND hwnd;
+    MSG msg;
+
+    if (!class_registered) {
+        WNDCLASSEXA wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = loading_wnd_proc;
+        wc.hInstance = g_hinst;
+        wc.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(32512)); /* IDC_ARROW */
+        wc.lpszClassName = "ECMLoadingWnd";
+        RegisterClassExA(&wc);
+        class_registered = true;
+    }
+
+    SystemParametersInfoA(SPI_GETWORKAREA, 0, &screen_rc, 0);
+    x = screen_rc.left + ((screen_rc.right - screen_rc.left) - w) / 2;
+    y = screen_rc.top + ((screen_rc.bottom - screen_rc.top) - h) / 2;
+
+    hwnd = CreateWindowExA(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, "ECMLoadingWnd", "",
+                            WS_POPUP | WS_BORDER, x, y, w, h, g_hwnd, NULL, g_hinst, NULL);
+    if (!hwnd) {
+        return NULL;
+    }
+    add_ctrl(hwnd, "STATIC", message, SS_CENTER | SS_NOPREFIX, 10, 30, w - 20, 20, 0);
+
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    UpdateWindow(hwnd);
+    while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+    return hwnd;
+}
+
+/* Enforces a minimum visible time from when it was first shown - the
+ * actual connect/save work this wraps is often genuinely instant (a
+ * local port open, a few .ini writes), which would make the dialog
+ * flash for one paint and vanish, defeating "let the user actually see
+ * this happened". A deliberate short Sleep() on the UI thread, not a
+ * timer/animation - this app has no threading infrastructure, and the
+ * whole point here is a brief, honest pause, not a spinner. */
+static void loading_dialog_hide(HWND hwnd, DWORD shown_tick) {
+    DWORD elapsed;
+    if (!hwnd) {
+        return;
+    }
+    elapsed = GetTickCount() - shown_tick;
+    if (elapsed < 500) {
+        Sleep(500 - elapsed);
+    }
+    DestroyWindow(hwnd);
+}
+
+/* Startup-only variant of on_sensor_connect_clicked() - same connect
+ * logic, but never pops the "Select a port first" MessageBoxA a manual
+ * click uses: an unattended auto-connect attempt with nothing plugged
+ * in yet (a fresh install, or between hardware swaps) should just stay
+ * disconnected quietly, not block app launch on a dialog the user has
+ * to dismiss before they can do anything else. */
+static void auto_connect_sensor_on_startup(void) {
+    char port[16];
+
+    if (sensor_is_connected(&g_sensor)) {
+        return;
+    }
+    if (GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, port, sizeof(port)) == 0) {
+        return;
+    }
+    if (!sensor_connect(&g_sensor, port, SENSOR_BAUD, SENSOR_PARITY, SENSOR_DATABITS)) {
+        char msg[128];
+        wsprintfA(msg, "Failed to open %s", port);
+        ui_show_warning(msg);
+    }
+}
+
 /* Errors used to pop into a separate ephemeral warning box; now they
  * just land in the same activity log everything else does (matching
  * sdr_app/sdr_react, which don't have a separate transient warning
@@ -5067,6 +5175,29 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ui_refresh_all_channels();
             ui_refresh_sensor();
             ui_refresh_kill_switch();
+
+            /* Auto-connect on launch (direct request - the app "needs to
+             * connect to retrieve data" on open, not wait for a manual
+             * Connect click) - deliberately AFTER the disabled-state
+             * refreshes just above, not before: those unconditionally
+             * paint the disconnected look, so an auto-connect attempt
+             * placed earlier would have its own success state
+             * immediately overwritten by them. conn_connect()/
+             * sensor_connect() themselves already drive
+             * conn_on_connected_changed()/ui_refresh_sensor() again on
+             * success, correctly flipping the UI to connected. RS422
+             * reuses on_connect_clicked() as-is (no port-required gate
+             * to worry about - see its own comment); the sensor side
+             * uses the startup-safe variant so a fresh install with
+             * nothing plugged in yet doesn't block launch on a "select a
+             * port" dialog. */
+            {
+                DWORD loading_t0 = GetTickCount();
+                HWND loading_hwnd = loading_dialog_show("Connecting...");
+                on_connect_clicked();
+                auto_connect_sensor_on_startup();
+                loading_dialog_hide(loading_hwnd, loading_t0);
+            }
             return 0;
         }
 
@@ -5808,7 +5939,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         case WM_DESTROY:
-            save_settings();
+            /* Direct request - a loading dialog while closing saves,
+             * matching the one on launch. save_settings() itself is a
+             * handful of local .ini writes (genuinely fast), so
+             * loading_dialog_hide()'s own minimum-visible-time is what
+             * actually makes this readable rather than a one-frame
+             * flash. */
+            {
+                DWORD loading_t0 = GetTickCount();
+                HWND loading_hwnd = loading_dialog_show("Saving...");
+                save_settings();
+                loading_dialog_hide(loading_hwnd, loading_t0);
+            }
             KillTimer(hwnd, ID_POLL_TIMER);
             if (conn_is_connected(&g_conn)) {
                 conn_disconnect(&g_conn);
