@@ -5569,6 +5569,53 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         DeleteObject(hl_pen);
                     }
                 }
+                /* Sun (button reads "Light Mode" - click to switch TO
+                 * light) or moon ("Dark Mode") - same "the button always
+                 * shows the destination, not the current state"
+                 * convention Connect/Disconnect's own text already
+                 * uses, just paired with an icon here too. Plain white,
+                 * drawn before the text and to its left; rc.left is
+                 * pushed in afterward so the shared DrawTextA below
+                 * (used by every button here, not just this one) leaves
+                 * room for it instead of centering text under the icon.
+                 * No trig (avoids pulling in math.h/-lm for 8 lines) -
+                 * the diagonal rays are a few px short of true 45 deg,
+                 * invisible at this size. */
+                if (dis->CtlID == IDC_THEME_TOGGLE_BTN) {
+                    int icx = rc.left + 17;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HBRUSH white_brush = CreateSolidBrush(RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, white_brush);
+
+                    if (g_light_mode) {
+                        /* Moon: a white disc, then a second disc offset
+                         * up-right and filled in the button's own
+                         * background color, masking a crescent out of
+                         * it - same layering trick IDC_LOGO_LOCK_BTN's
+                         * padlock body uses on its shackle. */
+                        Ellipse(dis->hDC, icx - 5, icy - 5, icx + 5, icy + 5);
+                        SelectObject(dis->hDC, disabled ? g_brush_accent_dis : g_brush_accent);
+                        Ellipse(dis->hDC, icx - 2, icy - 6, icx + 6, icy + 2);
+                    } else {
+                        static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+                        static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+                        HPEN ray_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                        int ri;
+
+                        Ellipse(dis->hDC, icx - 3, icy - 3, icx + 3, icy + 3);
+                        SelectObject(dis->hDC, ray_pen);
+                        for (ri = 0; ri < 8; ri++) {
+                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 4, icy + ray_dy[ri] * 4, NULL);
+                            LineTo(dis->hDC, icx + ray_dx[ri] * 6, icy + ray_dy[ri] * 6);
+                        }
+                        DeleteObject(ray_pen);
+                    }
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_brush);
+                    rc.left += 30;
+                }
                 /* Dimmed text on top of the dimmed fill - white text on
                  * a gray disabled button still read as "basically the
                  * same brightness" as white text on a bright enabled
