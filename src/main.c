@@ -2908,24 +2908,32 @@ static void add_channel_card(HWND hwnd, int index) {
         int half_bw = channel_bandwidth_mhz(index) / 2;
         HWND freq_ctrl;
         wsprintfA(freq_label, "%d-%d MHz", freq - half_bw, freq + half_bw);
-        /* x+90..x+196, right-aligned - shifted left off the gauge column
+        /* x+90..x+238, right-aligned - shifted left off the gauge column
          * and narrowed so it ends before the selection checkbox at
-         * x+200 instead of overlapping/hiding it - direct complaint. */
+         * x+248 instead of overlapping/hiding it - direct complaint.
+         * Widened to x+238 to track the gauge column's own widening
+         * (right-aligned text actually moves into the freed space,
+         * unlike a left-aligned field). */
         freq_ctrl = add_ctrl(hwnd, "STATIC", freq_label, SS_RIGHT | SS_NOPREFIX,
-                              x + 90, y + 8, 106, 14, channel_freq_lbl_id(index));
+                              x + 90, y + 8, 148, 14, channel_freq_lbl_id(index));
         if (freq_ctrl) {
             SendMessageA(freq_ctrl, WM_SETFONT, (WPARAM)g_small_font, TRUE);
         }
     }
 
     /* Right column: custom gradient level gauge (Off at bottom, High at
-     * top, like a volume slider) + tick labels. */
-    add_channel_gauge(hwnd, x + 148, y + 24, 22, 72, channel_track_id(index));
+     * top, like a volume slider) + tick labels. Track widened 22->40 -
+     * the slider draws itself relative to its own control width
+     * (track_w = w/4 in channel_gauge_subclass_proc, click handling is
+     * y-only), so it's a real wider element, not just extra blank
+     * padding - direct complaint that the right side of the card sat
+     * mostly empty next to the gauge. Labels shifted right to follow. */
+    add_channel_gauge(hwnd, x + 148, y + 24, 40, 72, channel_track_id(index));
 
-    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 174, y + 24, 44, 14, channel_lbl_high_id(index));
-    add_ctrl(hwnd, "STATIC", "Mid",    SS_LEFT | SS_NOPREFIX, x + 174, y + 42, 44, 14, channel_lbl_medium_id(index));
-    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 174, y + 60, 44, 14, channel_lbl_low_id(index));
-    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 174, y + 78, 44, 14, channel_lbl_off_id(index));
+    add_ctrl(hwnd, "STATIC", "High",   SS_LEFT | SS_NOPREFIX, x + 194, y + 24, 44, 14, channel_lbl_high_id(index));
+    add_ctrl(hwnd, "STATIC", "Mid",    SS_LEFT | SS_NOPREFIX, x + 194, y + 42, 44, 14, channel_lbl_medium_id(index));
+    add_ctrl(hwnd, "STATIC", "Low",    SS_LEFT | SS_NOPREFIX, x + 194, y + 60, 44, 14, channel_lbl_low_id(index));
+    add_ctrl(hwnd, "STATIC", "Off",    SS_LEFT | SS_NOPREFIX, x + 194, y + 78, 44, 14, channel_lbl_off_id(index));
 
 }
 
@@ -4473,12 +4481,12 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(70), SX(130), SY(14));
     PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(86), SX(130), SY(12));
 
-    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(90), y + SY(8), SX(106), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(22), SY(72));
-    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(174), y + SY(24), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(174), y + SY(42), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(174), y + SY(60), SX(44), SY(14));
-    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(174), y + SY(78), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(90), y + SY(8), SX(148), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(40), SY(72));
+    PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(24), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(42), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_low_id(index)), x + SX(194), y + SY(60), SX(44), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_lbl_off_id(index)), x + SX(194), y + SY(78), SX(44), SY(14));
 
 #undef SX
 #undef SY
