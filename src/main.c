@@ -14,6 +14,7 @@
                               * GradientFill/TRIVERTEX/GRADIENT_RECT */
 #include <windows.h>
 #include <commdlg.h> /* GetOpenFileNameA, for the custom-logo file picker */
+#include <shellapi.h> /* ShellExecuteA - opens the CSV log in whatever's associated with .csv (Excel, if installed) */
 #include <gdiplus.h> /* GdipCreateBitmapFromFile etc. - see load_image_as_bitmap_gdiplus() */
 #include <stdint.h>
 #include <stdbool.h>
@@ -2243,6 +2244,28 @@ static void on_kill_reset_clicked(void) {
     }
 }
 
+/* Opens sensor_log.csv in whatever's associated with .csv (Excel, if
+ * installed). ShellExecuteA rather than a fixed "excel.exe" path -
+ * this app has no business assuming what's installed, same reasoning
+ * as everywhere else "just open the thing" is the goal. Its return
+ * value (cast from an HINSTANCE) IS the error code on failure, <= 32 -
+ * NOT something GetLastError() reflects, unlike this file's other
+ * warning helpers, so this checks the specific codes itself instead of
+ * calling ui_show_warning_with_last_error(). */
+static void on_open_log_clicked(void) {
+    char path[MAX_PATH + 16];
+    INT_PTR result;
+    get_sensor_log_path(path);
+    result = (INT_PTR)ShellExecuteA(g_hwnd, "open", path, NULL, NULL, SW_SHOWNORMAL);
+    if (result == SE_ERR_FNF || result == SE_ERR_PNF) {
+        ui_show_warning("No sensor log yet - it's written a few seconds after the first sensor reading");
+    } else if (result == SE_ERR_NOASSOC) {
+        ui_show_warning("Could not open sensor_log.csv - no application is associated with .csv files");
+    } else if (result <= 32) {
+        ui_show_warning("Could not open sensor_log.csv");
+    }
+}
+
 /* Per-unit reset - resets just this one unit, independent of the others.
  * Wired to a click on that unit's card status line while it's tripped
  * (see IDC_CH_STATUS_OFFSET's comment in resource.h). */
@@ -4315,6 +4338,7 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 80, 18, IDC_KILL_RESET_BTN);
     add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 110, 18, IDC_KILL_TRIP_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 1025, 172, 100, 16, IDC_OPEN_LOG_BTN);
 
     /* The heatmap fills the empty gap that opens up inside the header
      * panel itself once the window is wider than the design minimum -
@@ -4906,6 +4930,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_KILL_RESET_BTN && code == BN_CLICKED) {
                 on_kill_reset_clicked();
+                return 0;
+            }
+            if (id == IDC_OPEN_LOG_BTN && code == BN_CLICKED) {
+                on_open_log_clicked();
                 return 0;
             }
             if (id == IDC_KILL_TRIP_BTN && code == BN_CLICKED) {

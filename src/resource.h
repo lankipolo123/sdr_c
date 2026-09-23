@@ -17,6 +17,11 @@
 #define IDC_KILL_STATUS_LBL      1015
 #define IDC_KILL_RESET_BTN       1016
 #define IDC_SENSOR_REFRESH_BTN   1017
+/* Opens sensor_log.csv (see sensor_log.h) in whatever's associated
+ * with .csv - Excel if installed, else the OS's own picker/Notepad.
+ * Direct request - the CSV logging existed with no way to actually
+ * get to the file from inside the app. */
+#define IDC_OPEN_LOG_BTN         1018
 /* Manual trip - same slot as IDC_KILL_RESET_BTN, mutually exclusive
  * visibility (armed shows this, tripped shows Reset instead) - see
  * ui_refresh_kill_switch() in main.c. */
