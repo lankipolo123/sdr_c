@@ -1229,19 +1229,23 @@ static COLORREF temp_band_color(float temp_c) {
     return COLOR_APP_DISCONNECTED;
 }
 
-/* Continuous 4-stop version of temp_band_color()'s cool-to-hot hues
- * (blue -> orange -> darker orange -> red), for the heatmap only. A
- * discrete band function is the wrong tool there: 4 real bay readings
- * a couple degrees apart (the normal case) usually land in the SAME
- * band, so all 4 corners would get an identical color and the "scan"
- * would collapse into one flat fill - the exact bug this replaces.
- * t is 0..1 (clamped), not an absolute temperature - the heatmap
- * auto-scales to the current spread of the 4 live readings (see
- * sensor_heatmap_subclass_proc) so even a 1C difference between bays
- * stays visibly distinct instead of vanishing into one band. */
+/* Continuous 5-stop version of temp_band_color()'s cool-to-hot hues
+ * (green -> yellow -> orange -> darker orange -> red), for the heatmap
+ * only. A discrete band function is the wrong tool there: 4 real bay
+ * readings a couple degrees apart (the normal case) usually land in
+ * the SAME band, so all 4 corners would get an identical color and the
+ * "scan" would collapse into one flat fill - the exact bug this
+ * replaces. t is 0..1 (clamped), not an absolute temperature - the
+ * heatmap auto-scales to the current spread of the 4 live readings
+ * (see sensor_heatmap_subclass_proc) so even a 1C difference between
+ * bays stays visibly distinct instead of vanishing into one band.
+ * Green (not blue) as the cool end - direct request/reference image:
+ * a conventional green-safe/red-hot heatmap read, not this app's own
+ * accent-blue used everywhere else in the UI (which read as just
+ * another shade of the app's own chrome here, not "cool"). */
 static COLORREF vivid_thermal_color(float t) {
     static const COLORREF stops[] = {
-        RGB(58, 133, 224), RGB(224, 146, 34), RGB(196, 110, 24), RGB(224, 90, 90)
+        RGB(70, 170, 90), RGB(210, 190, 60), RGB(224, 146, 34), RGB(196, 90, 24), RGB(214, 64, 56)
     };
     const int n = (int)(sizeof(stops) / sizeof(stops[0]));
     float scaled;
@@ -1432,6 +1436,7 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         int i;
         float lo = 0.0f, hi = 0.0f;
         RECT blend_rc;
+        bool any_reading = false; /* also drives the panel border color below - see its own comment */
         static const int panel_radius = 14;
         static const int legend_h = 22;
         static const int dot_r = 6;
@@ -1440,7 +1445,6 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         GetClientRect(hwnd, &rc);
 
         {
-            bool any_reading = false;
             for (i = 0; i < SENSOR_MAX_UNITS; i++) {
                 const SensorState *st = sensor_get_state(&g_sensor, i);
                 if (!st->has_reading) continue;
@@ -1628,14 +1632,19 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             bar_rc.top = legend_rc.top + 8;
             bar_rc.bottom = bar_rc.top + 5;
             if (bar_rc.right > bar_rc.left) {
-                int seg, seg_w = (bar_rc.right - bar_rc.left) / 3;
+                /* Same 5 stops as vivid_thermal_color() above (duplicated,
+                 * not shared - GradientFill needs real RECTs to sweep
+                 * across, not a 0..1 t like the heatmap's per-pixel blend
+                 * does) - keeps the legend bar an honest match for what
+                 * the blobs above it actually show. */
+                int seg, seg_w = (bar_rc.right - bar_rc.left) / 4;
                 static const COLORREF stops[] = {
-                    RGB(58, 133, 224), RGB(224, 146, 34), RGB(196, 110, 24), RGB(224, 90, 90)
+                    RGB(70, 170, 90), RGB(210, 190, 60), RGB(224, 146, 34), RGB(196, 90, 24), RGB(214, 64, 56)
                 };
-                for (seg = 0; seg < 3; seg++) {
+                for (seg = 0; seg < 4; seg++) {
                     RECT seg_rc = bar_rc;
                     seg_rc.left = bar_rc.left + seg * seg_w;
-                    seg_rc.right = (seg == 2) ? bar_rc.right : seg_rc.left + seg_w;
+                    seg_rc.right = (seg == 3) ? bar_rc.right : seg_rc.left + seg_w;
                     gradient_fill_rect(hdc, seg_rc, stops[seg], stops[seg + 1], false);
                 }
             }
@@ -1659,7 +1668,12 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
         SelectClipRgn(hdc, NULL);
         DeleteObject(panel_rgn);
 
-        pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+        /* Silver/light border while at least one bay has a real, live
+         * reading - reads as "this panel is actively scanning" at a
+         * glance, vs. every other panel's same muted COLOR_APP_PANEL_BORDER
+         * the rest of the time (no readings yet - nothing to be lit up
+         * about). Direct request/reference image. */
+        pen = CreatePen(PS_SOLID, 1, any_reading ? RGB(200, 203, 209) : COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
         RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, panel_radius, panel_radius);
