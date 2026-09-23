@@ -3935,6 +3935,156 @@ static void load_channel_settings(void) {
     }
 }
 
+/* ---- sensor CSV log: BAY1-4 temperature/humidity readings, one row
+ * every ~60s, appended to a plain CSV next to the exe - same portable/
+ * no-installer reasoning as get_ini_path(). Direct request: a WEEKLY
+ * log, not an ever-growing one - once 7 days have passed since the
+ * current file's first row, it's wiped back to just the header instead
+ * of keeping every week that's ever run. The 7-day anchor has to
+ * survive an app restart to mean anything (a restart-only reset would
+ * never actually reach 7 days if the app gets restarted more often than
+ * that), so it's persisted in the .ini right alongside the RS422/Sensor
+ * settings - written immediately whenever a new week starts, not just
+ * on the periodic ~30s save_settings() tick. ---- */
+
+#define SENSOR_LOG_INTERVAL_TICKS 600 /* ID_POLL_TIMER fires every 100ms - 600 ticks = one row every ~60s */
+/* 7 days, expressed in FILETIME's own unit (100ns intervals) - what
+ * GetSystemTimeAsFileTime()/the ULARGE_INTEGER comparison below need. */
+#define SENSOR_LOG_WEEK_100NS ((ULONGLONG)7 * 24 * 60 * 60 * 10000000ULL)
+
+static ULARGE_INTEGER g_sensor_log_week_start;
+static int g_sensor_log_tick_counter = 0;
+
+static void get_sensor_log_path(char *path /* at least MAX_PATH + 16 bytes */) {
+    char *dot;
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    dot = strrchr(path, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+    lstrcatA(path, "_sensor_log.csv");
+}
+
+static void sensor_log_now(ULARGE_INTEGER *out) {
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    out->LowPart = ft.dwLowDateTime;
+    out->HighPart = ft.dwHighDateTime;
+}
+
+/* Rewrites the CSV down to just its header row (the "past data deleted"
+ * half of the weekly reset) and records the new week's start time, both
+ * in memory and in the .ini so a restart mid-week doesn't lose it. */
+static void sensor_log_start_new_week(void) {
+    char path[MAX_PATH + 16];
+    char ini_path[MAX_PATH + 8];
+    char buf[24];
+    HANDLE file;
+    DWORD written;
+    static const char header[] =
+        "Timestamp,Bay1_C,Bay2_C,Bay3_C,Bay4_C,Bay1_RH,Bay2_RH,Bay3_RH,Bay4_RH\r\n";
+
+    get_sensor_log_path(path);
+    file = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        WriteFile(file, header, (DWORD)(sizeof(header) - 1), &written, NULL);
+        CloseHandle(file);
+    }
+
+    sensor_log_now(&g_sensor_log_week_start);
+
+    get_ini_path(ini_path);
+    wsprintfA(buf, "%lu", (unsigned long)g_sensor_log_week_start.LowPart);
+    WritePrivateProfileStringA("SensorLog", "WeekStartLow", buf, ini_path);
+    wsprintfA(buf, "%lu", (unsigned long)g_sensor_log_week_start.HighPart);
+    WritePrivateProfileStringA("SensorLog", "WeekStartHigh", buf, ini_path);
+}
+
+/* Call once at startup, after get_ini_path()'s file is available to
+ * read - resumes the current week's anchor if one was saved (so a
+ * restart mid-week keeps appending to the same file instead of
+ * resetting it early), or starts a fresh week on a genuinely first
+ * run (no saved anchor at all). */
+static void load_sensor_log_state(void) {
+    char ini_path[MAX_PATH + 8];
+    int has_saved_week;
+
+    get_ini_path(ini_path);
+
+    /* Same -1-sentinel idiom load_channel_settings() uses: nDefault (-1)
+     * only comes back if the key is genuinely missing. (A real saved
+     * FILETIME high-part could theoretically also be exactly
+     * 0xFFFFFFFF and get misread as "missing" here, same negligible
+     * risk this codebase already accepts for Mode/Level above.) */
+    has_saved_week = GetPrivateProfileIntA("SensorLog", "WeekStartHigh", -1, ini_path);
+    if (has_saved_week < 0) {
+        sensor_log_start_new_week();
+        return;
+    }
+    g_sensor_log_week_start.LowPart = (DWORD)GetPrivateProfileIntA("SensorLog", "WeekStartLow", 0, ini_path);
+    g_sensor_log_week_start.HighPart = (DWORD)GetPrivateProfileIntA("SensorLog", "WeekStartHigh", 0, ini_path);
+}
+
+static void sensor_log_append_row(void) {
+    char path[MAX_PATH + 16];
+    char line[256];
+    char ts[24];
+    char temp_str[SENSOR_MAX_UNITS][16];
+    char rh_str[SENSOR_MAX_UNITS][16];
+    SYSTEMTIME st;
+    HANDLE file;
+    DWORD written;
+    int i;
+    int len;
+
+    GetLocalTime(&st);
+    wsprintfA(ts, "%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+    for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+        const SensorState *s = sensor_get_state(&g_sensor, i);
+        if (s->has_reading) {
+            wsprintfA(temp_str[i], "%d.%d", (int)s->temperature_c, (int)(s->temperature_c * 10) % 10);
+            wsprintfA(rh_str[i], "%d.%d", (int)s->humidity_pct, (int)(s->humidity_pct * 10) % 10);
+        } else {
+            temp_str[i][0] = '\0';
+            rh_str[i][0] = '\0';
+        }
+    }
+
+    len = wsprintfA(line, "%s,%s,%s,%s,%s,%s,%s,%s,%s\r\n", ts,
+                     temp_str[0], temp_str[1], temp_str[2], temp_str[3],
+                     rh_str[0], rh_str[1], rh_str[2], rh_str[3]);
+
+    get_sensor_log_path(path);
+    /* FILE_APPEND_DATA alone (not combined with GENERIC_WRITE) is the
+     * standard Win32 idiom for "writes always land at the current end
+     * of file" - no separate SetFilePointer needed. */
+    file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        WriteFile(file, line, (DWORD)len, &written, NULL);
+        CloseHandle(file);
+    }
+}
+
+/* Called every ID_POLL_TIMER tick, same pattern as the uptime accounting
+ * right below it in WM_TIMER - cheap enough (one subtraction/comparison)
+ * to run every 100ms so a week boundary is never missed by more than a
+ * tick, with the actual file I/O throttled to SENSOR_LOG_INTERVAL_TICKS. */
+static void sensor_log_tick(void) {
+    ULARGE_INTEGER now;
+
+    sensor_log_now(&now);
+    if (now.QuadPart - g_sensor_log_week_start.QuadPart >= SENSOR_LOG_WEEK_100NS) {
+        sensor_log_start_new_week();
+    }
+
+    g_sensor_log_tick_counter++;
+    if (g_sensor_log_tick_counter >= SENSOR_LOG_INTERVAL_TICKS) {
+        g_sensor_log_tick_counter = 0;
+        sensor_log_append_row();
+    }
+}
+
 /* IDD_CW_PASSWORD's DLGPROC - just collects whatever was typed into
  * IDC_CW_PW_EDIT on OK, leaves g_cw_pw_input untouched on Cancel (caller
  * checks the DialogBoxParamA return value to tell the two apart). */
@@ -4614,6 +4764,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     sensor_set_unit_address(&g_sensor, addr_i, UNIT_TEMP_ADDR[addr_i]);
                 }
             }
+            load_sensor_log_state();
             SetTimer(hwnd, ID_POLL_TIMER, 100, NULL);
             /* Starts disconnected - every channel control starts
              * disabled too, same as conn_on_connected_changed() would
@@ -4667,6 +4818,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 ui_refresh_all_channels();
                 sensor_poll(&g_sensor);
                 ui_refresh_sensor();
+                sensor_log_tick();
                 check_kill_switch();
                 ui_refresh_kill_switch();
 
