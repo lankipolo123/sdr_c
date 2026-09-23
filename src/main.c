@@ -217,6 +217,24 @@ static COLORREF COLOR_APP_SHADOW;
                          * of extra width below (was 60%, now 75%). */
 #define GRID_BOTTOM_MARGIN 20 /* matches the visual weight of CONTENT_TOP's own top margin */
 
+/* Summary card lives below the 4x4 channel grid, in the main content
+ * area (not the sidebar) - direct request: "create a large card below
+ * [the channel cards] that i plan to make it like a summary". The
+ * grid's own height clamps at CARD_H_MAX (see channel_card_height()),
+ * so on anything taller than the CLIENT_HEIGHT design baseline (the
+ * normal case - this app launches maximized) real empty space opens
+ * up below row 4; this card fills it instead of leaving it dead, the
+ * same problem log_panel_y_for()'s own comment describes for Spectrum/
+ * Activity Log. GRID_BOTTOM/SUMMARY_PANEL_H here are only the
+ * WM_CREATE-time guess built from the static design-time constants
+ * (CARD_H, not the dynamic channel_card_height()) - same pattern
+ * CARD_H/CARD_W's own initial channel-card placement already uses;
+ * relayout_for_size() recomputes both for real once the window's
+ * actual size is known, same as it does for the grid itself. */
+#define GRID_BOTTOM (GRID_TOP + GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP)
+#define SUMMARY_PANEL_Y (GRID_BOTTOM + CARD_GAP)
+#define SUMMARY_PANEL_H (CLIENT_HEIGHT - GRID_BOTTOM_MARGIN - SUMMARY_PANEL_Y)
+
 #define SIDEBAR_X 10
 #define SIDEBAR_W 430 /* was 400 - grew along with CARD_W once the signal-
                         * wave dead space wasn't needed for anything else;
@@ -225,12 +243,14 @@ static COLORREF COLOR_APP_SHADOW;
                         * minimum value now - see sidebar_width_for(). */
 #define SIDEBAR_W_MAX 600
 
-/* Small panel above Spectrum - Kill Switch status/trip/reset + Open Log
- * on row 1, Light/Dark toggle on row 2 - moved out of the Ambient
- * Temperature header (direct request: "a small panel that will consist
- * Kill switch and open logs on the above the spectrum"). SIDEBAR_CONTENT_TOP
- * is where Spectrum itself now starts. */
-#define QUICK_PANEL_H 80
+/* Command Panel, above Spectrum - a live status caption ("Kill Switch:
+ * Armed"/"KILL SWITCH TRIPPED") over one compact row of icon buttons:
+ * Close All, Open All, Kill Switch/Reset, Open Log. Light Mode moved
+ * out of this panel (direct request - going into the Summary card
+ * instead, once that's built out - see GRID_BOTTOM below for where
+ * that card actually lives). Replaces the older 3-column captioned-
+ * button layout. */
+#define QUICK_PANEL_H 66
 #define SIDEBAR_CONTENT_TOP (CONTENT_TOP + QUICK_PANEL_H + CARD_GAP)
 
 /* Bottom edge now tracks the window's own client height directly (see
@@ -396,7 +416,15 @@ static int g_spectrum_unit;
  * have a retrievable control ID (channel_*_id() covers everything else
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
-static HWND g_quick_panel; /* Kill Switch + Open Log, above Spectrum */
+static HWND g_quick_panel; /* Command Panel - Close All/Open All/Kill Switch/Open Log, above Spectrum */
+static HWND g_summary_panel; /* Placeholder "Summary" card, below the channel grid */
+static HWND g_summary_header_icon; /* Same reposition-needs-its-own-handle
+                                     * reasoning as g_log_header_icon/
+                                     * g_log_header_lbl below - this card's Y
+                                     * moves with the grid's actual height
+                                     * too (see GRID_BOTTOM's comment). */
+static HWND g_summary_header_lbl;
+static HWND g_summary_placeholder_lbl;
 static HWND g_sidebar_panel;
 static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the Spectrum plot at a Y that moves with
@@ -1590,11 +1618,21 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 hi = mid + 1.0f;
             }
 
+            /* No-reading placeholder color - NOT plain COLOR_APP_MUTED,
+             * which is calibrated to read as a faint glow against Dark
+             * mode's own dark field background. In Light mode
+             * (RGB(110,113,118), a medium-dark gray) the same color
+             * alpha-blended 6 rings deep at each of 4 corners (below)
+             * stacks into a visibly dark/muddy patch instead of a subtle
+             * wash - direct report ("why is the others aint white").
+             * This lighter gray is calibrated for that same stacking in
+             * Light mode specifically; Dark mode is untouched. */
+            COLORREF idle_color = g_light_mode ? RGB(205, 207, 211) : COLOR_APP_MUTED;
             for (i = 0; i < SENSOR_MAX_UNITS; i++) {
                 const SensorState *st = sensor_get_state(&g_sensor, i);
                 corner[i] = st->has_reading
                     ? vivid_thermal_color((st->temperature_c - lo) / (hi - lo))
-                    : COLOR_APP_MUTED;
+                    : idle_color;
             }
         }
 
@@ -1852,8 +1890,15 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * reading - reads as "this panel is actively scanning" at a
          * glance, vs. every other panel's same muted COLOR_APP_PANEL_BORDER
          * the rest of the time (no readings yet - nothing to be lit up
-         * about). Direct request/reference image. */
-        pen = CreatePen(PS_SOLID, 1, any_reading ? RGB(200, 203, 209) : COLOR_APP_PANEL_BORDER);
+         * about). Direct request/reference image. In Light mode the
+         * silver (200,203,209) sits almost on top of Light mode's own
+         * idle COLOR_APP_PANEL_BORDER (219,221,225) - barely
+         * distinguishable, so "actively scanning" stopped reading as
+         * lit up there. COLOR_APP_ACCENT gives it real contrast instead,
+         * consistent with the accent blue this app already uses
+         * everywhere else for "this is live/active". Dark mode keeps
+         * the original silver, unchanged. */
+        pen = CreatePen(PS_SOLID, 1, any_reading ? (g_light_mode ? COLOR_APP_ACCENT : RGB(200, 203, 209)) : COLOR_APP_PANEL_BORDER);
         old_pen = (HPEN)SelectObject(hdc, pen);
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
         RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, panel_radius, panel_radius);
@@ -1868,9 +1913,15 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * dot_y, so it needs no extra top/bottom clearance beyond its
          * own half-height regardless of row - what lets inset_y above
          * stay small and the two rows genuinely spread apart. Every
-         * string is drawn twice: once 1px offset in near-black, then
-         * the real (white) text on top, a cheap drop-shadow that keeps
-         * it legible over both the light and dark ends of the blend. */
+         * string is drawn twice: once 1px offset in a shadow color,
+         * then the real text on top, a cheap drop-shadow that keeps it
+         * legible over both the light and dark ends of the blend.
+         * Reading text + shadow both flip per theme - Dark mode draws
+         * white text with a near-black shadow (original, unchanged);
+         * Light mode draws dark text with a white halo instead, since
+         * plain white text is invisible against Light mode's own light
+         * field/corner-wash colors (direct report - the heatmap read as
+         * broken/still-dark while the rest of the app went Light). */
         label_font = CreateFontA(-11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                                   ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                   DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
@@ -1878,6 +1929,9 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
                                 ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                 DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
         SetBkMode(hdc, TRANSPARENT);
+        {
+            COLORREF reading_text_color = g_light_mode ? COLOR_APP_TEXT : RGB(255, 255, 255);
+            COLORREF reading_shadow_color = g_light_mode ? RGB(255, 255, 255) : RGB(10, 10, 12);
 
         for (i = 0; i < SENSOR_MAX_UNITS; i++) {
             const SensorState *st = sensor_get_state(&g_sensor, i);
@@ -1935,7 +1989,7 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
              * reading below it, a clearer label/value hierarchy than
              * two same-weight white lines. */
             old_font = (HFONT)SelectObject(hdc, label_font ? label_font : g_font);
-            SetTextColor(hdc, RGB(10, 10, 12));
+            SetTextColor(hdc, reading_shadow_color);
             OffsetRect(&lrc, 1, 1);
             DrawTextA(hdc, blabel, -1, &lrc, align);
             OffsetRect(&lrc, -1, -1);
@@ -1943,14 +1997,15 @@ static LRESULT CALLBACK sensor_heatmap_subclass_proc(HWND hwnd, UINT msg, WPARAM
             DrawTextA(hdc, blabel, -1, &lrc, align);
 
             SelectObject(hdc, num_font ? num_font : g_font);
-            SetTextColor(hdc, RGB(10, 10, 12));
+            SetTextColor(hdc, reading_shadow_color);
             OffsetRect(&nrc, 1, 1);
             DrawTextA(hdc, num_label, -1, &nrc, align);
             OffsetRect(&nrc, -1, -1);
-            SetTextColor(hdc, RGB(255, 255, 255));
+            SetTextColor(hdc, reading_text_color);
             DrawTextA(hdc, num_label, -1, &nrc, align);
 
             SelectObject(hdc, old_font);
+        }
         }
         if (label_font) DeleteObject(label_font);
         if (num_font) DeleteObject(num_font);
@@ -1986,6 +2041,37 @@ static void log_add(const char *message) {
 
     count = (int)SendMessageA(list, LB_GETCOUNT, 0, 0);
     SendMessageA(list, LB_SETTOPINDEX, (WPARAM)(count > 0 ? count - 1 : 0), 0);
+}
+
+/* This app has no in-app accounts - only the Windows session it runs
+ * in - so the machine name is the closest thing to "who" for an audit
+ * trail. Cached after the first successful call; falls back to a
+ * fixed string rather than retrying every time if GetComputerNameA
+ * ever fails. */
+static const char *get_computer_name_cached(void) {
+    static char name[MAX_COMPUTERNAME_LENGTH + 1] = "";
+    static bool resolved;
+    DWORD len = sizeof(name);
+
+    if (!resolved) {
+        if (!GetComputerNameA(name, &len)) {
+            lstrcpynA(name, "unknown-pc", (int)sizeof(name));
+        }
+        resolved = true;
+    }
+    return name;
+}
+
+/* Tags a status-changing log entry with the machine it happened on -
+ * direct request ("view logs that shows who change the status"),
+ * scoped to Kill Switch trip/reset and channel power/mode/level
+ * changes only, not every log_add() line (connection, logo, admin
+ * unlock stay untagged - see call sites). Reuses the existing
+ * Activity Log / its "View Full" popup rather than a separate view. */
+static void log_add_status_change(const char *message) {
+    char tagged[144];
+    wsprintfA(tagged, "[%s] %s", get_computer_name_cached(), message);
+    log_add(tagged);
 }
 
 /* Forward declaration - defined below, needs log_add() to already
@@ -2617,7 +2703,7 @@ static void check_kill_switch(void) {
         wsprintfA(msg, "KILL SWITCH TRIPPED (avg %d.%d C >= %d C) - %d channel%s forced OFF",
                   (int)avg_c, (int)(avg_c * 10) % 10, (int)KILL_SWITCH_THRESHOLD_C,
                   newly_tripped, newly_tripped == 1 ? "" : "s");
-        log_add(msg);
+        log_add_status_change(msg);
     }
 }
 
@@ -2640,7 +2726,7 @@ static void on_kill_switch_manual_trip(void) {
         char msg[64];
         wsprintfA(msg, "Kill switch manually triggered - %d channel%s forced OFF",
                   newly_tripped, newly_tripped == 1 ? "" : "s");
-        log_add(msg);
+        log_add_status_change(msg);
     }
 }
 
@@ -2658,7 +2744,7 @@ static void on_kill_reset_clicked(void) {
         }
     }
     if (any) {
-        log_add("Kill switch reset by user (all units)");
+        log_add_status_change("Kill switch reset by user (all units)");
     }
 }
 
@@ -2701,13 +2787,13 @@ static void on_theme_toggle_clicked(void) {
  * Wired to a click on that unit's card status line while it's tripped
  * (see IDC_CH_STATUS_OFFSET's comment in resource.h). */
 static void on_unit_kill_reset(int idx) {
-    char msg[32];
+    char msg[48];
     if (!g_kill_switch_tripped[idx]) {
         return;
     }
     g_kill_switch_tripped[idx] = false;
     wsprintfA(msg, "Unit %d: kill switch reset by user", idx + 1);
-    log_add(msg);
+    log_add_status_change(msg);
 }
 
 /* ---- channel card UI ---- */
@@ -3017,6 +3103,42 @@ static void bulk_turn_output_off(void) {
         if (g_channel_selected[i]) {
             channel_turn_output_off(i);
         }
+    }
+}
+
+/* Command Panel's Close All/Open All - same gating convention as Bulk
+ * Actions above (OFF always works even kill-switch-tripped, ON skips
+ * a tripped channel), but acting on every one of the 16 channels
+ * regardless of Bulk Actions' own selection - a blanket rack-wide
+ * action, not a selection-based one. Each individual channel's own
+ * "Unit N: ..." completion line still logs itself once its send
+ * settles (see ui_refresh_channel()); this adds one audit-tagged
+ * summary line for the action as a whole, same pattern the kill
+ * switch's own trip/reset already uses. */
+static void on_close_all_clicked(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        channel_turn_output_off(i);
+    }
+    log_add_status_change("Close All: every channel commanded OFF");
+}
+
+static void on_open_all_clicked(void) {
+    int i;
+    int skipped = 0;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (!g_kill_switch_tripped[i]) {
+            channel_turn_output_on(i);
+        } else {
+            skipped++;
+        }
+    }
+    if (skipped > 0) {
+        char msg[64];
+        wsprintfA(msg, "Open All: channels commanded ON (%d skipped - kill switch tripped)", skipped);
+        log_add_status_change(msg);
+    } else {
+        log_add_status_change("Open All: every channel commanded ON");
     }
 }
 
@@ -3436,7 +3558,7 @@ static void ui_refresh_channel(int index) {
     if (cache->valid && cache->busy && !ch->busy) {
         char log_line[64];
         wsprintfA(log_line, "Unit %d: %s", index + 1, ch->last_command);
-        log_add(log_line);
+        log_add_status_change(log_line);
     }
 
     status_ctl = GetDlgItem(g_hwnd, channel_status_id(index));
@@ -4799,24 +4921,22 @@ static void build_controls(HWND hwnd) {
      * instead of running under it. */
     g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
 
-    /* Quick Actions: Kill Switch status/trip/reset + Open Log on row 1,
-     * Light/Dark toggle on row 2 - small panel of its own directly above
-     * Spectrum, moved out of Ambient Temperature's column (direct
-     * request). Row 1: status label (left), Kill Switch/Reset button
-     * (middle, same shared slot as before), Open Log right-aligned to
-     * the panel's own right edge (same margin pattern as Spectrum's
-     * "All"/Activity Log's "Clear"). Row 2: the toggle, left-aligned -
-     * its own label swaps text (see on_theme_toggle_clicked()) so it
-     * never needs a second slot the way Kill Switch/Reset do. */
+    /* Command Panel: one live status caption over one compact row of 4
+     * icon buttons - Close All, Open All, Kill Switch/Reset, Open Log.
+     * Direct request - Light Mode came out of this panel entirely (it's
+     * going into the Summary card below instead), replacing the old
+     * 3-column captioned layout with a single tighter row. Each button
+     * gets its own icon (see WM_DRAWITEM's IDC_CLOSE_ALL_BTN/
+     * IDC_OPEN_ALL_BTN/IDC_KILL_TRIP_BTN/IDC_KILL_RESET_BTN/
+     * IDC_OPEN_LOG_BTN cases) instead of text alone. */
     g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 22, CONTENT_TOP + 19, 170, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 200, CONTENT_TOP + 17, 80, 20, IDC_KILL_RESET_BTN);
-    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 200, CONTENT_TOP + 17, 110, 20, IDC_KILL_TRIP_BTN);
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 22, CONTENT_TOP + 8, 300, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 30, 90, 24, IDC_CLOSE_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 124, CONTENT_TOP + 30, 90, 24, IDC_OPEN_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 30, 90, 24, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 30, 90, 24, IDC_KILL_TRIP_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP,
-             SIDEBAR_X + SIDEBAR_W - 12 - 90, CONTENT_TOP + 17, 90, 20, IDC_OPEN_LOG_BTN);
-    add_ctrl(hwnd, "BUTTON", "Light Mode", BS_OWNERDRAW | WS_TABSTOP,
-             22, CONTENT_TOP + 45, 110, 20, IDC_THEME_TOGGLE_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 328, CONTENT_TOP + 30, 90, 24, IDC_OPEN_LOG_BTN);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -4870,6 +4990,19 @@ static void build_controls(HWND hwnd) {
     for (idx = 0; idx < MAX_CHANNELS; idx++) {
         add_channel_card(hwnd, idx);
     }
+
+    /* Summary card - placeholder only for now (direct request: "create
+     * a large card below [the channel cards] that i plan to make it
+     * like a summary" - content TBD, this just reserves the space and
+     * gives it a header so the eventual real content has a home).
+     * Lives below the 4x4 grid in the main content area, same width as
+     * the grid itself (GRID_LEFT to the header panel's own right
+     * margin) - NOT the narrow sidebar column (see GRID_BOTTOM's own
+     * comment for why there's room here at all). */
+    g_summary_panel = add_panel(hwnd, GRID_LEFT, SUMMARY_PANEL_Y, CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT, SUMMARY_PANEL_H);
+    g_summary_header_icon = add_header_icon(hwnd, GRID_LEFT + 12, SUMMARY_PANEL_Y + 10, ICON_WAVE);
+    g_summary_header_lbl = add_header(hwnd, "Summary", GRID_LEFT + 30, SUMMARY_PANEL_Y + 10, 188, 18);
+    g_summary_placeholder_lbl = add_ctrl(hwnd, "STATIC", "Coming soon", SS_LEFT | SS_NOPREFIX, GRID_LEFT + 12, SUMMARY_PANEL_Y + 40, 200, 16, 0);
 
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
         char label[16];
@@ -5085,12 +5218,32 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
      * gap that opens up next to it on resize (see build_controls()). */
     MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
     MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), 22, CONTENT_TOP + 19, 170, 16, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 200, CONTENT_TOP + 17, 80, 20, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 200, CONTENT_TOP + 17, 110, 20, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), SIDEBAR_X + sidebar_w - 12 - 90, CONTENT_TOP + 17, 90, 20, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_THEME_TOGGLE_BTN), 22, CONTENT_TOP + 45, 110, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), 22, CONTENT_TOP + 8, 300, 16, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 22, CONTENT_TOP + 30, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 124, CONTENT_TOP + 30, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 226, CONTENT_TOP + 30, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 226, CONTENT_TOP + 30, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 328, CONTENT_TOP + 30, 90, 24, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
+
+    /* Summary card's real position - below the grid's actual (dynamic,
+     * CARD_H_MAX-clamped) bottom edge, not the CARD_H-based WM_CREATE-
+     * time guess build_controls() used (see GRID_BOTTOM's comment).
+     * Floored at 60px tall so a smaller-than-baseline window never
+     * hands MoveWindow a negative/zero height. */
+    {
+        int grid_bottom = GRID_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP;
+        int summary_y = grid_bottom + CARD_GAP;
+        int summary_h = client_h - GRID_BOTTOM_MARGIN - summary_y;
+        int summary_w = client_w - SIDEBAR_X - grid_left;
+        if (summary_h < 60) {
+            summary_h = 60;
+        }
+        MoveWindow(g_summary_panel, grid_left, summary_y, summary_w, summary_h, FALSE);
+        MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
+        MoveWindow(g_summary_header_lbl, grid_left + 30, summary_y + 10, 188, 18, FALSE);
+        MoveWindow(g_summary_placeholder_lbl, grid_left + 12, summary_y + 40, 200, 16, FALSE);
+    }
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
     MoveWindow(g_log_header_lbl, 40, log_y + 10, 200, 18, FALSE);
@@ -5450,6 +5603,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_KILL_RESET_BTN && code == BN_CLICKED) {
                 on_kill_reset_clicked();
+                return 0;
+            }
+            if (id == IDC_CLOSE_ALL_BTN && code == BN_CLICKED) {
+                on_close_all_clicked();
+                return 0;
+            }
+            if (id == IDC_OPEN_ALL_BTN && code == BN_CLICKED) {
+                on_open_all_clicked();
                 return 0;
             }
             if (id == IDC_OPEN_LOG_BTN && code == BN_CLICKED) {
@@ -5976,6 +6137,61 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     SelectObject(dis->hDC, old_pen_i);
                     DeleteObject(white_brush);
                     rc.left += 30;
+                }
+                /* Command Panel's 4 icon buttons - on/off dot (hollow vs
+                 * filled circle, same convention a lot of hardware power
+                 * switches use), a warning triangle shared by Kill
+                 * Switch and Reset (same safety system, same glyph), and
+                 * a small document/lines icon for Open Log. Same
+                 * plain-white, drawn-before-text, rc.left-shifted-after
+                 * pattern as the theme toggle's sun/moon above, just a
+                 * smaller 22px offset - these buttons are only 90px
+                 * wide, not 110-130. */
+                if (dis->CtlID == IDC_CLOSE_ALL_BTN || dis->CtlID == IDC_OPEN_ALL_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC,
+                        dis->CtlID == IDC_OPEN_ALL_BTN ? (HBRUSH)GetStockObject(WHITE_BRUSH)
+                                                        : (HBRUSH)GetStockObject(NULL_BRUSH));
+                    Ellipse(dis->hDC, icx - 5, icy - 5, icx + 5, icy + 5);
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_pen);
+                    rc.left += 22;
+                }
+                if (dis->CtlID == IDC_KILL_TRIP_BTN || dis->CtlID == IDC_KILL_RESET_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    POINT tri[3];
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
+                    HBRUSH white_brush = CreateSolidBrush(RGB(255, 255, 255));
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, white_brush);
+                    tri[0].x = icx;     tri[0].y = icy - 6;
+                    tri[1].x = icx - 6; tri[1].y = icy + 5;
+                    tri[2].x = icx + 6; tri[2].y = icy + 5;
+                    Polygon(dis->hDC, tri, 3);
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_brush);
+                    rc.left += 22;
+                }
+                if (dis->CtlID == IDC_OPEN_LOG_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                    Rectangle(dis->hDC, icx - 5, icy - 6, icx + 5, icy + 6);
+                    MoveToEx(dis->hDC, icx - 3, icy - 2, NULL);
+                    LineTo(dis->hDC, icx + 3, icy - 2);
+                    MoveToEx(dis->hDC, icx - 3, icy + 2, NULL);
+                    LineTo(dis->hDC, icx + 3, icy + 2);
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_pen);
+                    rc.left += 22;
                 }
                 /* Dimmed text on top of the dimmed fill - white text on
                  * a gray disabled button still read as "basically the

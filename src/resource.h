@@ -31,6 +31,25 @@
  * visibility (armed shows this, tripped shows Reset instead) - see
  * ui_refresh_kill_switch() in main.c. */
 #define IDC_KILL_TRIP_BTN        1065
+/* Small caption static above IDC_OPEN_LOG_BTN in the Quick Actions
+ * panel ("Logs") - needs its own ID (unlike the Theme column's
+ * caption) because it's right-anchored to the panel edge the same
+ * way the button itself is, so relayout_for_size() has to reposition
+ * it on resize too. Direct request - the three Quick Actions buttons
+ * (Kill Switch/Reset, Open Log, Light Mode) didn't visually align
+ * with each other; a caption row above each button lines them up.
+ * No longer created (see build_controls()'s Command Panel comment -
+ * Light Mode moved out, the panel became a single icon-button row
+ * instead of captioned columns) - left defined rather than renumbering
+ * everything after it. */
+#define IDC_LOG_CAPTION_LBL      1066
+/* Command Panel's rack-wide power actions - see on_close_all_clicked()/
+ * on_open_all_clicked() in main.c. Same gating convention as Bulk
+ * Actions (OFF always works even kill-switch-tripped, ON skips a
+ * tripped channel) but acting on all 16 channels regardless of Bulk
+ * Actions' own selection. */
+#define IDC_CLOSE_ALL_BTN        1067
+#define IDC_OPEN_ALL_BTN         1068
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
