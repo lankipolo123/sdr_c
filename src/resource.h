@@ -50,6 +50,12 @@
  * Actions' own selection. */
 #define IDC_CLOSE_ALL_BTN        1067
 #define IDC_OPEN_ALL_BTN         1068
+/* Direct request: "add the change icon here also" - a shortcut to the
+ * same browse_and_set_logo() the header's own Change Logo button
+ * (IDC_CHANGE_LOGO_BTN, behind the padlock badge) already calls. That
+ * one stays as-is; this is an additional, always-visible way to reach
+ * the same feature from the Command Panel. */
+#define IDC_CMD_CHANGE_ICON_BTN  1069
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021

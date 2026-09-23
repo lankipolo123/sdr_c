@@ -243,14 +243,16 @@ static COLORREF COLOR_APP_SHADOW;
                         * minimum value now - see sidebar_width_for(). */
 #define SIDEBAR_W_MAX 600
 
-/* Command Panel, above Spectrum - a live status caption ("Kill Switch:
- * Armed"/"KILL SWITCH TRIPPED") over one compact row of icon buttons:
- * Close All, Open All, Kill Switch/Reset, Open Log. Light Mode moved
- * out of this panel (direct request - going into the Summary card
- * instead, once that's built out - see GRID_BOTTOM below for where
- * that card actually lives). Replaces the older 3-column captioned-
- * button layout. */
-#define QUICK_PANEL_H 66
+/* Command Panel, above Spectrum - two compact rows of icon buttons: row
+ * 1 Close All/Open All/Kill Switch/Reset, row 2 Open Log/Change Icon.
+ * No live status caption anymore (direct request - "Kill Switch:
+ * Armed" text came out, that state was already logged to the Activity
+ * Log on every trip/reset anyway, see log_add_status_change()'s call
+ * sites, so removing the label loses no information). Light Mode
+ * moved out of this panel too (direct request - going into the
+ * Summary card instead, once that's built out - see GRID_BOTTOM below
+ * for where that card actually lives). */
+#define QUICK_PANEL_H 72
 #define SIDEBAR_CONTENT_TOP (CONTENT_TOP + QUICK_PANEL_H + CARD_GAP)
 
 /* Bottom edge now tracks the window's own client height directly (see
@@ -2641,33 +2643,34 @@ static int count_kill_switch_tripped(void) {
     return n;
 }
 
-/* The status label is always visible now - "Kill Switch: Armed" (green)
- * normally, switching to the red TRIPPED message once something trips
- * it. IDC_KILL_TRIP_BTN and IDC_KILL_RESET_BTN share one slot and swap
- * places: the manual Trip button shows while armed (nothing to reset
- * yet), Reset shows once something's tripped (already off, nothing left
- * to manually trip). WM_CTLCOLORSTATIC picks the label's color off the
- * same count_kill_switch_tripped() check this uses. */
+/* No visible "Kill Switch: Armed"/"KILL SWITCH TRIPPED" label anymore
+ * (direct request - that state was already logged to the Activity Log
+ * on every real transition anyway: check_kill_switch()/
+ * on_kill_switch_manual_trip()/on_kill_reset_clicked()/
+ * on_unit_kill_reset() each call log_add_status_change() themselves,
+ * so this function logging its own line too would just double up).
+ * IDC_KILL_TRIP_BTN and IDC_KILL_RESET_BTN still share one slot and
+ * swap places here: the manual Trip button shows while armed (nothing
+ * to reset yet), Reset shows once something's tripped (already off,
+ * nothing left to manually trip). */
 static void ui_refresh_kill_switch(void) {
     int tripped_count = count_kill_switch_tripped();
     bool any_tripped = tripped_count > 0;
 
     /* Compare the actual count, not just "any vs none" - going from say
-     * 8 tripped to 7 stays "some tripped" either way, but the displayed
-     * count still needs to move. */
+     * 8 tripped to 7 stays "some tripped" either way, but the button
+     * visibility still needs re-evaluating (it doesn't - same swap
+     * either way - but g_kill_ui_tripped_count needs to track it). */
     if (g_kill_ui_valid && g_kill_ui_tripped_count == tripped_count) {
         return;
     }
     if (any_tripped) {
-        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "KILL SWITCH TRIPPED");
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_SHOW);
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_TRIP_BTN), SW_HIDE);
     } else {
-        SetDlgItemTextA(g_hwnd, IDC_KILL_STATUS_LBL, "Kill Switch: Armed");
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
         ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_TRIP_BTN), SW_SHOW);
     }
-    InvalidateRect(GetDlgItem(g_hwnd, IDC_KILL_STATUS_LBL), NULL, FALSE);
     g_kill_ui_valid = true;
     g_kill_ui_tripped_count = tripped_count;
 }
@@ -4930,13 +4933,13 @@ static void build_controls(HWND hwnd) {
      * IDC_OPEN_ALL_BTN/IDC_KILL_TRIP_BTN/IDC_KILL_RESET_BTN/
      * IDC_OPEN_LOG_BTN cases) instead of text alone. */
     g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 22, CONTENT_TOP + 8, 300, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 30, 90, 24, IDC_CLOSE_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 124, CONTENT_TOP + 30, 90, 24, IDC_OPEN_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 30, 90, 24, IDC_KILL_RESET_BTN);
-    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 30, 90, 24, IDC_KILL_TRIP_BTN);
+    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 8, 90, 24, IDC_CLOSE_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 124, CONTENT_TOP + 8, 90, 24, IDC_OPEN_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 8, 90, 24, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 8, 90, 24, IDC_KILL_TRIP_BTN);
     ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 328, CONTENT_TOP + 30, 90, 24, IDC_OPEN_LOG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 38, 90, 24, IDC_OPEN_LOG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Change Icon", BS_OWNERDRAW | WS_TABSTOP, 124, CONTENT_TOP + 38, 90, 24, IDC_CMD_CHANGE_ICON_BTN);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -5218,12 +5221,12 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
      * gap that opens up next to it on resize (see build_controls()). */
     MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
     MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), 22, CONTENT_TOP + 8, 300, 16, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 22, CONTENT_TOP + 30, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 124, CONTENT_TOP + 30, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 226, CONTENT_TOP + 30, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 226, CONTENT_TOP + 30, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 328, CONTENT_TOP + 30, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 22, CONTENT_TOP + 8, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 124, CONTENT_TOP + 8, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 226, CONTENT_TOP + 8, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 226, CONTENT_TOP + 8, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 22, CONTENT_TOP + 38, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), 124, CONTENT_TOP + 38, 90, 24, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
 
     /* Summary card's real position - below the grid's actual (dynamic,
@@ -5639,6 +5642,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return 0;
             }
             if (id == IDC_CHANGE_LOGO_BTN && code == BN_CLICKED) {
+                browse_and_set_logo(hwnd);
+                return 0;
+            }
+            if (id == IDC_CMD_CHANGE_ICON_BTN && code == BN_CLICKED) {
                 browse_and_set_logo(hwnd);
                 return 0;
             }
@@ -6191,6 +6198,29 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     SelectObject(dis->hDC, old_brush_i);
                     SelectObject(dis->hDC, old_pen_i);
                     DeleteObject(white_pen);
+                    rc.left += 22;
+                }
+                /* Same "picture" glyph (frame + sun + mountain
+                 * silhouette) any image-picker UI uses - a frame outline,
+                 * a small filled dot for the sun, one triangular peak
+                 * crossing the frame's bottom edge for the mountain. */
+                if (dis->CtlID == IDC_CMD_CHANGE_ICON_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    HBRUSH white_brush = CreateSolidBrush(RGB(255, 255, 255));
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                    Rectangle(dis->hDC, icx - 6, icy - 5, icx + 6, icy + 6);
+                    SelectObject(dis->hDC, white_brush);
+                    Ellipse(dis->hDC, icx - 3, icy - 3, icx, icy);
+                    MoveToEx(dis->hDC, icx - 5, icy + 4, NULL);
+                    LineTo(dis->hDC, icx, icy - 1);
+                    LineTo(dis->hDC, icx + 5, icy + 4);
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_pen);
+                    DeleteObject(white_brush);
                     rc.left += 22;
                 }
                 /* Dimmed text on top of the dimmed fill - white text on
