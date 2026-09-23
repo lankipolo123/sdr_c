@@ -56,6 +56,11 @@
  * one stays as-is; this is an additional, always-visible way to reach
  * the same feature from the Command Panel. */
 #define IDC_CMD_CHANGE_ICON_BTN  1069
+/* Caption above the Summary card's Mode toggle (IDC_THEME_TOGGLE_BTN,
+ * relocated there - see its own WM_DRAWITEM comment in main.c). Right-
+ * anchored to the card's own right edge like the toggle itself, so it
+ * needs its own ID for relayout_for_size() to reposition on resize. */
+#define IDC_MODE_CAPTION_LBL     1070
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021

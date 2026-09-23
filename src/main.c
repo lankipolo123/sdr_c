@@ -235,6 +235,15 @@ static COLORREF COLOR_APP_SHADOW;
 #define SUMMARY_PANEL_Y (GRID_BOTTOM + CARD_GAP)
 #define SUMMARY_PANEL_H (CLIENT_HEIGHT - GRID_BOTTOM_MARGIN - SUMMARY_PANEL_Y)
 
+/* Mode toggle (relocated IDC_THEME_TOGGLE_BTN - see its WM_DRAWITEM
+ * comment) sits top-right in the Summary card, icon only, no button
+ * background - direct request, large and deliberately prominent since
+ * more content is planned to join it there. Right-anchored to the
+ * card's own right edge, same margin convention as Open Log/its
+ * caption in the Command Panel. */
+#define MODE_ICON_SIZE 64
+#define MODE_ICON_MARGIN 12
+
 #define SIDEBAR_X 10
 #define SIDEBAR_W 430 /* was 400 - grew along with CARD_W once the signal-
                         * wave dead space wasn't needed for anything else;
@@ -427,6 +436,8 @@ static HWND g_summary_header_icon; /* Same reposition-needs-its-own-handle
                                      * too (see GRID_BOTTOM's comment). */
 static HWND g_summary_header_lbl;
 static HWND g_summary_placeholder_lbl;
+static HWND g_mode_caption_lbl; /* Right-anchored, needs its own handle to reposition - see MODE_ICON_SIZE's comment */
+static HWND g_mode_toggle_btn;
 static HWND g_sidebar_panel;
 static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the Spectrum plot at a Y that moves with
@@ -5006,6 +5017,12 @@ static void build_controls(HWND hwnd) {
     g_summary_header_icon = add_header_icon(hwnd, GRID_LEFT + 12, SUMMARY_PANEL_Y + 10, ICON_WAVE);
     g_summary_header_lbl = add_header(hwnd, "Summary", GRID_LEFT + 30, SUMMARY_PANEL_Y + 10, 188, 18);
     g_summary_placeholder_lbl = add_ctrl(hwnd, "STATIC", "Coming soon", SS_LEFT | SS_NOPREFIX, GRID_LEFT + 12, SUMMARY_PANEL_Y + 40, 200, 16, 0);
+    g_mode_caption_lbl = add_ctrl(hwnd, "STATIC", "Mode", SS_RIGHT | SS_NOPREFIX,
+                                   CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 10,
+                                   MODE_ICON_SIZE, 16, IDC_MODE_CAPTION_LBL);
+    g_mode_toggle_btn = add_ctrl(hwnd, "BUTTON", g_light_mode ? "Dark Mode" : "Light Mode", BS_OWNERDRAW | WS_TABSTOP,
+                                  CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 30,
+                                  MODE_ICON_SIZE, MODE_ICON_SIZE, IDC_THEME_TOGGLE_BTN);
 
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
         char label[16];
@@ -5239,13 +5256,16 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int summary_y = grid_bottom + CARD_GAP;
         int summary_h = client_h - GRID_BOTTOM_MARGIN - summary_y;
         int summary_w = client_w - SIDEBAR_X - grid_left;
-        if (summary_h < 60) {
-            summary_h = 60;
+        int mode_x = client_w - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE;
+        if (summary_h < 100) {
+            summary_h = 100;
         }
         MoveWindow(g_summary_panel, grid_left, summary_y, summary_w, summary_h, FALSE);
         MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
         MoveWindow(g_summary_header_lbl, grid_left + 30, summary_y + 10, 188, 18, FALSE);
         MoveWindow(g_summary_placeholder_lbl, grid_left + 12, summary_y + 40, 200, 16, FALSE);
+        MoveWindow(g_mode_caption_lbl, mode_x, summary_y + 10, MODE_ICON_SIZE, 16, FALSE);
+        MoveWindow(g_mode_toggle_btn, mode_x, summary_y + 30, MODE_ICON_SIZE, MODE_ICON_SIZE, FALSE);
     }
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
@@ -5993,6 +6013,69 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     return TRUE;
                 }
 
+                /* Summary card's Mode toggle - icon only, no button
+                 * background/badge (direct request), same blend-into-
+                 * panel FillRect trick as the padlock above. Much
+                 * bigger than the old text-button version of this same
+                 * control used to be (that one, and its "Light Mode"/
+                 * "Dark Mode" label, lived in the Command Panel; this
+                 * replaces it entirely - same IDC_THEME_TOGGLE_BTN ID,
+                 * same on_theme_toggle_clicked()/g_light_mode-driven
+                 * icon choice, just relocated and redrawn). Sun (click
+                 * to switch TO light) or moon ("Dark Mode") - same "the
+                 * icon always shows the destination, not the current
+                 * state" convention Connect/Disconnect's own text uses.
+                 * No trig (avoids pulling in math.h/-lm for 8 lines) -
+                 * the diagonal rays are a few px short of true 45 deg,
+                 * invisible at this size. */
+                if (dis->CtlID == IDC_THEME_TOGGLE_BTN) {
+                    int icx = (rc.left + rc.right) / 2;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    /* Theme-aware, NOT plain white - this button's own
+                     * FillRect blends it into the panel background,
+                     * which is white in Light mode, so a hardcoded white
+                     * glyph would paint invisibly (confirmed by testing:
+                     * flipped to Light mode, the icon vanished entirely,
+                     * same class of bug the heatmap's idle color had).
+                     * COLOR_APP_HEADER matches the padlock glyph's own
+                     * color above, for the same reason. */
+                    HBRUSH glyph_brush = CreateSolidBrush(COLOR_APP_HEADER);
+                    HPEN old_pen_i;
+                    HBRUSH old_brush_i;
+
+                    FillRect(dis->hDC, &rc, g_brush_panel);
+                    old_pen_i = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
+                    old_brush_i = (HBRUSH)SelectObject(dis->hDC, glyph_brush);
+
+                    if (g_light_mode) {
+                        /* Moon: a disc, then a second disc offset
+                         * up-right and filled in the panel's own
+                         * background color, masking a crescent out of
+                         * it - same layering trick the padlock's
+                         * shackle uses above. */
+                        Ellipse(dis->hDC, icx - 16, icy - 16, icx + 16, icy + 16);
+                        SelectObject(dis->hDC, g_brush_panel);
+                        Ellipse(dis->hDC, icx - 6, icy - 19, icx + 19, icy + 6);
+                    } else {
+                        static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
+                        static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+                        HPEN ray_pen = CreatePen(PS_SOLID, 3, COLOR_APP_HEADER);
+                        int ri;
+
+                        Ellipse(dis->hDC, icx - 10, icy - 10, icx + 10, icy + 10);
+                        SelectObject(dis->hDC, ray_pen);
+                        for (ri = 0; ri < 8; ri++) {
+                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 13, icy + ray_dy[ri] * 13, NULL);
+                            LineTo(dis->hDC, icx + ray_dx[ri] * 19, icy + ray_dy[ri] * 19);
+                        }
+                        DeleteObject(ray_pen);
+                    }
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(glyph_brush);
+                    return TRUE;
+                }
+
                 /* ON/OFF are two real, separate buttons (not one toggle).
                  * Only ON gets a strong color when active (solid green) -
                  * OFF being the channel's normal/idle state doesn't get
@@ -6097,53 +6180,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         SelectObject(dis->hDC, old_hl_pen);
                         DeleteObject(hl_pen);
                     }
-                }
-                /* Sun (button reads "Light Mode" - click to switch TO
-                 * light) or moon ("Dark Mode") - same "the button always
-                 * shows the destination, not the current state"
-                 * convention Connect/Disconnect's own text already
-                 * uses, just paired with an icon here too. Plain white,
-                 * drawn before the text and to its left; rc.left is
-                 * pushed in afterward so the shared DrawTextA below
-                 * (used by every button here, not just this one) leaves
-                 * room for it instead of centering text under the icon.
-                 * No trig (avoids pulling in math.h/-lm for 8 lines) -
-                 * the diagonal rays are a few px short of true 45 deg,
-                 * invisible at this size. */
-                if (dis->CtlID == IDC_THEME_TOGGLE_BTN) {
-                    int icx = rc.left + 17;
-                    int icy = (rc.top + rc.bottom) / 2;
-                    HBRUSH white_brush = CreateSolidBrush(RGB(255, 255, 255));
-                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
-                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, white_brush);
-
-                    if (g_light_mode) {
-                        /* Moon: a white disc, then a second disc offset
-                         * up-right and filled in the button's own
-                         * background color, masking a crescent out of
-                         * it - same layering trick IDC_LOGO_LOCK_BTN's
-                         * padlock body uses on its shackle. */
-                        Ellipse(dis->hDC, icx - 5, icy - 5, icx + 5, icy + 5);
-                        SelectObject(dis->hDC, disabled ? g_brush_accent_dis : g_brush_accent);
-                        Ellipse(dis->hDC, icx - 2, icy - 6, icx + 6, icy + 2);
-                    } else {
-                        static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
-                        static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
-                        HPEN ray_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
-                        int ri;
-
-                        Ellipse(dis->hDC, icx - 3, icy - 3, icx + 3, icy + 3);
-                        SelectObject(dis->hDC, ray_pen);
-                        for (ri = 0; ri < 8; ri++) {
-                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 4, icy + ray_dy[ri] * 4, NULL);
-                            LineTo(dis->hDC, icx + ray_dx[ri] * 6, icy + ray_dy[ri] * 6);
-                        }
-                        DeleteObject(ray_pen);
-                    }
-                    SelectObject(dis->hDC, old_brush_i);
-                    SelectObject(dis->hDC, old_pen_i);
-                    DeleteObject(white_brush);
-                    rc.left += 30;
                 }
                 /* Command Panel's 4 icon buttons - on/off dot (hollow vs
                  * filled circle, same convention a lot of hardware power
