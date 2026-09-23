@@ -4426,20 +4426,23 @@ static int channel_card_height(int client_h) {
     return h;
 }
 
-/* How wide a channel card should be for a given client width - extra
- * width beyond CLIENT_WIDTH (the designed minimum) splits 75/25 between
- * the 4-column grid and the sidebar (see sidebar_width_for()), so both
- * actually grow into a wider window instead of leaving a dead strip
- * right of the grid (see CARD_W's own comment) - weighted toward the
- * grid (was 60/40) since 16 cards benefit more visibly from the extra
- * width than the sidebar does. Clamped to [CARD_W, CARD_W_MAX].
+/* How wide a channel card should be for a given client width - derived
+ * to exactly fill the grid from grid_left (already grown along with the
+ * sidebar, see sidebar_width_for()/grid_left_for()) out to the same
+ * right margin (SIDEBAR_X) the header panel itself stretches to,
+ * instead of leaving a dead strip right of the grid (see CARD_W's own
+ * comment - direct report: cards weren't actually reaching the window's
+ * right edge at 1920 width, off by roughly a card-gap's worth of slop
+ * from an earlier version of this function that grew card_w by a fixed
+ * percentage of the extra width rather than solving for "fills the
+ * space" directly). Clamped to [CARD_W, CARD_W_MAX].
  * position_channel_card() already scales every control inside a card
  * proportionally to whatever width it's given. */
-static int channel_card_width(int client_w) {
-    int extra = client_w - CLIENT_WIDTH;
-    int w = CARD_W;
-    if (extra > 0) {
-        w += (extra * 75 / 100) / GRID_COLS;
+static int channel_card_width(int client_w, int grid_left) {
+    int available = client_w - SIDEBAR_X - grid_left - (GRID_COLS - 1) * CARD_GAP;
+    int w = available / GRID_COLS;
+    if (w < CARD_W) {
+        w = CARD_W;
     }
     if (w > CARD_W_MAX) {
         w = CARD_W_MAX;
@@ -4493,9 +4496,9 @@ static int log_panel_y_for(int card_h) {
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int i;
     int card_h = channel_card_height(client_h);
-    int card_w = channel_card_width(client_w);
     int sidebar_w = sidebar_width_for(client_w);
     int grid_left = grid_left_for(sidebar_w);
+    int card_w = channel_card_width(client_w, grid_left);
     int log_y = log_panel_y_for(card_h);
 
     if (!g_layout_ready) {
@@ -4728,8 +4731,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                  * design constants, or clicks on any row/column past the
                  * first would hit-test against the wrong rect. */
                 int card_h = channel_card_height(g_last_client_h);
-                int card_w = channel_card_width(g_last_client_w);
                 int grid_left = grid_left_for(sidebar_width_for(g_last_client_w));
+                int card_w = channel_card_width(g_last_client_w, grid_left);
                 int idx;
                 for (idx = 0; idx < MAX_CHANNELS; idx++) {
                     int col = idx % GRID_COLS;
