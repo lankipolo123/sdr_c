@@ -5178,11 +5178,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             /* Auto-connect on launch (direct request - the app "needs to
              * connect to retrieve data" on open, not wait for a manual
-             * Connect click) - deliberately AFTER the disabled-state
-             * refreshes just above, not before: those unconditionally
-             * paint the disconnected look, so an auto-connect attempt
-             * placed earlier would have its own success state
-             * immediately overwritten by them. conn_connect()/
+             * Connect click) is deferred to WM_APP_AUTOCONNECT, not run
+             * here directly - see that constant's own comment in
+             * resource.h for why (WM_CREATE fires before the window is
+             * actually shown, so a loading dialog here would float over
+             * an empty desktop with the main window not drawn yet). */
+            PostMessageA(hwnd, WM_APP_AUTOCONNECT, 0, 0);
+            return 0;
+        }
+
+        case WM_APP_AUTOCONNECT: {
+            /* Runs once the message loop actually reaches this posted
+             * message - after WinMain's ShowWindow()/UpdateWindow(), so
+             * the main window is already fully drawn behind the
+             * "Connecting..." dialog. Deliberately after the
+             * disabled-state refreshes WM_CREATE already did (those
+             * unconditionally paint the disconnected look, so an
+             * auto-connect success here needs to come after them, not
+             * before, or it'd be immediately overwritten). conn_connect()/
              * sensor_connect() themselves already drive
              * conn_on_connected_changed()/ui_refresh_sensor() again on
              * success, correctly flipping the UI to connected. RS422
@@ -5191,13 +5204,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
              * uses the startup-safe variant so a fresh install with
              * nothing plugged in yet doesn't block launch on a "select a
              * port" dialog. */
-            {
-                DWORD loading_t0 = GetTickCount();
-                HWND loading_hwnd = loading_dialog_show("Connecting...");
-                on_connect_clicked();
-                auto_connect_sensor_on_startup();
-                loading_dialog_hide(loading_hwnd, loading_t0);
-            }
+            DWORD loading_t0 = GetTickCount();
+            HWND loading_hwnd = loading_dialog_show("Connecting...");
+            on_connect_clicked();
+            auto_connect_sensor_on_startup();
+            loading_dialog_hide(loading_hwnd, loading_t0);
             return 0;
         }
 

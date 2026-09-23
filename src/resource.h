@@ -117,6 +117,15 @@
 
 #define ID_POLL_TIMER        1
 
+/* Posted from WM_CREATE instead of running the startup auto-connect
+ * inline there - WM_CREATE fires DURING CreateWindowExA, well before
+ * WinMain's own ShowWindow() call, so the loading dialog would appear
+ * over an empty/black desktop with the main window not drawn yet if it
+ * ran there directly (reported directly - "why the app has to be
+ * black when a dialog just load"). A posted message is only handled
+ * once the message loop actually runs, which is after ShowWindow(). */
+#define WM_APP_AUTOCONNECT   (WM_APP + 1)
+
 /* Each of the 16 channel cards gets its controls at
  * IDC_CH_BASE + channel_index*IDC_CH_STRIDE + offset, rather than a
  * separate #define per control per channel. Layout matches the
