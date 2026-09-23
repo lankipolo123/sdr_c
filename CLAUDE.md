@@ -164,6 +164,41 @@ picking this back up:
 - PIL/Pillow is often not installed after a reset - use `convert`
   (imagemagick) for cropping screenshots instead of assuming Python has PIL.
 
+## Working efficiently (read this first if tokens/time are tight)
+
+Lessons from where this project actually burned tokens on mistakes/re-work:
+
+- **Tune visuals on the plain dev exe only, in Wine, before touching the
+  obfuscated build.** The full pipeline (obfuscate -> reapply the 5 known
+  hand-fixes -> protected build -> installer) should run ONCE, after the
+  plain build already looks right - not on every color/alpha tweak. Building
+  the installer to check a saturation change is a wasted cycle.
+- **For heatmap/visual tuning, inject known fake values instead of relying on
+  the user's real hardware to see a result.** In
+  `sensor_heatmap_subclass_proc()`'s `WM_PAINT`, right after `GetClientRect`,
+  temporarily loop `g_sensor.units[i].has_reading = true;
+  g_sensor.units[i].temperature_c = <fixed value>;`, rebuild, screenshot via
+  Wine+Xvfb (`DISPLAY=:99`, launch the exe, `import -window root out.png`),
+  then remove the block before committing - it must never ship. This turns a
+  "does it look right now?" round trip into one self-contained check.
+- **Crop to the changed region and stack before/after with
+  `convert a.png -crop WxH+X+Y crop_a.png` then
+  `convert crop_a.png crop_b.png -append compare.png`** instead of sending
+  two full screenshots - makes the actual difference visible in one image
+  instead of asking the user to spot it across two.
+- **Vague visual feedback costs a full extra round trip either direction.**
+  A rough magnitude ("about half as strong", "cut it by a third") or a
+  pointed location beats "looks off" - fewer guess-and-check cycles.
+- **Never chain `pkill ...; next-cmd` or `pkill ... && next-cmd` in one
+  call** - pkill exits 1 when nothing matched, which drops `next-cmd`
+  silently in this tool's shell semantics (already bit this project's own
+  testing more than once - always verify with `md5sum` before trusting a
+  "rebuilt" binary). Always run them as separate tool calls.
+- **This file is what survives a hard-refresh/new session, not the chat.**
+  Before ending a work session, make sure whatever changed and why is
+  reflected here (not just committed in code) - a fresh session with zero
+  chat history should be able to pick up correctly from this file alone.
+
 ## Working with this user
 
 - Terse, direct, technical. Don't over-explain; show the result.
