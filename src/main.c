@@ -2860,7 +2860,7 @@ static void add_channel_card(HWND hwnd, int index) {
     ShowWindow(g_card_mode_lbl[index], SW_HIDE);
 
     mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 24, 82, 100, channel_mode_id(index));
+                           x + 8, y + 24, 98, 100, channel_mode_id(index));
     for (i = 0; i < PROTO_MODE_COUNT; i++) {
         const char *name = proto_mode_name((uint8_t)i);
         SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
@@ -2869,8 +2869,11 @@ static void add_channel_card(HWND hwnd, int index) {
     SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
     make_combo_readonly_ex(mode_combo, g_card_combo_overlays[index]);
 
+    /* Set narrowed from 40 to 32 and the gap before the gauge column
+     * trimmed from 14 to 6 - both borrowed to give the mode combo above
+     * (previously truncating every mode name) the extra width instead. */
     add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 94, y + 24, 40, 21, channel_set_id(index));
+             x + 110, y + 24, 32, 21, channel_set_id(index));
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
              x + 8, y + 47, 60, 21, channel_on_id(index));
@@ -4429,7 +4432,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(58), SY(16));
     PLACE(g_card_mode_lbl[index], x + SX(88), y + SY(8), SX(60), SY(14));
 
-    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(82), 100);
+    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(98), 100);
     /* The mode combo's readonly-theming overlays (arrow + 4 border
      * strips, see make_combo_readonly_ex) are separate sibling windows,
      * not children of the combo, so moving the combo above does NOT
@@ -4464,7 +4467,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
             MoveWindow(g_card_combo_overlays[index][4], crc.right - COMBO_BORDER_PX, crc.top, COMBO_BORDER_PX, ch2, FALSE);
         }
     }
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(94), y + SY(24), SX(40), SY(21));
+    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(110), y + SY(24), SX(32), SY(21));
     PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(47), SX(60), SY(21));
     PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(47), SX(60), SY(21));
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(70), SX(130), SY(14));
