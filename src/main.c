@@ -43,7 +43,12 @@
  * while CARD_W still fits inside 1660 with room to spare, see
  * GRID_RIGHT's own comment). */
 #define CLIENT_WIDTH  1660
-#define CLIENT_HEIGHT 702
+#define CLIENT_HEIGHT 770 /* was 702 - grown by the new Quick Actions panel's
+                            * own footprint (QUICK_PANEL_H + CARD_GAP) above
+                            * Spectrum, so the minimum window size still
+                            * leaves Spectrum/Activity Log exactly as much
+                            * room as before instead of shrinking to make
+                            * space for the new panel. */
 
 /* Header bar across the top, above the sidebar/grid content: the
  * "Connection & Settings" section - icon + heading, same as it had
@@ -209,12 +214,26 @@ static const char *const LEVEL_LABELS[] = { "Off", "Low", "Mid", "High" };
                         * minimum value now - see sidebar_width_for(). */
 #define SIDEBAR_W_MAX 600
 
-/* Flush against the bottom of the sidebar box (itself pinned to the
- * grid's height) rather than added below it - keeps the sidebar's
- * bottom edge exactly at the grid's bottom edge, no leftover empty
- * strip past it. */
-#define LOG_PANEL_H 220
-#define LOG_PANEL_Y (CONTENT_TOP + GRID_ROWS * CARD_H + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H)
+/* Small panel above Spectrum - Kill Switch status/trip/reset + Open Log,
+ * moved out of the Ambient Temperature header (direct request: "a small
+ * panel that will consist Kill switch and open logs on the above the
+ * spectrum"). SIDEBAR_CONTENT_TOP is where Spectrum itself now starts. */
+#define QUICK_PANEL_H 56
+#define SIDEBAR_CONTENT_TOP (CONTENT_TOP + QUICK_PANEL_H + CARD_GAP)
+
+/* Bottom edge now tracks the window's own client height directly (see
+ * log_panel_y_for()), not the channel grid's - the grid's height is
+ * clamped by CARD_H_MAX, which used to leave Spectrum/Activity Log
+ * stuck at a fixed max size while a much taller window (e.g. the real
+ * 1920x1200 ThinkPad) still had a large dead strip below them. LOG_PANEL_H
+ * itself grew 220 -> 260 for a real baseline increase on top of that -
+ * both direct requests ("increase the logs height and the spectrum
+ * height also now since theres too much space"). This macro is only the
+ * WM_CREATE-time initial guess (matches log_panel_y_for(CLIENT_HEIGHT)
+ * exactly) - relayout_for_size() immediately supersedes it with the
+ * real client height once the window is shown. */
+#define LOG_PANEL_H 260
+#define LOG_PANEL_Y (CLIENT_HEIGHT - GRID_BOTTOM_MARGIN - LOG_PANEL_H)
 
 static HINSTANCE g_hinst;
 static HWND g_hwnd;
@@ -359,6 +378,7 @@ static int g_spectrum_unit;
  * have a retrievable control ID (channel_*_id() covers everything else
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
+static HWND g_quick_panel; /* Kill Switch + Open Log, above Spectrum */
 static HWND g_sidebar_panel;
 static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the Spectrum plot at a Y that moves with
@@ -4334,11 +4354,8 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1097, 58, 72, 18, IDC_SENSOR_CONNECT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1025, 82, 130, 16, IDC_SENSOR_STATUS_LBL);
     add_pill(hwnd, "Avg -", 1025, 102, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
-    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 1025, 130, 190, 16, IDC_KILL_STATUS_LBL);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 80, 18, IDC_KILL_RESET_BTN);
-    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 1025, 150, 110, 18, IDC_KILL_TRIP_BTN);
-    ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 1025, 172, 100, 16, IDC_OPEN_LOG_BTN);
+    /* Kill Switch status/trip/reset and Open Log moved out of here into
+     * their own small panel above Spectrum - see g_quick_panel below. */
 
     /* The heatmap fills the empty gap that opens up inside the header
      * panel itself once the window is wider than the design minimum -
@@ -4358,19 +4375,33 @@ static void build_controls(HWND hwnd) {
      * instead of running under it. */
     g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
 
+    /* Quick Actions: Kill Switch status/trip/reset + Open Log, small
+     * panel of its own directly above Spectrum - moved out of Ambient
+     * Temperature's column (direct request). Single row: status label
+     * (left), Kill Switch/Reset button (middle, same shared slot as
+     * before), Open Log right-aligned to the panel's own right edge
+     * (same margin pattern as Spectrum's "All"/Activity Log's "Clear"). */
+    g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
+    add_ctrl(hwnd, "STATIC", "Kill Switch: Armed", SS_LEFT | SS_NOPREFIX, 22, CONTENT_TOP + 19, 170, 16, IDC_KILL_STATUS_LBL);
+    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 200, CONTENT_TOP + 17, 80, 20, IDC_KILL_RESET_BTN);
+    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 200, CONTENT_TOP + 17, 110, 20, IDC_KILL_TRIP_BTN);
+    ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP,
+             SIDEBAR_X + SIDEBAR_W - 12 - 90, CONTENT_TOP + 17, 90, 20, IDC_OPEN_LOG_BTN);
+
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
      * in the SAME box, not a separate panel. Connection & Settings and
      * Amplifier Temperature moved up into the header above. */
-    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - CONTENT_TOP);
+    g_sidebar_panel = add_panel(hwnd, SIDEBAR_X, SIDEBAR_CONTENT_TOP, SIDEBAR_W, LOG_PANEL_Y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP);
 
-    add_header_icon(hwnd, 22, CONTENT_TOP + 10, ICON_WAVE);
-    add_header(hwnd, "Spectrum", 40, CONTENT_TOP + 10, 188, 18);
+    add_header_icon(hwnd, 22, SIDEBAR_CONTENT_TOP + 10, ICON_WAVE);
+    add_header(hwnd, "Spectrum", 40, SIDEBAR_CONTENT_TOP + 10, 188, 18);
     make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                  236, CONTENT_TOP + 8, 56, 140, IDC_SPECTRUM_UNIT_COMBO));
+                                  236, SIDEBAR_CONTENT_TOP + 8, 56, 140, IDC_SPECTRUM_UNIT_COMBO));
     add_ctrl(hwnd, "BUTTON", "All", BS_OWNERDRAW | WS_TABSTOP,
-             SIDEBAR_X + SIDEBAR_W - 12 - 60, CONTENT_TOP + 8, 60, 20, IDC_SPECTRUM_ALL_BTN);
-    add_spectrum_plot(hwnd, 22, CONTENT_TOP + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (CONTENT_TOP + 34),
+             SIDEBAR_X + SIDEBAR_W - 12 - 60, SIDEBAR_CONTENT_TOP + 8, 60, 20, IDC_SPECTRUM_ALL_BTN);
+    add_spectrum_plot(hwnd, 22, SIDEBAR_CONTENT_TOP + 34, SIDEBAR_W + SIDEBAR_X - 34, LOG_PANEL_Y - 12 - (SIDEBAR_CONTENT_TOP + 34),
                        IDC_SPECTRUM_PLOT);
     {
         int u;
@@ -4579,14 +4610,18 @@ static int grid_left_for(int sidebar_w) {
     return SIDEBAR_X + sidebar_w + 10;
 }
 
-/* LOG_PANEL_Y's own formula (CONTENT_TOP + GRID_ROWS*CARD_H + ... -
- * LOG_PANEL_H), parameterized on the actual card height instead of the
- * fixed design CARD_H - so the sidebar's bottom edge keeps landing
- * exactly on the grid's bottom edge (see LOG_PANEL_H's comment on why
- * that alignment matters) even once the grid grows taller than its
- * designed size. */
-static int log_panel_y_for(int card_h) {
-    return CONTENT_TOP + GRID_ROWS * card_h + (GRID_ROWS - 1) * CARD_GAP - LOG_PANEL_H;
+/* Sidebar's (Spectrum + Activity Log) bottom edge, straight off the
+ * window's own client height - not the channel grid's, unlike this
+ * function's own former version. The grid's height is clamped by
+ * CARD_H_MAX, which used to cap the sidebar's growth at the same point,
+ * leaving a large dead strip below Spectrum/Activity Log on a much
+ * taller window (direct report at the real 1920x1200 ThinkPad size).
+ * GRID_BOTTOM_MARGIN doubles as this margin too - same visual weight,
+ * and it's exactly what the grid's own bottom edge lands on whenever
+ * the grid ISN'T clamped, so the two stay aligned in the common case
+ * and only diverge (on purpose) once the grid maxes out. */
+static int log_panel_y_for(int client_h) {
+    return client_h - GRID_BOTTOM_MARGIN - LOG_PANEL_H;
 }
 
 /* Recomputes the whole layout for a new client size: the header bar
@@ -4595,17 +4630,17 @@ static int log_panel_y_for(int card_h) {
  * (channel_card_width()) to use up extra space instead of leaving it
  * empty below row 4 or as a dead strip right of the grid, and the
  * sidebar (Spectrum + Activity Log) grows too (sidebar_width_for()),
- * its bottom edge tracking the grid's via log_panel_y_for() the same
- * way it always has. Never shrinks below the designed CARD_W x CARD_H
- * (see WM_GETMINMAXINFO, which stops the window itself getting that
- * small). */
+ * its bottom edge now tracking the window's own client height via
+ * log_panel_y_for() - not the grid's, see that function's own comment.
+ * Never shrinks below the designed CARD_W x CARD_H (see WM_GETMINMAXINFO,
+ * which stops the window itself getting that small). */
 static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     int i;
     int card_h = channel_card_height(client_h);
     int sidebar_w = sidebar_width_for(client_w);
     int grid_left = grid_left_for(sidebar_w);
     int card_w = channel_card_width(client_w, grid_left);
-    int log_y = log_panel_y_for(card_h);
+    int log_y = log_panel_y_for(client_h);
 
     if (!g_layout_ready) {
         return;
@@ -4615,16 +4650,21 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     /* Stretches right along with the header panel itself, filling the
      * gap that opens up next to it on resize (see build_controls()). */
     MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
-    MoveWindow(g_sidebar_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - CONTENT_TOP, FALSE);
+    MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_STATUS_LBL), 22, CONTENT_TOP + 19, 170, 16, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 200, CONTENT_TOP + 17, 80, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 200, CONTENT_TOP + 17, 110, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), SIDEBAR_X + sidebar_w - 12 - 90, CONTENT_TOP + 17, 90, 20, FALSE);
+    MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
     MoveWindow(g_log_header_lbl, 40, log_y + 10, 200, 18, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_LISTBOX), 22, log_y + 34, sidebar_w + SIDEBAR_X - 34, LOG_PANEL_H - 46, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_LOG_CLEAR_BTN), SIDEBAR_X + sidebar_w - 12 - 60, log_y + 8, 60, 20, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO), 236, CONTENT_TOP + 8, 56, 140, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + sidebar_w - 12 - 60, CONTENT_TOP + 8, 60, 20, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, CONTENT_TOP + 34,
-               sidebar_w + SIDEBAR_X - 34, log_y - 12 - (CONTENT_TOP + 34), FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_UNIT_COMBO), 236, SIDEBAR_CONTENT_TOP + 8, 56, 140, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_ALL_BTN), SIDEBAR_X + sidebar_w - 12 - 60, SIDEBAR_CONTENT_TOP + 8, 60, 20, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), 22, SIDEBAR_CONTENT_TOP + 34,
+               sidebar_w + SIDEBAR_X - 34, log_y - 12 - (SIDEBAR_CONTENT_TOP + 34), FALSE);
 
     for (i = 0; i < MAX_CHANNELS; i++) {
         int col = i % GRID_COLS;
