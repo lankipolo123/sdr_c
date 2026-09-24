@@ -5783,14 +5783,30 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                  * g_cw_authorized first). */
                 HMENU menu;
                 RECT btn_rc;
+                MENUINFO mi;
 
                 if (!unlock_cw(hwnd)) {
                     return 0;
                 }
 
                 menu = CreatePopupMenu();
-                AppendMenuA(menu, MF_STRING, IDC_CHANGE_LOGO_BTN, "Change Logo");
-                AppendMenuA(menu, MF_STRING, IDC_RESET_LOGO_BTN, "Reset to Default");
+                /* Owner-drawn (see WM_MEASUREITEM/WM_DRAWITEM's own
+                 * ODT_MENU branches below) so this reads as part of the
+                 * app's own dark theme instead of a plain stock Windows
+                 * menu (direct report) - MF_OWNERDRAW's lpNewItem isn't
+                 * the item's text, it's an opaque item-data value
+                 * (documented AppendMenuA behavior), so the label
+                 * strings are stashed there as raw pointers, read back
+                 * via itemData/dwItemData in the measure/draw handlers.
+                 * SetMenuInfo's hbrBack recolors the popup's own
+                 * background (the part around/between items that isn't
+                 * covered by owner-draw at all) to match. */
+                mi.cbSize = sizeof(mi);
+                mi.fMask = MIM_BACKGROUND;
+                mi.hbrBack = g_brush_panel;
+                SetMenuInfo(menu, &mi);
+                AppendMenuA(menu, MF_OWNERDRAW, IDC_CHANGE_LOGO_BTN, (LPCSTR)"Change Logo");
+                AppendMenuA(menu, MF_OWNERDRAW, IDC_RESET_LOGO_BTN, (LPCSTR)"Reset to Default");
                 GetWindowRect(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), &btn_rc);
                 SetForegroundWindow(hwnd);
                 TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN, btn_rc.left, btn_rc.bottom, 0, hwnd, NULL);
@@ -6025,8 +6041,49 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return (LRESULT)g_brush_field;
         }
 
+        /* Sizes the "Icon" button's owner-drawn popup menu items (see
+         * that button's WM_COMMAND handler) - measured against a real
+         * DC/font instead of a guessed fixed size, so it's never too
+         * tight for the actual text. */
+        case WM_MEASUREITEM: {
+            MEASUREITEMSTRUCT *mis = (MEASUREITEMSTRUCT *)lParam;
+            if (mis->CtlType == ODT_MENU) {
+                const char *text = (const char *)mis->itemData;
+                HDC hdc = GetDC(hwnd);
+                HFONT old_font = (HFONT)SelectObject(hdc, g_font);
+                SIZE sz;
+                GetTextExtentPoint32A(hdc, text, lstrlenA(text), &sz);
+                SelectObject(hdc, old_font);
+                ReleaseDC(hwnd, hdc);
+                mis->itemWidth = (UINT)sz.cx + 40;
+                mis->itemHeight = (UINT)sz.cy + 16;
+                return TRUE;
+            }
+            break;
+        }
+
         case WM_DRAWITEM: {
             DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
+            /* The "Icon" button's popup menu (Change Logo/Reset to
+             * Default) - dark panel fill, accent highlight on hover,
+             * matching the rest of the app's theme instead of a plain
+             * stock Windows menu (direct report). itemData is the
+             * label text pointer stashed by AppendMenuA(MF_OWNERDRAW)
+             * back in that button's WM_COMMAND handler. */
+            if (dis->CtlType == ODT_MENU) {
+                const char *text = (const char *)dis->itemData;
+                bool hot = (dis->itemState & ODS_SELECTED) != 0;
+                RECT rc = dis->rcItem;
+                HFONT old_font = (HFONT)SelectObject(dis->hDC, g_font);
+
+                FillRect(dis->hDC, &rc, hot ? g_brush_accent : g_brush_panel);
+                SetTextColor(dis->hDC, hot ? RGB(255, 255, 255) : COLOR_APP_TEXT);
+                SetBkMode(dis->hDC, TRANSPARENT);
+                rc.left += 16;
+                DrawTextA(dis->hDC, text, lstrlenA(text), &rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                SelectObject(dis->hDC, old_font);
+                return TRUE;
+            }
             if (dis->CtlType == ODT_BUTTON) {
                 char text[64];
                 bool disabled = (dis->itemState & ODS_DISABLED) != 0;
