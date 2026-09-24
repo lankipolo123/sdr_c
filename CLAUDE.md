@@ -53,11 +53,21 @@ visible) and it does NOT get obfuscated/protected - it has no vendor DLL path
 or password to hide, unlike the main exe. See "Background sensor service"
 below for what this is and how to test it.
 
-**Before shipping anything to the user: always rebuild the protected/
-obfuscated build AND the NSIS installer.** Never hand over the plain dev exe
-as a deliverable.
+**Direct decision (2026-09-24): ship the PLAIN build, not the obfuscated one.**
+Windows Defender was flagging real installs as a virus - unsigned exe, zero
+accumulated hash reputation (changes every rebuild), and the obfuscated
+build's own string-hiding + `LoadLibraryA`-ing a vendor DLL at runtime is a
+textbook AV heuristic false-positive profile. Traded away for what the
+obfuscation actually bought (hiding literal strings from a casual binary
+viewer, not real protection). So: build straight from `src/` with the plain
+dev exe command above, run `makensis installer.nsi` against THAT exe, ship
+it. Do NOT run `tools/obfuscate.py`/build from `build_obf/src/` for a normal
+ship - that pipeline is being kept (see gotchas below, still accurate) in
+case a real signing story shows up later and obfuscation is worth
+reconsidering, but it is NOT the default anymore. If asked to bring it back,
+this is a reversal of a direct decision - confirm before doing it.
 
-## Obfuscation gotchas (`tools/obfuscate.py` -> `build_obf/src/`)
+## Obfuscation gotchas (`tools/obfuscate.py` -> `build_obf/src/`) - NOT currently used for shipping, see above
 
 Regenerating the obfuscated source needs manual hand-fixes every time, for
 things the script doesn't handle automatically:
