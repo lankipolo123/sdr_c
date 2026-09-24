@@ -254,11 +254,26 @@ static COLORREF COLOR_APP_SHADOW;
                              * as the 64->112 jump. */
 #define MODE_ICON_MARGIN 12
 
+/* Summary card's minimum content height - caption row (60) + the
+ * MODE_ICON_SIZE square + a bottom breather (20). channel_card_height()
+ * reserves this (plus a CARD_GAP) off the top of the grid's own budget
+ * so the grid shrinks first on a short window instead of the Summary
+ * card being forced to this floor with nowhere left to put it (direct
+ * report: worked at 1920x1200, overflowed off the bottom of the window
+ * at 1920x1080 - the grid was maxing cards out at CARD_H_MAX with no
+ * idea the Summary card still needed room below it). relayout_for_size()
+ * still floors summary_h at this value too, as a safety net for windows
+ * shorter than even the reservation accounts for. */
+#define MIN_SUMMARY_H (60 + MODE_ICON_SIZE + 20)
+
 /* Highest Temp Today block's own width - wider than MODE_ICON_SIZE
  * since "<temp>C - BAY<N>" is a much longer string than AVG TEMP's
  * bare number, even at the smaller g_big_font. Height stays
- * MODE_ICON_SIZE so its row still lines up with the other two. */
-#define HIGHEST_TEMP_BLOCK_W 460
+ * MODE_ICON_SIZE so its row still lines up with the other two. Grown
+ * 460->560 alongside g_big_font's own bump (56->72, see its comment) -
+ * same clipping risk AVG_TEMP_BLOCK_W's comment describes, just for
+ * the longer "<temp>C - BAY<N>" string. */
+#define HIGHEST_TEMP_BLOCK_W 560
 
 /* AVG TEMP block's own width - direct report: "24.6C" at the enlarged
  * g_huge_font (-84, see its own comment) no longer fit inside
@@ -267,8 +282,10 @@ static COLORREF COLOR_APP_SHADOW;
  * control's own DC clips drawing to its own bounds regardless of what
  * the app tries to paint past them). Left-anchored at GRID_LEFT + 12
  * same as before, just wider - plenty of clearance before the
- * Highest Temp block, which is centered independently. */
-#define AVG_TEMP_BLOCK_W 380
+ * Highest Temp block, which is centered independently. Grown again
+ * 380->420 alongside g_huge_font's own bump (84->100, see its
+ * comment) - same reasoning, bigger text needs a bigger box. */
+#define AVG_TEMP_BLOCK_W 420
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 430 /* was 400 - grew along with CARD_W once the signal-
@@ -468,6 +485,7 @@ static int g_spectrum_unit;
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
 static HWND g_quick_panel; /* Command Panel - Close All/Open All/Kill Switch/Open Log, above Spectrum */
+static HWND g_quick_panel_label; /* "Commands" - plain text, not a button, left of the 4 buttons */
 static HWND g_summary_panel; /* Placeholder "Summary" card, below the channel grid */
 static HWND g_summary_header_icon; /* Same reposition-needs-its-own-handle
                                      * reasoning as g_log_header_icon/
@@ -4981,10 +4999,20 @@ static void build_controls(HWND hwnd) {
      * IDC_OPEN_LOG_BTN/IDC_CMD_CHANGE_ICON_BTN cases) instead of all 4
      * sharing the generic accent blue. */
     g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
-    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 6, 92, 36, IDC_CLOSE_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 123, CONTENT_TOP + 6, 92, 36, IDC_OPEN_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 224, CONTENT_TOP + 6, 92, 36, IDC_OPEN_LOG_BTN);
-    add_ctrl(hwnd, "BUTTON", "Change Icon", BS_OWNERDRAW | WS_TABSTOP, 325, CONTENT_TOP + 6, 92, 36, IDC_CMD_CHANGE_ICON_BTN);
+    /* "Commands" - plain static label, not a button (direct request),
+     * left of the 4 buttons. Buttons narrowed 92->76 and shifted right
+     * to make real room for it (checked pixel-by-pixel against the
+     * panel's actual rendered right edge before landing on these
+     * numbers - a same-width-but-shifted first attempt ran the last
+     * button past the panel's own edge). "Change Icon" renamed to
+     * "Icon" - the picture glyph already says what it does, and the
+     * shorter label is what let that button narrow without its text
+     * clipping. */
+    g_quick_panel_label = add_header(hwnd, "Commands", 22, CONTENT_TOP + 16, 76, 16);
+    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 108, CONTENT_TOP + 6, 76, 36, IDC_CLOSE_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 192, CONTENT_TOP + 6, 76, 36, IDC_OPEN_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 276, CONTENT_TOP + 6, 76, 36, IDC_OPEN_LOG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP, 360, CONTENT_TOP + 6, 76, 36, IDC_CMD_CHANGE_ICON_BTN);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -5065,17 +5093,18 @@ static void build_controls(HWND hwnd) {
     g_mode_toggle_btn = add_ctrl(hwnd, "BUTTON", g_light_mode ? "Dark Mode" : "Light Mode", BS_OWNERDRAW | WS_TABSTOP,
                                   CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 60,
                                   MODE_ICON_SIZE, MODE_ICON_SIZE, IDC_THEME_TOGGLE_BTN);
-    /* 3rd content block, centered between the two above - see
-     * HIGHEST_TEMP_BLOCK_W's own comment for why it's wider than
-     * MODE_ICON_SIZE. Centered on the WM_CREATE-time CLIENT_WIDTH
-     * guess here; relayout_for_size() recomputes against the real
-     * client_w once the window's actual size is known, same pattern
-     * as everything else in this card. */
+    /* 3rd content block, centered between the two above - not on the
+     * summary card's full width, which would let a wider AVG TEMP or
+     * Highest Temp block collide into the other (direct report - see
+     * relayout_for_size()'s matching highest_x comment for the full
+     * reasoning). Same WM_CREATE-time CLIENT_WIDTH guess as everything
+     * else in this card; relayout_for_size() recomputes against the
+     * real client_w once the window's actual size is known. */
     g_highest_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "Highest Temp Today", SS_CENTER | SS_NOPREFIX,
-                                           GRID_LEFT + (CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
+                                           (GRID_LEFT + 12 + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
                                            SUMMARY_PANEL_Y + 40, HIGHEST_TEMP_BLOCK_W, 16, IDC_HIGHEST_TEMP_CAPTION_LBL);
     g_highest_temp_block = add_pill(hwnd, "",
-                                     GRID_LEFT + (CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
+                                     (GRID_LEFT + 12 + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
                                      SUMMARY_PANEL_Y + 60, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE,
                                      IDC_HIGHEST_TEMP_BLOCK, (WNDPROC)highest_temp_block_subclass_proc);
     if (g_avg_temp_caption_lbl && g_header_font) {
@@ -5202,9 +5231,15 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
 /* How tall a channel card should be to make the 4-row grid's bottom
  * edge land GRID_BOTTOM_MARGIN above the client area's bottom, for a
  * given client height - clamped to [CARD_H, CARD_H_MAX] (see that
- * constant's comment for why growth is capped). */
+ * constant's comment for why growth is capped). Reserves the Summary
+ * card's own minimum footprint (MIN_SUMMARY_H + a CARD_GAP) off the top
+ * of the available space first, so on a short window (1920x1080 vs. the
+ * 1920x1200 this was tuned against) the grid shrinks to make room
+ * instead of the Summary card overflowing past the window's bottom
+ * edge - see MIN_SUMMARY_H's own comment. */
 static int channel_card_height(int client_h) {
-    int avail = client_h - CONTENT_TOP - GRID_BOTTOM_MARGIN - (GRID_ROWS - 1) * CARD_GAP;
+    int avail = client_h - CONTENT_TOP - GRID_BOTTOM_MARGIN - (GRID_ROWS - 1) * CARD_GAP
+                - MIN_SUMMARY_H - CARD_GAP;
     int h = avail / GRID_ROWS;
     if (h < CARD_H) {
         h = CARD_H;
@@ -5302,10 +5337,11 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
      * gap that opens up next to it on resize (see build_controls()). */
     MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
     MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 22, CONTENT_TOP + 6, 92, 36, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 123, CONTENT_TOP + 6, 92, 36, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 224, CONTENT_TOP + 6, 92, 36, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), 325, CONTENT_TOP + 6, 92, 36, FALSE);
+    MoveWindow(g_quick_panel_label, 22, CONTENT_TOP + 16, 76, 16, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 108, CONTENT_TOP + 6, 76, 36, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 192, CONTENT_TOP + 6, 76, 36, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 276, CONTENT_TOP + 6, 76, 36, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), 360, CONTENT_TOP + 6, 76, 36, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
 
     /* Summary card's real position - below the grid's actual (dynamic,
@@ -5319,9 +5355,20 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int summary_h = client_h - GRID_BOTTOM_MARGIN - summary_y;
         int summary_w = client_w - SIDEBAR_X - grid_left;
         int mode_x = client_w - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE;
-        int highest_x = grid_left + summary_w / 2 - HIGHEST_TEMP_BLOCK_W / 2;
-        if (summary_h < 60 + MODE_ICON_SIZE + 20) {
-            summary_h = 60 + MODE_ICON_SIZE + 20;
+        /* Centered between AVG TEMP's right edge and Mode's left edge,
+         * not on the summary card's full width - direct request to
+         * grow both AVG TEMP and Highest Temp Today's fonts (and their
+         * blocks, to still fit the bigger text) meant centering on the
+         * whole row would have overlapped the two blocks together,
+         * since a wider AVG TEMP block pushes its own right edge deeper
+         * into where a "centered on everything" Highest Temp block
+         * would start. This formula keeps equal breathing room on both
+         * sides of Highest Temp regardless of how wide either
+         * neighbor's block is. */
+        int avg_right = grid_left + 12 + AVG_TEMP_BLOCK_W;
+        int highest_x = (avg_right + mode_x) / 2 - HIGHEST_TEMP_BLOCK_W / 2;
+        if (summary_h < MIN_SUMMARY_H) {
+            summary_h = MIN_SUMMARY_H;
         }
         MoveWindow(g_summary_panel, grid_left, summary_y, summary_w, summary_h, FALSE);
         MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
@@ -5409,14 +5456,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_mono_font = g_font;
             }
 
-            g_big_font = CreateFontA(-56, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            g_big_font = CreateFontA(-72, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                       ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                       DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
             if (!g_big_font) {
                 g_big_font = g_mono_font;
             }
 
-            g_huge_font = CreateFontA(-84, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            g_huge_font = CreateFontA(-100, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                        ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                        DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
             if (!g_huge_font) {
