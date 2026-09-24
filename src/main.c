@@ -278,17 +278,41 @@ static COLORREF COLOR_APP_SHADOW;
                              * as the 64->112 jump. */
 #define MODE_ICON_MARGIN 12
 
-/* Summary card's minimum content height - caption row (60) + the
- * MODE_ICON_SIZE square + a bottom breather (20). channel_card_height()
- * reserves this (plus a CARD_GAP) off the top of the grid's own budget
- * so the grid shrinks first on a short window instead of the Summary
- * card being forced to this floor with nowhere left to put it (direct
- * report: worked at 1920x1200, overflowed off the bottom of the window
- * at 1920x1080 - the grid was maxing cards out at CARD_H_MAX with no
- * idea the Summary card still needed room below it). relayout_for_size()
- * still floors summary_h at this value too, as a safety net for windows
- * shorter than even the reservation accounts for. */
-#define MIN_SUMMARY_H (60 + MODE_ICON_SIZE + 20)
+/* Summary card's own internal row layout, top to bottom: the header
+ * (icon+"Summary", unchanged, y+10) - then ONE content row, Commands
+ * as its leftmost column lined up with AVG TEMP/Highest Temp Today/
+ * Mode (direct correction - it was sitting in its own separate spot
+ * instead of matching "the others"). All 4 captions share the same Y
+ * (SUMMARY_CONTENT_Y) and all 4 content blocks share the same Y
+ * (SUMMARY_CONTENT_BLOCK_Y), same as AVG TEMP/Highest/Mode always did
+ * with each other. Commands' own content is a 2x2 button grid (Close
+ * All/Open All on row 1, Open Log/Icon on row 2) with Reset to Default
+ * spanning both columns below it, all within COMMANDS_COL_W so AVG
+ * TEMP starts right after it (see avg_right's own comment further
+ * down, which already recenters Highest Temp off of AVG TEMP's real
+ * start - inserting a column before it needed no other change there). */
+#define COMMANDS_COL_W 176
+#define COMMANDS_COL_GAP 40
+#define SUMMARY_CMD_ROW1_Y 0
+#define SUMMARY_CMD_ROW2_Y 44
+#define SUMMARY_CMD_RESET_Y 88
+#define SUMMARY_CONTENT_Y 40
+#define SUMMARY_CONTENT_BLOCK_Y 60
+
+/* Summary card's minimum content height - SUMMARY_CONTENT_BLOCK_Y (the
+ * 4 content blocks' own top offset, which already accounts for the
+ * header above it) + the MODE_ICON_SIZE square + a
+ * bottom breather (20). Commands' own content (124px tall) fits well
+ * inside that same MODE_ICON_SIZE budget. channel_card_height() reserves this (plus a
+ * CARD_GAP) off the top of the grid's own budget so the grid shrinks
+ * first on a short window instead of the Summary card being forced to
+ * this floor with nowhere left to put it (direct report: worked at
+ * 1920x1200, overflowed off the bottom of the window at 1920x1080 -
+ * the grid was maxing cards out at CARD_H_MAX with no idea the Summary
+ * card still needed room below it). relayout_for_size() still floors
+ * summary_h at this value too, as a safety net for windows shorter
+ * than even the reservation accounts for. */
+#define MIN_SUMMARY_H (SUMMARY_CONTENT_BLOCK_Y + MODE_ICON_SIZE + 20)
 
 /* Highest Temp Today block's own width - wider than MODE_ICON_SIZE
  * since "<temp>C - BAY<N>" is a much longer string than AVG TEMP's
@@ -319,17 +343,11 @@ static COLORREF COLOR_APP_SHADOW;
                         * minimum value now - see sidebar_width_for(). */
 #define SIDEBAR_W_MAX 600
 
-/* Command Panel, above Spectrum - 4 buttons, 1 row, max height (direct
- * request/correction): Close All, Open All, Open Log, Change Icon.
- * Kill Switch and its "Kill Switch: Armed" status caption both came
- * out of this panel entirely (manual trip/reset still works per-
- * channel via each card's own status line; automatic rack-wide trip
- * via check_kill_switch() is untouched either way, it never depended
- * on this panel). Light Mode moved out earlier too - into the Summary
- * card, once that's built out (see GRID_BOTTOM below for where that
- * card actually lives). */
-#define QUICK_PANEL_H 48
-#define SIDEBAR_CONTENT_TOP (CONTENT_TOP + QUICK_PANEL_H + CARD_GAP)
+/* Command Panel used to be its own small panel here, above Spectrum -
+ * moved onto the Summary card as its own row (direct request, see
+ * COMMANDS_ROW_Y/COMMANDS_ROW_H below) - Spectrum now starts right
+ * where it used to sit. */
+#define SIDEBAR_CONTENT_TOP CONTENT_TOP
 
 /* Bottom edge now tracks the window's own client height directly (see
  * log_panel_y_for()), not the channel grid's - the grid's height is
@@ -349,6 +367,9 @@ static HINSTANCE g_hinst;
 static HWND g_hwnd;
 static HWND g_log_view_hwnd; /* NULL when no full-log popup is open - see
                                * on_log_view_clicked()/log_view_wnd_proc(). */
+static HWND g_templog_view_hwnd; /* Same, for the Highest Temp Log popup -
+                                   * see on_highest_temp_log_clicked()/
+                                   * templog_view_wnd_proc(). */
 static HFONT g_font;
 static HFONT g_header_font;
 static HFONT g_logo_font; /* bold, letter-spaced wordmark under the logo mark */
@@ -502,8 +523,13 @@ static int g_spectrum_unit;
  * have a retrievable control ID (channel_*_id() covers everything else
  * per-card - GetDlgItem() finds those directly). */
 static HWND g_header_panel;
-static HWND g_quick_panel; /* Command Panel - Close All/Open All/Kill Switch/Open Log, above Spectrum */
-static HWND g_quick_panel_label; /* "Commands" - plain text, not a button, left of the 4 buttons */
+static HWND g_quick_panel_label; /* "Commands" - leftmost column of the same
+                                   * content row as AVG TEMP/Highest Temp Today/
+                                   * Mode, same Y as their captions, centered over
+                                   * COMMANDS_COL_W (176, matching Reset to
+                                   * Default's width below it) in plain g_font -
+                                   * direct correction, it wasn't lining up with
+                                   * them before. */
 static HWND g_summary_panel; /* Placeholder "Summary" card, below the channel grid */
 static HWND g_summary_header_icon; /* Same reposition-needs-its-own-handle
                                      * reasoning as g_log_header_icon/
@@ -2251,6 +2277,285 @@ static LRESULT CALLBACK log_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
     return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
+/* Highest Temp Log popup's own WndProc - identical shape to
+ * log_view_wnd_proc() above (same dark-themed, resizable secondary
+ * window "View Full" already uses for the Activity Log - direct
+ * request to match it exactly), just its own window class/controls/
+ * global handle so the two popups can be open side by side. */
+static LRESULT CALLBACK templog_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_ERASEBKGND: {
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            FillRect((HDC)wParam, &rc, g_brush_panel);
+            return 1;
+        }
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, COLOR_APP_TEXT);
+            SetBkColor(hdc, COLOR_APP_FIELD_BG);
+            return (LRESULT)g_brush_field;
+        }
+        case WM_SIZE: {
+            int w = LOWORD(lParam);
+            int h = HIWORD(lParam);
+            MoveWindow(GetDlgItem(hwnd, IDC_TEMPLOG_VIEW_EDIT), 12, 12, w - 24, h - 52, TRUE);
+            MoveWindow(GetDlgItem(hwnd, IDC_TEMPLOG_VIEW_CLOSE_BTN), w - 12 - 80, h - 32, 80, 24, TRUE);
+            return 0;
+        }
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDC_TEMPLOG_VIEW_CLOSE_BTN && HIWORD(wParam) == BN_CLICKED) {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        case WM_DESTROY:
+            g_templog_view_hwnd = NULL;
+            return 0;
+    }
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
+/* One parsed sensor_log.csv row, reduced to just what the Highest Temp
+ * Log view needs to sort/display - the peak of that row's 4 bay
+ * readings (skipping any bay with no reading that tick), which bay it
+ * came from, and the row's own timestamp column verbatim. */
+typedef struct {
+    char timestamp[24];
+    float peak_c;
+    int bay; /* 0-3 */
+} TempLogRow;
+
+static int templog_row_cmp(const void *a, const void *b) {
+    const TempLogRow *ra = (const TempLogRow *)a;
+    const TempLogRow *rb = (const TempLogRow *)b;
+    if (ra->peak_c > rb->peak_c) return -1;
+    if (ra->peak_c < rb->peak_c) return 1;
+    return 0;
+}
+
+/* IDC_HIGHEST_TEMP_LOG_BTN's handler - reads sensor_log.csv (the same
+ * weekly-rotating file "Open Log" already opens raw in Excel - see
+ * on_open_log_clicked()), parses every row's 4 bay temperatures, and
+ * shows them sorted highest-first in a dedicated popup, same "bigger
+ * window" pattern as on_log_view_clicked() - direct request to match
+ * "View Full" exactly. Scoped to whatever's currently in the CSV,
+ * which is at most the current week's worth of readings -
+ * sensor_log_start_new_week() (sensor_log.c) truncates it back to
+ * just the header on each weekly rotation, so this view is never
+ * showing more than one week deep by construction, no separate date
+ * filtering needed here. */
+static void on_highest_temp_log_clicked(void) {
+    char path[MAX_PATH + 16];
+    HANDLE file;
+    DWORD size, read_bytes;
+    char *raw;
+    char *line;
+    TempLogRow *rows;
+    int row_count, row_cap;
+    char *buf;
+    size_t buf_cap, buf_len;
+    int i;
+    RECT screen_rc;
+    int win_w = 700, win_h = 550;
+    int x, y;
+    HWND edit_ctrl, close_btn;
+    static bool class_registered;
+
+    if (g_templog_view_hwnd) {
+        SetForegroundWindow(g_templog_view_hwnd);
+        return;
+    }
+
+    get_sensor_log_path(path);
+    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        ui_show_warning("No sensor log yet - it's written a few seconds after the first sensor reading");
+        return;
+    }
+    size = GetFileSize(file, NULL);
+    raw = (char *)malloc((size_t)size + 1);
+    if (!raw) {
+        CloseHandle(file);
+        ui_show_warning("Could not open the Highest Temp Log (out of memory)");
+        return;
+    }
+    if (!ReadFile(file, raw, size, &read_bytes, NULL)) {
+        read_bytes = 0;
+    }
+    CloseHandle(file);
+    raw[read_bytes] = '\0';
+
+    /* Skip the header row, then parse each data row: timestamp field,
+     * then 4 temperature fields (humidity fields after them are never
+     * needed here). A field left blank (no reading that unit that
+     * tick - see sensor_log_append_row()) is just skipped, not treated
+     * as 0.0 - a real 0.0C reading should still be able to win. */
+    row_count = 0;
+    row_cap = 64;
+    rows = (TempLogRow *)malloc(sizeof(TempLogRow) * (size_t)row_cap);
+    line = strchr(raw, '\n');
+    line = line ? line + 1 : raw + lstrlenA(raw);
+    while (*line && rows) {
+        char *line_end = strchr(line, '\n');
+        char row_buf[256];
+        int row_len = (int)((line_end ? line_end : raw + lstrlenA(raw)) - line);
+        char *field[5];
+        int fi;
+        char *p;
+        bool have_peak = false;
+        float peak = 0.0f;
+        int peak_bay = 0;
+
+        if (row_len <= 0 || row_len >= (int)sizeof(row_buf)) {
+            line = line_end ? line_end + 1 : line + lstrlenA(line);
+            continue;
+        }
+        memcpy(row_buf, line, (size_t)row_len);
+        row_buf[row_len] = '\0';
+        if (row_buf[row_len - 1] == '\r') {
+            row_buf[row_len - 1] = '\0';
+        }
+
+        p = row_buf;
+        field[0] = p;
+        for (fi = 1; fi < 5 && p; fi++) {
+            p = strchr(p, ',');
+            if (p) {
+                *p = '\0';
+                p++;
+                field[fi] = p;
+            }
+        }
+        if (fi == 5) {
+            for (fi = 1; fi < 5; fi++) {
+                if (field[fi][0] != '\0') {
+                    float v = (float)atof(field[fi]);
+                    if (!have_peak || v > peak) {
+                        peak = v;
+                        peak_bay = fi - 1;
+                        have_peak = true;
+                    }
+                }
+            }
+            if (have_peak) {
+                if (row_count >= row_cap) {
+                    TempLogRow *grown;
+                    row_cap *= 2;
+                    grown = (TempLogRow *)realloc(rows, sizeof(TempLogRow) * (size_t)row_cap);
+                    if (!grown) {
+                        free(rows);
+                        rows = NULL;
+                    } else {
+                        rows = grown;
+                    }
+                }
+                if (rows) {
+                    lstrcpynA(rows[row_count].timestamp, field[0], (int)sizeof(rows[row_count].timestamp));
+                    rows[row_count].peak_c = peak;
+                    rows[row_count].bay = peak_bay;
+                    row_count++;
+                }
+            }
+        }
+        line = line_end ? line_end + 1 : line + lstrlenA(line);
+    }
+    free(raw);
+
+    if (!rows || row_count == 0) {
+        free(rows);
+        ui_show_warning("No sensor log entries yet - it's written a few seconds after the first sensor reading");
+        return;
+    }
+    qsort(rows, (size_t)row_count, sizeof(TempLogRow), templog_row_cmp);
+
+    buf_cap = 4096;
+    buf = (char *)malloc(buf_cap);
+    buf_len = 0;
+    if (buf) {
+        buf[0] = '\0';
+    }
+    for (i = 0; i < row_count && buf; i++) {
+        char line_txt[64];
+        size_t line_len;
+        wsprintfA(line_txt, "%s   %d.%dC   BAY%d", rows[i].timestamp,
+                  (int)rows[i].peak_c, (int)(rows[i].peak_c * 10) % 10, rows[i].bay + 1);
+        line_len = (size_t)lstrlenA(line_txt);
+        while (buf_len + line_len + 3 > buf_cap) {
+            char *grown;
+            buf_cap *= 2;
+            grown = (char *)realloc(buf, buf_cap);
+            if (!grown) {
+                free(buf);
+                buf = NULL;
+                break;
+            }
+            buf = grown;
+        }
+        if (!buf) break;
+        lstrcpynA(buf + buf_len, line_txt, (int)(buf_cap - buf_len));
+        buf_len += line_len;
+        buf[buf_len++] = '\r';
+        buf[buf_len++] = '\n';
+        buf[buf_len] = '\0';
+    }
+    free(rows);
+    if (!buf) {
+        ui_show_warning("Could not open the Highest Temp Log (out of memory)");
+        return;
+    }
+
+    if (!class_registered) {
+        WNDCLASSEXA wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = templog_view_wnd_proc;
+        wc.hInstance = g_hinst;
+        wc.hCursor = LoadCursorA(NULL, MAKEINTRESOURCEA(32512)); /* IDC_ARROW */
+        wc.lpszClassName = "ECMTempLogViewWnd";
+        RegisterClassExA(&wc);
+        class_registered = true;
+    }
+
+    {
+        RECT win_rc = { 0, 0, win_w, win_h };
+        AdjustWindowRectEx(&win_rc, WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME, FALSE, 0);
+
+        SystemParametersInfoA(SPI_GETWORKAREA, 0, &screen_rc, 0);
+        x = screen_rc.left + ((screen_rc.right - screen_rc.left) - (win_rc.right - win_rc.left)) / 2;
+        y = screen_rc.top + ((screen_rc.bottom - screen_rc.top) - (win_rc.bottom - win_rc.top)) / 2;
+
+        g_templog_view_hwnd = CreateWindowExA(0, "ECMTempLogViewWnd", "Highest Temp Log - This Week",
+                                               WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+                                               x, y, win_rc.right - win_rc.left, win_rc.bottom - win_rc.top,
+                                               g_hwnd, NULL, g_hinst, NULL);
+    }
+    if (!g_templog_view_hwnd) {
+        free(buf);
+        return;
+    }
+
+    edit_ctrl = CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", buf,
+                                 WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
+                                 ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | ES_AUTOHSCROLL,
+                                 12, 12, win_w - 24, win_h - 52, g_templog_view_hwnd,
+                                 (HMENU)(INT_PTR)IDC_TEMPLOG_VIEW_EDIT, g_hinst, NULL);
+    if (edit_ctrl) {
+        SendMessageA(edit_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
+    }
+    close_btn = CreateWindowExA(0, "BUTTON", "Close",
+                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                 win_w - 12 - 80, win_h - 32, 80, 24, g_templog_view_hwnd,
+                                 (HMENU)(INT_PTR)IDC_TEMPLOG_VIEW_CLOSE_BTN, g_hinst, NULL);
+    if (close_btn) {
+        SendMessageA(close_btn, WM_SETFONT, (WPARAM)g_font, TRUE);
+    }
+
+    free(buf);
+    ShowWindow(g_templog_view_hwnd, SW_SHOW);
+    SetFocus(edit_ctrl);
+}
+
 /* IDC_LOG_VIEW_BTN's handler - a bigger, dedicated window showing the
  * whole Activity Log as one scrollable block instead of the small
  * embedded listbox (direct request: "a full view dialog logs"). A
@@ -3226,6 +3531,25 @@ static void on_open_all_clicked(void) {
     }
 }
 
+/* Summary card's Reset to Default - every channel back to its true
+ * factory default (mode White Noise, output off - matches
+ * channels_init()'s own values), sent as real commands the same way
+ * Close All/Open All above do, not a silent local-only reset. Runs
+ * regardless of kill switch trips or Bulk Actions' selection - a
+ * rack-wide action like Close All, not a selection-based one. Also
+ * resets each card's own mode combo back to White Noise (index 0) so
+ * it reads as "what was just sent", matching a fresh card's own
+ * initial selection in add_channel_card(). */
+static void on_reset_to_default_clicked(void) {
+    int i;
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        channel_set_mode(i, PROTO_MODE_WHITE_NOISE);
+        channel_turn_output_off(i);
+        SendMessageA(GetDlgItem(g_hwnd, channel_mode_id(i)), CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
+    }
+    log_add_status_change("Reset to Default: every channel set to White Noise, OFF");
+}
+
 static void bulk_apply_level(int level) {
     int i;
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -3568,14 +3892,18 @@ static void add_channel_card(HWND hwnd, int index) {
         int half_bw = channel_bandwidth_mhz(index) / 2;
         HWND freq_ctrl;
         wsprintfA(freq_label, "%d-%d MHz", freq - half_bw, freq + half_bw);
-        /* x+90..x+238, right-aligned - shifted left off the gauge column
-         * and narrowed so it ends before the selection checkbox at
-         * x+248 instead of overlapping/hiding it - direct complaint.
-         * Widened to x+238 to track the gauge column's own widening
-         * (right-aligned text actually moves into the freed space,
-         * unlike a left-aligned field). */
-        freq_ctrl = add_ctrl(hwnd, "STATIC", freq_label, SS_RIGHT | SS_NOPREFIX,
-                              x + 90, y + 8, 148, 14, channel_freq_lbl_id(index));
+        /* Left-aligned right next to the "Unit N" header (which ends at
+         * x+84), same line - direct request, replacing the old
+         * right-aligned x+90..x+238 box. That box's right edge sat only
+         * ~10px clear of the selection checkbox (x+CARD_W-24) at
+         * CARD_W's own minimum (272) - fine at the card's usual wider
+         * runtime size, but tight enough to actually overlap/get
+         * covered by the checkbox at smaller widths (direct report).
+         * Anchored to the header's own fixed left-side position instead
+         * of the checkbox's card-width-relative one, this can't
+         * collide with it at any card width the grid ever produces. */
+        freq_ctrl = add_ctrl(hwnd, "STATIC", freq_label, SS_LEFT | SS_NOPREFIX,
+                              x + 88, y + 8, 110, 14, channel_freq_lbl_id(index));
         if (freq_ctrl) {
             SendMessageA(freq_ctrl, WM_SETFONT, (WPARAM)g_small_font, TRUE);
         }
@@ -4964,11 +5292,21 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1025 + AMBIENT_X_SHIFT, 58, 64, 18, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1097 + AMBIENT_X_SHIFT, 58, 72, 18, IDC_SENSOR_CONNECT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1025 + AMBIENT_X_SHIFT, 82, 130, 16, IDC_SENSOR_STATUS_LBL);
-    /* Kill Switch status/trip/reset and Open Log moved out of here into
-     * their own small panel above Spectrum - see g_quick_panel below.
-     * The Avg pill moved out too - now the large AVG TEMP block on the
-     * Summary card's left side (see IDC_SENSOR_TEMP_LBL below, mode_x's
-     * comment). */
+    /* Opens the Highest Temp Log popup (on_highest_temp_log_clicked())
+     * below the rest of this panel's own controls - direct request,
+     * "list highest temp logs below [Ambient Temperature]". Comfortable
+     * room for it here: this panel's lowest other control (the status
+     * label just above) ends at y=98, and the header panel itself
+     * doesn't end until y=186 (HEADER_H=180, panel starts at y=6). */
+    add_ctrl(hwnd, "BUTTON", "Highest Temps", BS_OWNERDRAW | WS_TABSTOP,
+             1025 + AMBIENT_X_SHIFT, 110, 140, 24, IDC_HIGHEST_TEMP_LOG_BTN);
+    /* Kill Switch status/trip/reset moved out into each card's own
+     * status line. The Avg pill and the Command Panel (Close All/Open
+     * All/Open Log/Icon/Reset to Default) both moved out too - the
+     * Avg pill is now the large AVG TEMP block, Commands is now its
+     * own row, both on the Summary card (see IDC_SENSOR_TEMP_LBL
+     * below, mode_x's comment, and the Summary card section further
+     * down). */
 
     /* The heatmap fills the gap between Ambient Temperature (left) and
      * Bulk Actions (right), so it reads as centered in the header row -
@@ -4982,31 +5320,6 @@ static void build_controls(HWND hwnd) {
      * Bulk Actions' leftmost control (470+BULK_X_SHIFT=1472) minus that
      * same 40px gap. */
     g_sensor_heatmap = add_sensor_heatmap(hwnd, HEATMAP_LEFT, 14, HEATMAP_RIGHT - HEATMAP_LEFT, 150);
-
-    /* Command Panel: 4 buttons, 1 row, max height - direct request/
-     * correction. Kill Switch came out of this panel entirely (manual
-     * trip/reset still works per-channel via each card's own status
-     * line - see IDC_CH_STATUS_OFFSET's comment in resource.h - this
-     * just removes the rack-wide button here); Light Mode moved to the
-     * Summary card earlier. Each button gets its own fill color now
-     * too (see WM_DRAWITEM's IDC_CLOSE_ALL_BTN/IDC_OPEN_ALL_BTN/
-     * IDC_OPEN_LOG_BTN/IDC_CMD_CHANGE_ICON_BTN cases) instead of all 4
-     * sharing the generic accent blue. */
-    g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
-    /* "Commands" - plain static label, not a button (direct request),
-     * left of the 4 buttons. Buttons narrowed 92->76 and shifted right
-     * to make real room for it (checked pixel-by-pixel against the
-     * panel's actual rendered right edge before landing on these
-     * numbers - a same-width-but-shifted first attempt ran the last
-     * button past the panel's own edge). "Change Icon" renamed to
-     * "Icon" - the picture glyph already says what it does, and the
-     * shorter label is what let that button narrow without its text
-     * clipping. */
-    g_quick_panel_label = add_header(hwnd, "Commands", 22, CONTENT_TOP + 16, 76, 16);
-    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 108, CONTENT_TOP + 6, 76, 36, IDC_CLOSE_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 192, CONTENT_TOP + 6, 76, 36, IDC_OPEN_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 276, CONTENT_TOP + 6, 76, 36, IDC_OPEN_LOG_BTN);
-    add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP, 360, CONTENT_TOP + 6, 76, 36, IDC_CMD_CHANGE_ICON_BTN);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -5072,20 +5385,42 @@ static void build_controls(HWND hwnd) {
     g_summary_panel = add_panel(hwnd, GRID_LEFT, SUMMARY_PANEL_Y, CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT, SUMMARY_PANEL_H);
     g_summary_header_icon = add_header_icon(hwnd, GRID_LEFT + 12, SUMMARY_PANEL_Y + 10, ICON_WAVE);
     g_summary_header_lbl = add_header(hwnd, "Summary", GRID_LEFT + 30, SUMMARY_PANEL_Y + 10, 188, 18);
-    /* Two content blocks so far, left (AVG TEMP) and right (Mode) -
-     * same caption-row-above-a-MODE_ICON_SIZE-square-content treatment
-     * on both sides, direct request that they "sync well" since more
-     * content is planned for this card later. No more "Coming soon"
-     * placeholder - there's real content now. */
+    /* Command Panel, relocated onto the Summary card (direct request) -
+     * a 2x2 grid (Close All/Open All on row 1, Open Log/Icon on row 2 -
+     * direct correction, replacing an earlier single-row version) with
+     * Reset to Default (rack-wide, every channel back to its factory
+     * default - see on_reset_to_default_clicked()) spanning both
+     * columns below it. "Commands" is the leftmost column of the same
+     * content row as AVG TEMP/Highest Temp Today/Mode below (direct
+     * correction - it wasn't lining up with them before), so AVG TEMP
+     * now starts after COMMANDS_COL_W + COMMANDS_COL_GAP instead of
+     * right at GRID_LEFT + 12. */
+    g_quick_panel_label = add_ctrl(hwnd, "STATIC", "Commands", SS_CENTER | SS_NOPREFIX,
+                                    GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, 0);
+    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, IDC_CLOSE_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, IDC_OPEN_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, IDC_OPEN_LOG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, IDC_CMD_CHANGE_ICON_BTN);
+    add_ctrl(hwnd, "BUTTON", "Reset to Default", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, 36, IDC_RESET_TO_DEFAULT_BTN);
+    /* AVG TEMP/Mode/Highest Temp Today's shared content row - Commands
+     * (above) is now this same row's leftmost column, so AVG TEMP
+     * starts after it instead of at GRID_LEFT + 12 directly. Same
+     * caption-row-above-a-MODE_ICON_SIZE-square-content treatment on
+     * both, direct request that they "sync well". */
     g_avg_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "AVG TEMP", SS_CENTER | SS_NOPREFIX,
-                                       GRID_LEFT + 12, SUMMARY_PANEL_Y + 40, AVG_TEMP_BLOCK_W, 16, IDC_AVG_TEMP_CAPTION_LBL);
-    g_avg_temp_block = add_pill(hwnd, "", GRID_LEFT + 12, SUMMARY_PANEL_Y + 60,
+                                       GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP, SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, AVG_TEMP_BLOCK_W, 16, IDC_AVG_TEMP_CAPTION_LBL);
+    g_avg_temp_block = add_pill(hwnd, "", GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y,
                                  AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, IDC_SENSOR_TEMP_LBL, (WNDPROC)avg_temp_block_subclass_proc);
     g_mode_caption_lbl = add_ctrl(hwnd, "STATIC", "Mode", SS_CENTER | SS_NOPREFIX,
-                                   CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 40,
+                                   CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y,
                                    MODE_ICON_SIZE, 16, IDC_MODE_CAPTION_LBL);
     g_mode_toggle_btn = add_ctrl(hwnd, "BUTTON", g_light_mode ? "Dark Mode" : "Light Mode", BS_OWNERDRAW | WS_TABSTOP,
-                                  CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 60,
+                                  CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y,
                                   MODE_ICON_SIZE, MODE_ICON_SIZE, IDC_THEME_TOGGLE_BTN);
     /* 3rd content block, centered between the two above - not on the
      * summary card's full width, which would let a wider AVG TEMP or
@@ -5095,12 +5430,15 @@ static void build_controls(HWND hwnd) {
      * else in this card; relayout_for_size() recomputes against the
      * real client_w once the window's actual size is known. */
     g_highest_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "Highest Temp Today", SS_CENTER | SS_NOPREFIX,
-                                           (GRID_LEFT + 12 + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
-                                           SUMMARY_PANEL_Y + 40, HIGHEST_TEMP_BLOCK_W, 16, IDC_HIGHEST_TEMP_CAPTION_LBL);
+                                           (GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
+                                           SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, HIGHEST_TEMP_BLOCK_W, 16, IDC_HIGHEST_TEMP_CAPTION_LBL);
     g_highest_temp_block = add_pill(hwnd, "",
-                                     (GRID_LEFT + 12 + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
-                                     SUMMARY_PANEL_Y + 60, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE,
+                                     (GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
+                                     SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE,
                                      IDC_HIGHEST_TEMP_BLOCK, (WNDPROC)highest_temp_block_subclass_proc);
+    if (g_quick_panel_label && g_header_font) {
+        SendMessageA(g_quick_panel_label, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
+    }
     if (g_avg_temp_caption_lbl && g_header_font) {
         SendMessageA(g_avg_temp_caption_lbl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
     }
@@ -5210,7 +5548,7 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(70), SX(130), SY(14));
     PLACE(GetDlgItem(hwnd, channel_uptime_id(index)), x + SX(8), y + SY(86), SX(130), SY(12));
 
-    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(90), y + SY(8), SX(148), SY(14));
+    PLACE(GetDlgItem(hwnd, channel_freq_lbl_id(index)), x + SX(88), y + SY(8), SX(110), SY(14));
     PLACE(GetDlgItem(hwnd, channel_track_id(index)), x + SX(148), y + SY(24), SX(40), SY(72));
     PLACE(GetDlgItem(hwnd, channel_lbl_high_id(index)), x + SX(194), y + SY(24), SX(44), SY(14));
     PLACE(GetDlgItem(hwnd, channel_lbl_medium_id(index)), x + SX(194), y + SY(42), SX(44), SY(14));
@@ -5334,12 +5672,6 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
      * header panel it's sitting in also moves position (SIDEBAR_X, 6
      * never actually change), not because it resizes with the window. */
     MoveWindow(g_sensor_heatmap, HEATMAP_LEFT, 14, HEATMAP_RIGHT - HEATMAP_LEFT, 150, FALSE);
-    MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
-    MoveWindow(g_quick_panel_label, 22, CONTENT_TOP + 16, 76, 16, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 108, CONTENT_TOP + 6, 76, 36, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 192, CONTENT_TOP + 6, 76, 36, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 276, CONTENT_TOP + 6, 76, 36, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), 360, CONTENT_TOP + 6, 76, 36, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
 
     /* Summary card's real position - below the grid's actual (dynamic,
@@ -5363,7 +5695,8 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
          * would start. This formula keeps equal breathing room on both
          * sides of Highest Temp regardless of how wide either
          * neighbor's block is. */
-        int avg_right = grid_left + 12 + AVG_TEMP_BLOCK_W;
+        int avg_x = grid_left + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP;
+        int avg_right = avg_x + AVG_TEMP_BLOCK_W;
         int highest_x = (avg_right + mode_x) / 2 - HIGHEST_TEMP_BLOCK_W / 2;
         if (summary_h < MIN_SUMMARY_H) {
             summary_h = MIN_SUMMARY_H;
@@ -5371,12 +5704,18 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         MoveWindow(g_summary_panel, grid_left, summary_y, summary_w, summary_h, FALSE);
         MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
         MoveWindow(g_summary_header_lbl, grid_left + 30, summary_y + 10, 188, 18, FALSE);
-        MoveWindow(g_avg_temp_caption_lbl, grid_left + 12, summary_y + 40, AVG_TEMP_BLOCK_W, 16, FALSE);
-        MoveWindow(g_avg_temp_block, grid_left + 12, summary_y + 60, AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
-        MoveWindow(g_highest_temp_caption_lbl, highest_x, summary_y + 40, HIGHEST_TEMP_BLOCK_W, 16, FALSE);
-        MoveWindow(g_highest_temp_block, highest_x, summary_y + 60, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
-        MoveWindow(g_mode_caption_lbl, mode_x, summary_y + 40, MODE_ICON_SIZE, 16, FALSE);
-        MoveWindow(g_mode_toggle_btn, mode_x, summary_y + 60, MODE_ICON_SIZE, MODE_ICON_SIZE, FALSE);
+        MoveWindow(g_quick_panel_label, grid_left + 12, summary_y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_RESET_TO_DEFAULT_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, 36, FALSE);
+        MoveWindow(g_avg_temp_caption_lbl, avg_x, summary_y + SUMMARY_CONTENT_Y, AVG_TEMP_BLOCK_W, 16, FALSE);
+        MoveWindow(g_avg_temp_block, avg_x, summary_y + SUMMARY_CONTENT_BLOCK_Y, AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
+        MoveWindow(g_highest_temp_caption_lbl, highest_x, summary_y + SUMMARY_CONTENT_Y, HIGHEST_TEMP_BLOCK_W, 16, FALSE);
+        MoveWindow(g_highest_temp_block, highest_x, summary_y + SUMMARY_CONTENT_BLOCK_Y, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
+        MoveWindow(g_mode_caption_lbl, mode_x, summary_y + SUMMARY_CONTENT_Y, MODE_ICON_SIZE, 16, FALSE);
+        MoveWindow(g_mode_toggle_btn, mode_x, summary_y + SUMMARY_CONTENT_BLOCK_Y, MODE_ICON_SIZE, MODE_ICON_SIZE, FALSE);
     }
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
@@ -5749,6 +6088,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_open_log_clicked();
                 return 0;
             }
+            if (id == IDC_HIGHEST_TEMP_LOG_BTN && code == BN_CLICKED) {
+                on_highest_temp_log_clicked();
+                return 0;
+            }
             if (id == IDC_THEME_TOGGLE_BTN && code == BN_CLICKED) {
                 on_theme_toggle_clicked();
                 return 0;
@@ -5812,6 +6155,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN, btn_rc.left, btn_rc.bottom, 0, hwnd, NULL);
                 PostMessageA(hwnd, WM_NULL, 0, 0); /* MSDN-recommended after TrackPopupMenu */
                 DestroyMenu(menu);
+                return 0;
+            }
+            if (id == IDC_RESET_TO_DEFAULT_BTN && code == BN_CLICKED) {
+                on_reset_to_default_clicked();
                 return 0;
             }
             if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
@@ -6297,6 +6644,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         fill = g_brush_accent;
                     } else if (dis->CtlID == IDC_CMD_CHANGE_ICON_BTN) {
                         fill = g_brush_level_medium; /* orange - distinct from the other 3 */
+                    } else if (dis->CtlID == IDC_RESET_TO_DEFAULT_BTN) {
+                        fill = g_brush_level_off; /* muted gray - a neutral "clear" action, distinct from the other 4 */
                     }
                     {
                         HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));

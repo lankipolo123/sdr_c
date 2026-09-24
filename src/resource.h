@@ -56,6 +56,12 @@
  * one stays as-is; this is an additional, always-visible way to reach
  * the same feature from the Command Panel. */
 #define IDC_CMD_CHANGE_ICON_BTN  1069
+/* Rack-wide reset - every channel back to its true factory default
+ * (mode White Noise, output off - see channels_init()'s own defaults),
+ * sent as a real command to each one, not just a local state reset.
+ * Direct request, added alongside the rest of the Command Panel's
+ * move onto the Summary card. See on_reset_to_default_clicked(). */
+#define IDC_RESET_TO_DEFAULT_BTN 1078
 /* Caption above the Summary card's Mode toggle (IDC_THEME_TOGGLE_BTN,
  * relocated there - see its own WM_DRAWITEM comment in main.c). Right-
  * anchored to the card's own right edge like the toggle itself, so it
@@ -74,6 +80,17 @@
  * highest_temp_block_subclass_proc() in main.c. */
 #define IDC_HIGHEST_TEMP_CAPTION_LBL 1072
 #define IDC_HIGHEST_TEMP_BLOCK       1073
+/* Ambient Temperature panel's own log viewer - every row ever appended
+ * to sensor_log.csv this week (it rotates weekly - see sensor_log.c's
+ * own header comment), sorted highest-temperature-first instead of
+ * chronologically. Same "bigger dedicated popup window" pattern as
+ * IDC_LOG_VIEW_BTN's Activity Log viewer - direct request to match it
+ * exactly - just its own window/controls so the two viewers can be
+ * open at once. See on_highest_temp_log_clicked()/
+ * templog_view_wnd_proc() in main.c. */
+#define IDC_HIGHEST_TEMP_LOG_BTN    1074
+#define IDC_TEMPLOG_VIEW_EDIT       1075
+#define IDC_TEMPLOG_VIEW_CLOSE_BTN  1076
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
