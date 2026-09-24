@@ -42,7 +42,18 @@
  * call), so this also takes it back to its original ~430px size,
  * while CARD_W still fits inside 1660 with room to spare, see
  * GRID_RIGHT's own comment). */
-#define CLIENT_WIDTH  1660
+#define CLIENT_WIDTH  1764 /* was 1660 - grown by the same 104px COMMANDS_COL_W
+                             * grew by (176->280). This is the window's
+                             * enforced MINIMUM width floor (WM_GETMINMAXINFO)
+                             * - widening Commands shifted AVG TEMP/Highest
+                             * Temp Today/Mode all 104px further right without
+                             * this floor growing to match, so a real window
+                             * sized near the old 1660 minimum genuinely ran
+                             * out of room and Mode's icon got clipped against
+                             * the panel's own right edge - direct report,
+                             * confirmed on real hardware, never caught in
+                             * this sandbox since testing always force-resizes
+                             * to 1920x1200, well above either floor. */
 #define CLIENT_HEIGHT 794 /* was 702, then 770 - grown by the Quick Actions
                             * panel's own footprint (QUICK_PANEL_H + CARD_GAP)
                             * above Spectrum, so the minimum window size still
@@ -276,7 +287,11 @@ static COLORREF COLOR_APP_SHADOW;
                              * card. Glyph dimensions in WM_DRAWITEM
                              * scale together with this, same reasoning
                              * as the 64->112 jump. */
-#define MODE_ICON_MARGIN 12
+#define MODE_ICON_MARGIN 60 /* was 12 - direct report of the icon getting
+                              * clipped against the panel's own right edge;
+                              * a lot more clearance here regardless of the
+                              * exact cause, since this is strictly safer
+                              * either way (mode_x just moves left). */
 
 /* Summary card's own internal row layout, top to bottom: the header
  * (icon+"Summary", unchanged, y+10) - then ONE content row, Commands
