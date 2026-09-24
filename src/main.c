@@ -290,12 +290,18 @@ static COLORREF COLOR_APP_SHADOW;
  * spanning both columns below it, all within COMMANDS_COL_W so AVG
  * TEMP starts right after it (see avg_right's own comment further
  * down, which already recenters Highest Temp off of AVG TEMP's real
- * start - inserting a column before it needed no other change there). */
+ * start - inserting a column before it needed no other change there).
+ * 3 rows of SUMMARY_CMD_ROW_H (64) with 14px gaps fill the exact same
+ * MODE_ICON_SIZE (220) height as the pill/icon blocks below its own
+ * caption (64*3 + 14*2 = 220) - direct correction, the buttons were
+ * still the original single-row panel's 36px tall, leaving Commands
+ * looking short with dead space under it next to the other 3 columns. */
 #define COMMANDS_COL_W 176
 #define COMMANDS_COL_GAP 40
+#define SUMMARY_CMD_ROW_H 64
 #define SUMMARY_CMD_ROW1_Y 0
-#define SUMMARY_CMD_ROW2_Y 44
-#define SUMMARY_CMD_RESET_Y 88
+#define SUMMARY_CMD_ROW2_Y 78
+#define SUMMARY_CMD_RESET_Y 156
 #define SUMMARY_CONTENT_Y 40
 #define SUMMARY_CONTENT_BLOCK_Y 60
 
@@ -5357,15 +5363,15 @@ static void build_controls(HWND hwnd) {
     g_quick_panel_label = add_ctrl(hwnd, "STATIC", "Commands", SS_CENTER | SS_NOPREFIX,
                                     GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, 0);
     add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, IDC_CLOSE_ALL_BTN);
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, IDC_CLOSE_ALL_BTN);
     add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, IDC_OPEN_ALL_BTN);
+             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, IDC_OPEN_ALL_BTN);
     add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, IDC_OPEN_LOG_BTN);
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, IDC_OPEN_LOG_BTN);
     add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, IDC_CMD_CHANGE_ICON_BTN);
+             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, IDC_CMD_CHANGE_ICON_BTN);
     add_ctrl(hwnd, "BUTTON", "Reset to Default", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, 36, IDC_RESET_TO_DEFAULT_BTN);
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, SUMMARY_CMD_ROW_H, IDC_RESET_TO_DEFAULT_BTN);
     /* AVG TEMP/Mode/Highest Temp Today's shared content row - Commands
      * (above) is now this same row's leftmost column, so AVG TEMP
      * starts after it instead of at GRID_LEFT + 12 directly. Same
@@ -5664,11 +5670,11 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
         MoveWindow(g_summary_header_lbl, grid_left + 30, summary_y + 10, 188, 18, FALSE);
         MoveWindow(g_quick_panel_label, grid_left + 12, summary_y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, 36, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, 36, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_RESET_TO_DEFAULT_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, 36, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_RESET_TO_DEFAULT_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, SUMMARY_CMD_ROW_H, FALSE);
         MoveWindow(g_avg_temp_caption_lbl, avg_x, summary_y + SUMMARY_CONTENT_Y, AVG_TEMP_BLOCK_W, 16, FALSE);
         MoveWindow(g_avg_temp_block, avg_x, summary_y + SUMMARY_CONTENT_BLOCK_Y, AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
         MoveWindow(g_highest_temp_caption_lbl, highest_x, summary_y + SUMMARY_CONTENT_Y, HIGHEST_TEMP_BLOCK_W, 16, FALSE);
