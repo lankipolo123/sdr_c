@@ -61,6 +61,19 @@
  * anchored to the card's own right edge like the toggle itself, so it
  * needs its own ID for relayout_for_size() to reposition on resize. */
 #define IDC_MODE_CAPTION_LBL     1070
+/* Caption above the Summary card's AVG TEMP block (IDC_SENSOR_TEMP_LBL,
+ * relocated there from the old Ambient Temperature pill - see
+ * avg_temp_block_subclass_proc() in main.c). Left-anchored, same row
+ * and same g_header_font/COLOR_APP_HEADER treatment as IDC_MODE_CAPTION_LBL
+ * on the opposite side - direct request that the two "sync well as
+ * contents" of the same card, sized/styled to match. */
+#define IDC_AVG_TEMP_CAPTION_LBL 1071
+/* Summary card's 3rd content block, centered between AVG TEMP and Mode -
+ * running max across all 4 bays since local midnight, not just the
+ * current live readings - see update_highest_temp_today()/
+ * highest_temp_block_subclass_proc() in main.c. */
+#define IDC_HIGHEST_TEMP_CAPTION_LBL 1072
+#define IDC_HIGHEST_TEMP_BLOCK       1073
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021

@@ -244,13 +244,31 @@ static COLORREF COLOR_APP_SHADOW;
  * more content is planned to join it there. Right-anchored to the
  * card's own right edge, same margin convention as Open Log/its
  * caption in the Command Panel. */
-#define MODE_ICON_SIZE 112 /* was 64 - direct request, "the icon of light
-                             * mode [should] go larger" - both the button's
-                             * own bounding box AND the glyph's hardcoded
-                             * pixel dimensions in WM_DRAWITEM scale
-                             * together (growing just the box would only
-                             * add padding around the same-size glyph). */
+#define MODE_ICON_SIZE 220 /* was 64, then 112 - still "too small" both
+                             * times (direct feedback) - the whole white
+                             * space around the icon in the Summary card
+                             * was meant to BE the button, not padding
+                             * around a small icon inside a mostly-empty
+                             * card. Glyph dimensions in WM_DRAWITEM
+                             * scale together with this, same reasoning
+                             * as the 64->112 jump. */
 #define MODE_ICON_MARGIN 12
+
+/* Highest Temp Today block's own width - wider than MODE_ICON_SIZE
+ * since "<temp>C - BAY<N>" is a much longer string than AVG TEMP's
+ * bare number, even at the smaller g_big_font. Height stays
+ * MODE_ICON_SIZE so its row still lines up with the other two. */
+#define HIGHEST_TEMP_BLOCK_W 460
+
+/* AVG TEMP block's own width - direct report: "24.6C" at the enlarged
+ * g_huge_font (-84, see its own comment) no longer fit inside
+ * MODE_ICON_SIZE (220), clipping off the left edge (centered text
+ * whose measured width exceeds its box centers into negative x, and a
+ * control's own DC clips drawing to its own bounds regardless of what
+ * the app tries to paint past them). Left-anchored at GRID_LEFT + 12
+ * same as before, just wider - plenty of clearance before the
+ * Highest Temp block, which is centered independently. */
+#define AVG_TEMP_BLOCK_W 380
 
 #define SIDEBAR_X 10
 #define SIDEBAR_W 430 /* was 400 - grew along with CARD_W once the signal-
@@ -260,16 +278,16 @@ static COLORREF COLOR_APP_SHADOW;
                         * minimum value now - see sidebar_width_for(). */
 #define SIDEBAR_W_MAX 600
 
-/* Command Panel, above Spectrum - two compact rows of icon buttons: row
- * 1 Close All/Open All/Kill Switch/Reset, row 2 Open Log/Change Icon.
- * No live status caption anymore (direct request - "Kill Switch:
- * Armed" text came out, that state was already logged to the Activity
- * Log on every trip/reset anyway, see log_add_status_change()'s call
- * sites, so removing the label loses no information). Light Mode
- * moved out of this panel too (direct request - going into the
- * Summary card instead, once that's built out - see GRID_BOTTOM below
- * for where that card actually lives). */
-#define QUICK_PANEL_H 72
+/* Command Panel, above Spectrum - 4 buttons, 1 row, max height (direct
+ * request/correction): Close All, Open All, Open Log, Change Icon.
+ * Kill Switch and its "Kill Switch: Armed" status caption both came
+ * out of this panel entirely (manual trip/reset still works per-
+ * channel via each card's own status line; automatic rack-wide trip
+ * via check_kill_switch() is untouched either way, it never depended
+ * on this panel). Light Mode moved out earlier too - into the Summary
+ * card, once that's built out (see GRID_BOTTOM below for where that
+ * card actually lives). */
+#define QUICK_PANEL_H 48
 #define SIDEBAR_CONTENT_TOP (CONTENT_TOP + QUICK_PANEL_H + CARD_GAP)
 
 /* Bottom edge now tracks the window's own client height directly (see
@@ -300,6 +318,20 @@ static HFONT g_mono_font; /* fixed-width, for numeric instrument readouts -
 static HFONT g_small_font; /* smaller than g_font - the per-channel
                              * frequency range label, direct request
                              * after the default size ran wide/large */
+static HFONT g_huge_font; /* Summary card's AVG TEMP number - sized to
+                            * visually match the Mode icon's footprint,
+                            * direct request the two "sync well" as
+                            * content on the same card. Fixed-width for
+                            * the same digit-alignment reasoning as
+                            * g_mono_font, just much bigger. Bumped again
+                            * (direct request - "increase the text size
+                            * of avg temp number") past what the 3rd,
+                            * narrower Highest Temp block can also fit -
+                            * see g_big_font below for that one. */
+static HFONT g_big_font; /* Highest Temp Today's own number - the
+                           * original (smaller) g_huge_font size, kept
+                           * as its own font once g_huge_font itself
+                           * grew past what fits next to a bay label. */
 /* NULL = draw the built-in vector HelixDefender mark (the normal case).
  * Set by load_custom_logo() at startup (if branding.bmp exists next to
  * the .exe) or by browse_and_set_logo() (IDC_CHANGE_LOGO_BTN) - either
@@ -443,9 +475,25 @@ static HWND g_summary_header_icon; /* Same reposition-needs-its-own-handle
                                      * moves with the grid's actual height
                                      * too (see GRID_BOTTOM's comment). */
 static HWND g_summary_header_lbl;
-static HWND g_summary_placeholder_lbl;
 static HWND g_mode_caption_lbl; /* Right-anchored, needs its own handle to reposition - see MODE_ICON_SIZE's comment */
 static HWND g_mode_toggle_btn;
+static HWND g_avg_temp_caption_lbl; /* Left-anchored mirror of g_mode_caption_lbl/g_mode_toggle_btn - see avg_temp_block_subclass_proc() */
+static HWND g_avg_temp_block;
+static HWND g_highest_temp_caption_lbl; /* Centered between the two above - see highest_temp_block_subclass_proc() */
+static HWND g_highest_temp_block;
+/* Summary card's "Highest Temp Today" - a running max across all 4 bays
+ * since local midnight, not just whatever the 4 live readings happen to
+ * be on this exact tick (direct correction - "oh yeah Highest Temp
+ * TODAY", not "highest right now"). Rolls over on the first tick that
+ * sees a new local date, same "compare stored date, reset if it moved"
+ * idiom sensor_log_start_new_week() uses for its own weekly rotation -
+ * in-memory only, not persisted across an app restart (nothing asked
+ * for that yet). Updated by update_highest_temp_today(), read by
+ * highest_temp_block_subclass_proc(). */
+static bool g_highest_temp_today_valid;
+static float g_highest_temp_today_c;
+static int g_highest_temp_today_bay = -1;
+static WORD g_highest_temp_today_day, g_highest_temp_today_month, g_highest_temp_today_year;
 static HWND g_sidebar_panel;
 static HWND g_log_header_icon; /* "Activity Log" icon+label - pinned under
                                  * the Spectrum plot at a Y that moves with
@@ -1377,24 +1425,11 @@ static void create_theme_brushes(void) {
     build_dot_pattern_brush();
 }
 
-/* Which of the 6 confirmed bands a reading falls in - real safe/caution/
- * danger tiers for this hardware (direct request, not a generic spec):
- * <10 white, 10-15 green, 15-20 blue, 20-25 orange, 25-35 darker orange,
- * 35+ red. Used by the Avg pill's marker/readout. NOT used by the
- * heatmap (see vivid_thermal_color()'s comment for why a discrete band
- * function doesn't work there) - accepted tradeoff, direct request. */
-static COLORREF temp_band_color(float temp_c) {
-    if (temp_c < 10.0f) return RGB(255, 255, 255);
-    if (temp_c < 15.0f) return COLOR_APP_CONNECTED;
-    if (temp_c < 20.0f) return RGB(58, 133, 224);
-    if (temp_c < 25.0f) return RGB(224, 146, 34);
-    if (temp_c < 35.0f) return RGB(196, 110, 24);
-    return COLOR_APP_DISCONNECTED;
-}
-
-/* Continuous 5-stop version of temp_band_color()'s cool-to-hot hues
- * (green -> yellow -> orange -> darker orange -> red), for the heatmap
- * only. A discrete band function is the wrong tool there: 4 real bay
+/* Continuous 5-stop cool-to-hot hues
+ * (green -> yellow -> orange -> darker orange -> red) - originally for
+ * the heatmap only, now also the Summary card's AVG TEMP gradient text
+ * (avg_temp_block_subclass_proc). A discrete band function is the
+ * wrong tool for the heatmap specifically: 4 real bay
  * readings a couple degrees apart (the normal case) usually land in
  * the SAME band, so all 4 corners would get an identical color and the
  * "scan" would collapse into one flat fill - the exact bug this
@@ -1489,53 +1524,81 @@ static void alpha_fill_rect(HDC hdc, RECT r, COLORREF color, BYTE alpha) {
     DeleteDC(mem_dc);
 }
 
-/* A full pill (corner diameter = control height) filled with a
- * horizontal gradient from the dark field color into whatever color
- * the state is, clipped to the pill shape, then a thin matching
- * border and centered text on top. Shared by the sensor status pill
- * and the average-temperature pill below it.
- *
- * Text color is picked from the blend at the CENTER of the gradient
- * (roughly where the text itself sits), not hardcoded - temp_band_color()
- * returns pure white for cold readings, and near-white/light text on
- * top of that was invisible. Cheap perceptual luminance on the halfway
- * blend of field-bg and grad_to decides light-text-on-dark vs
- * dark-text-on-light. */
-static void paint_gradient_pill(HDC hdc, RECT rc, COLORREF grad_to, const char *text) {
-    HRGN clip;
-    int diameter = rc.bottom - rc.top;
-    HPEN pen, old_pen;
-    HFONT old_font;
-    COLORREF mid, text_color;
-    int luma;
+/* Summary card's AVG TEMP block - left side, mirroring the Mode icon on
+ * the right (same MODE_ICON_SIZE square footprint, same caption-above-
+ * content row, direct request that the two "sync well" as content on
+ * the same card). Direct correction - the gradient belongs on the
+ * TEXT itself, not the block background (first version had it
+ * backwards). Flat field-colored block, and the number's own glyph
+ * shapes get filled with a real green-to-red gradient: BeginPath/
+ * TextOutA/EndPath records the text's outline as the DC's current
+ * path, PathToRegion turns that into a clip region shaped exactly
+ * like the glyphs, then gradient_fill_rect paints through it - the
+ * same building block SetTextColor can't do (GDI text is always a
+ * single flat color otherwise). */
+static LRESULT CALLBACK avg_temp_block_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_ERASEBKGND) {
+        return 1;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc;
+        RECT rc;
+        char text[16];
+        int text_len;
+        float avg_c;
+        bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
+        HFONT old_font;
+        SIZE text_size;
+        int text_x, text_y;
+        HRGN text_rgn;
 
-    clip = CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, diameter, diameter);
-    SelectClipRgn(hdc, clip);
-    gradient_fill_rect(hdc, rc, COLOR_APP_FIELD_BG, grad_to, false);
-    SelectClipRgn(hdc, NULL);
-    DeleteObject(clip);
+        hdc = BeginPaint(hwnd, &ps);
+        GetClientRect(hwnd, &rc);
+        /* No block/border - blends straight into the panel behind it,
+         * same "icon only, no badge" treatment the Mode toggle got
+         * (direct correction - the two sides looked inconsistent with
+         * one boxed and one bare). */
+        FillRect(hdc, &rc, g_brush_panel);
 
-    pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-    old_pen = (HPEN)SelectObject(hdc, pen);
-    SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, diameter, diameter);
-    SelectObject(hdc, old_pen);
-    DeleteObject(pen);
+        if (has_avg) {
+            wsprintfA(text, "%d.%dC", (int)avg_c, (int)(avg_c * 10) % 10);
+        } else {
+            lstrcpynA(text, "-", (int)sizeof(text));
+        }
+        text_len = lstrlenA(text);
 
-    mid = RGB((GetRValue(COLOR_APP_FIELD_BG) + GetRValue(grad_to)) / 2,
-              (GetGValue(COLOR_APP_FIELD_BG) + GetGValue(grad_to)) / 2,
-              (GetBValue(COLOR_APP_FIELD_BG) + GetBValue(grad_to)) / 2);
-    luma = (GetRValue(mid) * 299 + GetGValue(mid) * 587 + GetBValue(mid) * 114) / 1000;
-    text_color = (luma > 150) ? RGB(20, 21, 23) : COLOR_APP_TEXT;
+        old_font = (HFONT)SelectObject(hdc, g_huge_font);
+        GetTextExtentPoint32A(hdc, text, text_len, &text_size);
+        text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
+        text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
 
-    SetBkMode(hdc, TRANSPARENT);
-    old_font = (HFONT)SelectObject(hdc, g_mono_font);
-    SetTextColor(hdc, text_color);
-    DrawTextA(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(hdc, old_font);
+        SetBkMode(hdc, TRANSPARENT);
+        BeginPath(hdc);
+        TextOutA(hdc, text_x, text_y, text, text_len);
+        EndPath(hdc);
+        text_rgn = PathToRegion(hdc);
+        if (text_rgn) {
+            SelectClipRgn(hdc, text_rgn);
+            gradient_fill_rect(hdc, rc, vivid_thermal_color(0.0f), vivid_thermal_color(1.0f), false);
+            SelectClipRgn(hdc, NULL);
+            DeleteObject(text_rgn);
+        }
+        SelectObject(hdc, old_font);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return CallWindowProcA(g_panel_orig_proc, hwnd, msg, wParam, lParam);
 }
 
-static LRESULT CALLBACK sensor_avg_pill_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+/* Summary card's 3rd content block, centered between AVG TEMP and Mode -
+ * "Highest Temp Today" (update_highest_temp_today()'s running max, not
+ * a live snapshot - see that function's own comment for why). Same
+ * bare-no-block, gradient-on-the-glyphs treatment as avg_temp_block_
+ * subclass_proc, just a smaller font (g_big_font, not g_huge_font) so
+ * "<temp>C - BAY<N>" still fits on one line. */
+static LRESULT CALLBACK highest_temp_block_subclass_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_ERASEBKGND) {
         return 1;
     }
@@ -1544,14 +1607,42 @@ static LRESULT CALLBACK sensor_avg_pill_subclass_proc(HWND hwnd, UINT msg, WPARA
         HDC hdc;
         RECT rc;
         char text[32];
-        float avg_c;
-        bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
-        COLORREF band = has_avg ? temp_band_color(avg_c) : COLOR_APP_MUTED;
+        int text_len;
+        HFONT old_font;
+        SIZE text_size;
+        int text_x, text_y;
+        HRGN text_rgn;
 
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rc);
-        GetWindowTextA(hwnd, text, sizeof(text));
-        paint_gradient_pill(hdc, rc, band, text);
+        FillRect(hdc, &rc, g_brush_panel);
+
+        if (g_highest_temp_today_valid) {
+            wsprintfA(text, "%d.%dC - BAY%d", (int)g_highest_temp_today_c,
+                      (int)(g_highest_temp_today_c * 10) % 10, g_highest_temp_today_bay + 1);
+        } else {
+            lstrcpynA(text, "-", (int)sizeof(text));
+        }
+        text_len = lstrlenA(text);
+
+        old_font = (HFONT)SelectObject(hdc, g_big_font);
+        GetTextExtentPoint32A(hdc, text, text_len, &text_size);
+        text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
+        text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
+
+        SetBkMode(hdc, TRANSPARENT);
+        BeginPath(hdc);
+        TextOutA(hdc, text_x, text_y, text, text_len);
+        EndPath(hdc);
+        text_rgn = PathToRegion(hdc);
+        if (text_rgn) {
+            SelectClipRgn(hdc, text_rgn);
+            gradient_fill_rect(hdc, rc, vivid_thermal_color(0.0f), vivid_thermal_color(1.0f), false);
+            SelectClipRgn(hdc, NULL);
+            DeleteObject(text_rgn);
+        }
+        SelectObject(hdc, old_font);
+
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -2567,7 +2658,41 @@ static int g_sensor_ui_count;
 static bool g_sensor_connect_btn_valid;
 static bool g_sensor_connect_btn_connected;
 
+static void update_highest_temp_today(void) {
+    SYSTEMTIME st;
+    int i;
+
+    GetLocalTime(&st);
+    if (!g_highest_temp_today_valid ||
+        st.wDay != g_highest_temp_today_day ||
+        st.wMonth != g_highest_temp_today_month ||
+        st.wYear != g_highest_temp_today_year) {
+        g_highest_temp_today_valid = false;
+        g_highest_temp_today_bay = -1;
+        g_highest_temp_today_day = st.wDay;
+        g_highest_temp_today_month = st.wMonth;
+        g_highest_temp_today_year = st.wYear;
+    }
+
+    for (i = 0; i < SENSOR_MAX_UNITS; i++) {
+        const SensorState *unit = sensor_get_state(&g_sensor, i);
+        if (!unit->has_reading) {
+            continue;
+        }
+        if (!g_highest_temp_today_valid || unit->temperature_c > g_highest_temp_today_c) {
+            g_highest_temp_today_c = unit->temperature_c;
+            g_highest_temp_today_bay = i;
+            g_highest_temp_today_valid = true;
+        }
+    }
+}
+
 static void ui_refresh_sensor(void) {
+    update_highest_temp_today();
+    /* Unconditional, ahead of this function's own "nothing changed"
+     * gate below - a new daily-max doesn't always move the rack-wide
+     * average (see that gate's own check), but should still repaint. */
+    InvalidateRect(g_highest_temp_block, NULL, FALSE);
     /* Rack-wide summary - the average across the 6 physical sensors that
      * currently have a reading (see SENSOR_UNIT_ADDR_DEFAULT) - not tied to the 16
      * RF channels. The Connect button has its own small change-detection
@@ -2609,17 +2734,11 @@ static void ui_refresh_sensor(void) {
     SetDlgItemTextA(g_hwnd, IDC_SENSOR_STATUS_LBL, text);
     InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_STATUS_LBL), NULL, FALSE);
 
-    if (has_avg) {
-        wsprintfA(text, "Avg %d.%d C", (int)avg_c, (int)(avg_c * 10) % 10);
-    } else {
-        lstrcpynA(text, "Avg -", (int)sizeof(text));
-    }
-    SetDlgItemTextA(g_hwnd, IDC_SENSOR_TEMP_LBL, text);
-    InvalidateRect(GetDlgItem(g_hwnd, IDC_SENSOR_TEMP_LBL), NULL, FALSE);
-
-    /* The heatmap reads live off g_sensor when it paints (see
-     * sensor_heatmap_subclass_proc()) - just needs a repaint kicked off
-     * here, not text pushed into it. */
+    /* The AVG TEMP block (avg_temp_block_subclass_proc) and the heatmap
+     * (sensor_heatmap_subclass_proc) both read live off g_sensor when
+     * they paint - just need a repaint kicked off here, not text pushed
+     * into either one. */
+    InvalidateRect(g_avg_temp_block, NULL, FALSE);
     InvalidateRect(g_sensor_heatmap, NULL, FALSE);
 
     g_sensor_ui_valid = true;
@@ -2634,47 +2753,12 @@ static void ui_refresh_sensor(void) {
  * rack-wide average (see KILL_SWITCH_THRESHOLD_C's comment for why) -
  * there's no per-channel sensor reading to check individually. */
 
-static bool g_kill_ui_valid;
-static int g_kill_ui_tripped_count;
-
 static int count_kill_switch_tripped(void) {
     int i, n = 0;
     for (i = 0; i < MAX_CHANNELS; i++) {
         if (g_kill_switch_tripped[i]) n++;
     }
     return n;
-}
-
-/* No visible "Kill Switch: Armed"/"KILL SWITCH TRIPPED" label anymore
- * (direct request - that state was already logged to the Activity Log
- * on every real transition anyway: check_kill_switch()/
- * on_kill_switch_manual_trip()/on_kill_reset_clicked()/
- * on_unit_kill_reset() each call log_add_status_change() themselves,
- * so this function logging its own line too would just double up).
- * IDC_KILL_TRIP_BTN and IDC_KILL_RESET_BTN still share one slot and
- * swap places here: the manual Trip button shows while armed (nothing
- * to reset yet), Reset shows once something's tripped (already off,
- * nothing left to manually trip). */
-static void ui_refresh_kill_switch(void) {
-    int tripped_count = count_kill_switch_tripped();
-    bool any_tripped = tripped_count > 0;
-
-    /* Compare the actual count, not just "any vs none" - going from say
-     * 8 tripped to 7 stays "some tripped" either way, but the button
-     * visibility still needs re-evaluating (it doesn't - same swap
-     * either way - but g_kill_ui_tripped_count needs to track it). */
-    if (g_kill_ui_valid && g_kill_ui_tripped_count == tripped_count) {
-        return;
-    }
-    if (any_tripped) {
-        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_SHOW);
-        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_TRIP_BTN), SW_HIDE);
-    } else {
-        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-        ShowWindow(GetDlgItem(g_hwnd, IDC_KILL_TRIP_BTN), SW_SHOW);
-    }
-    g_kill_ui_valid = true;
-    g_kill_ui_tripped_count = tripped_count;
 }
 
 /* Manual reset only, by design - see the KILL_SWITCH_THRESHOLD_C comment
@@ -2709,47 +2793,6 @@ static void check_kill_switch(void) {
                   (int)avg_c, (int)(avg_c * 10) % 10, (int)KILL_SWITCH_THRESHOLD_C,
                   newly_tripped, newly_tripped == 1 ? "" : "s");
         log_add_status_change(msg);
-    }
-}
-
-/* Manual trip - same rack-wide effect as check_kill_switch()'s automatic
- * trip, but user-initiated regardless of the current average reading.
- * Lets the operator force every channel off immediately (e.g. on visual/
- * audible confirmation of trouble) instead of waiting for the sensor
- * average to actually cross KILL_SWITCH_THRESHOLD_C. */
-static void on_kill_switch_manual_trip(void) {
-    int i;
-    int newly_tripped = 0;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        if (!g_kill_switch_tripped[i]) {
-            g_kill_switch_tripped[i] = true;
-            channel_turn_output_off(i);
-            newly_tripped++;
-        }
-    }
-    if (newly_tripped > 0) {
-        char msg[64];
-        wsprintfA(msg, "Kill switch manually triggered - %d channel%s forced OFF",
-                  newly_tripped, newly_tripped == 1 ? "" : "s");
-        log_add_status_change(msg);
-    }
-}
-
-/* Sidebar's Reset button - resets every currently-tripped unit at once
- * (whichever ones happen to be over threshold) - a convenient "reset
- * everything" alongside each card's own single-unit reset (see
- * on_unit_kill_reset()). */
-static void on_kill_reset_clicked(void) {
-    int i;
-    bool any = false;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        if (g_kill_switch_tripped[i]) {
-            g_kill_switch_tripped[i] = false;
-            any = true;
-        }
-    }
-    if (any) {
-        log_add_status_change("Kill switch reset by user (all units)");
     }
 }
 
@@ -4904,9 +4947,11 @@ static void build_controls(HWND hwnd) {
     add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1025, 58, 64, 18, IDC_SENSOR_REFRESH_BTN);
     add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1097, 58, 72, 18, IDC_SENSOR_CONNECT_BTN);
     add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1025, 82, 130, 16, IDC_SENSOR_STATUS_LBL);
-    add_pill(hwnd, "Avg -", 1025, 102, 134, 22, IDC_SENSOR_TEMP_LBL, (WNDPROC)sensor_avg_pill_subclass_proc);
     /* Kill Switch status/trip/reset and Open Log moved out of here into
-     * their own small panel above Spectrum - see g_quick_panel below. */
+     * their own small panel above Spectrum - see g_quick_panel below.
+     * The Avg pill moved out too - now the large AVG TEMP block on the
+     * Summary card's left side (see IDC_SENSOR_TEMP_LBL below, mode_x's
+     * comment). */
 
     /* The heatmap fills the empty gap that opens up inside the header
      * panel itself once the window is wider than the design minimum -
@@ -4926,22 +4971,20 @@ static void build_controls(HWND hwnd) {
      * instead of running under it. */
     g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
 
-    /* Command Panel: one live status caption over one compact row of 4
-     * icon buttons - Close All, Open All, Kill Switch/Reset, Open Log.
-     * Direct request - Light Mode came out of this panel entirely (it's
-     * going into the Summary card below instead), replacing the old
-     * 3-column captioned layout with a single tighter row. Each button
-     * gets its own icon (see WM_DRAWITEM's IDC_CLOSE_ALL_BTN/
-     * IDC_OPEN_ALL_BTN/IDC_KILL_TRIP_BTN/IDC_KILL_RESET_BTN/
-     * IDC_OPEN_LOG_BTN cases) instead of text alone. */
+    /* Command Panel: 4 buttons, 1 row, max height - direct request/
+     * correction. Kill Switch came out of this panel entirely (manual
+     * trip/reset still works per-channel via each card's own status
+     * line - see IDC_CH_STATUS_OFFSET's comment in resource.h - this
+     * just removes the rack-wide button here); Light Mode moved to the
+     * Summary card earlier. Each button gets its own fill color now
+     * too (see WM_DRAWITEM's IDC_CLOSE_ALL_BTN/IDC_OPEN_ALL_BTN/
+     * IDC_OPEN_LOG_BTN/IDC_CMD_CHANGE_ICON_BTN cases) instead of all 4
+     * sharing the generic accent blue. */
     g_quick_panel = add_panel(hwnd, SIDEBAR_X, CONTENT_TOP, SIDEBAR_W, QUICK_PANEL_H);
-    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 8, 90, 24, IDC_CLOSE_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 124, CONTENT_TOP + 8, 90, 24, IDC_OPEN_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 8, 90, 24, IDC_KILL_RESET_BTN);
-    add_ctrl(hwnd, "BUTTON", "Kill Switch", BS_OWNERDRAW | WS_TABSTOP, 226, CONTENT_TOP + 8, 90, 24, IDC_KILL_TRIP_BTN);
-    ShowWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), SW_HIDE);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 38, 90, 24, IDC_OPEN_LOG_BTN);
-    add_ctrl(hwnd, "BUTTON", "Change Icon", BS_OWNERDRAW | WS_TABSTOP, 124, CONTENT_TOP + 38, 90, 24, IDC_CMD_CHANGE_ICON_BTN);
+    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP, 22, CONTENT_TOP + 6, 92, 36, IDC_CLOSE_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP, 123, CONTENT_TOP + 6, 92, 36, IDC_OPEN_ALL_BTN);
+    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP, 224, CONTENT_TOP + 6, 92, 36, IDC_OPEN_LOG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Change Icon", BS_OWNERDRAW | WS_TABSTOP, 325, CONTENT_TOP + 6, 92, 36, IDC_CMD_CHANGE_ICON_BTN);
 
     /* Sidebar: one tall box - Spectrum up top (the space that used to
      * just be "reserved for other features"), Activity Log below that
@@ -5007,13 +5050,43 @@ static void build_controls(HWND hwnd) {
     g_summary_panel = add_panel(hwnd, GRID_LEFT, SUMMARY_PANEL_Y, CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT, SUMMARY_PANEL_H);
     g_summary_header_icon = add_header_icon(hwnd, GRID_LEFT + 12, SUMMARY_PANEL_Y + 10, ICON_WAVE);
     g_summary_header_lbl = add_header(hwnd, "Summary", GRID_LEFT + 30, SUMMARY_PANEL_Y + 10, 188, 18);
-    g_summary_placeholder_lbl = add_ctrl(hwnd, "STATIC", "Coming soon", SS_LEFT | SS_NOPREFIX, GRID_LEFT + 12, SUMMARY_PANEL_Y + 40, 200, 16, 0);
-    g_mode_caption_lbl = add_ctrl(hwnd, "STATIC", "Mode", SS_RIGHT | SS_NOPREFIX,
-                                   CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 10,
+    /* Two content blocks so far, left (AVG TEMP) and right (Mode) -
+     * same caption-row-above-a-MODE_ICON_SIZE-square-content treatment
+     * on both sides, direct request that they "sync well" since more
+     * content is planned for this card later. No more "Coming soon"
+     * placeholder - there's real content now. */
+    g_avg_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "AVG TEMP", SS_CENTER | SS_NOPREFIX,
+                                       GRID_LEFT + 12, SUMMARY_PANEL_Y + 40, AVG_TEMP_BLOCK_W, 16, IDC_AVG_TEMP_CAPTION_LBL);
+    g_avg_temp_block = add_pill(hwnd, "", GRID_LEFT + 12, SUMMARY_PANEL_Y + 60,
+                                 AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, IDC_SENSOR_TEMP_LBL, (WNDPROC)avg_temp_block_subclass_proc);
+    g_mode_caption_lbl = add_ctrl(hwnd, "STATIC", "Mode", SS_CENTER | SS_NOPREFIX,
+                                   CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 40,
                                    MODE_ICON_SIZE, 16, IDC_MODE_CAPTION_LBL);
     g_mode_toggle_btn = add_ctrl(hwnd, "BUTTON", g_light_mode ? "Dark Mode" : "Light Mode", BS_OWNERDRAW | WS_TABSTOP,
-                                  CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 30,
+                                  CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE, SUMMARY_PANEL_Y + 60,
                                   MODE_ICON_SIZE, MODE_ICON_SIZE, IDC_THEME_TOGGLE_BTN);
+    /* 3rd content block, centered between the two above - see
+     * HIGHEST_TEMP_BLOCK_W's own comment for why it's wider than
+     * MODE_ICON_SIZE. Centered on the WM_CREATE-time CLIENT_WIDTH
+     * guess here; relayout_for_size() recomputes against the real
+     * client_w once the window's actual size is known, same pattern
+     * as everything else in this card. */
+    g_highest_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "Highest Temp Today", SS_CENTER | SS_NOPREFIX,
+                                           GRID_LEFT + (CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
+                                           SUMMARY_PANEL_Y + 40, HIGHEST_TEMP_BLOCK_W, 16, IDC_HIGHEST_TEMP_CAPTION_LBL);
+    g_highest_temp_block = add_pill(hwnd, "",
+                                     GRID_LEFT + (CLIENT_WIDTH - SIDEBAR_X - GRID_LEFT) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
+                                     SUMMARY_PANEL_Y + 60, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE,
+                                     IDC_HIGHEST_TEMP_BLOCK, (WNDPROC)highest_temp_block_subclass_proc);
+    if (g_avg_temp_caption_lbl && g_header_font) {
+        SendMessageA(g_avg_temp_caption_lbl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
+    }
+    if (g_mode_caption_lbl && g_header_font) {
+        SendMessageA(g_mode_caption_lbl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
+    }
+    if (g_highest_temp_caption_lbl && g_header_font) {
+        SendMessageA(g_highest_temp_caption_lbl, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
+    }
 
     for (i = 0; i < BAUD_OPTIONS_COUNT; i++) {
         char label[16];
@@ -5229,12 +5302,10 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
      * gap that opens up next to it on resize (see build_controls()). */
     MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
     MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 22, CONTENT_TOP + 8, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 124, CONTENT_TOP + 8, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_RESET_BTN), 226, CONTENT_TOP + 8, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_KILL_TRIP_BTN), 226, CONTENT_TOP + 8, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 22, CONTENT_TOP + 38, 90, 24, FALSE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), 124, CONTENT_TOP + 38, 90, 24, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 22, CONTENT_TOP + 6, 92, 36, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), 123, CONTENT_TOP + 6, 92, 36, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), 224, CONTENT_TOP + 6, 92, 36, FALSE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), 325, CONTENT_TOP + 6, 92, 36, FALSE);
     MoveWindow(g_sidebar_panel, SIDEBAR_X, SIDEBAR_CONTENT_TOP, sidebar_w, log_y + LOG_PANEL_H - SIDEBAR_CONTENT_TOP, FALSE);
 
     /* Summary card's real position - below the grid's actual (dynamic,
@@ -5248,15 +5319,19 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int summary_h = client_h - GRID_BOTTOM_MARGIN - summary_y;
         int summary_w = client_w - SIDEBAR_X - grid_left;
         int mode_x = client_w - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE;
-        if (summary_h < 100) {
-            summary_h = 100;
+        int highest_x = grid_left + summary_w / 2 - HIGHEST_TEMP_BLOCK_W / 2;
+        if (summary_h < 60 + MODE_ICON_SIZE + 20) {
+            summary_h = 60 + MODE_ICON_SIZE + 20;
         }
         MoveWindow(g_summary_panel, grid_left, summary_y, summary_w, summary_h, FALSE);
         MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
         MoveWindow(g_summary_header_lbl, grid_left + 30, summary_y + 10, 188, 18, FALSE);
-        MoveWindow(g_summary_placeholder_lbl, grid_left + 12, summary_y + 40, 200, 16, FALSE);
-        MoveWindow(g_mode_caption_lbl, mode_x, summary_y + 10, MODE_ICON_SIZE, 16, FALSE);
-        MoveWindow(g_mode_toggle_btn, mode_x, summary_y + 30, MODE_ICON_SIZE, MODE_ICON_SIZE, FALSE);
+        MoveWindow(g_avg_temp_caption_lbl, grid_left + 12, summary_y + 40, AVG_TEMP_BLOCK_W, 16, FALSE);
+        MoveWindow(g_avg_temp_block, grid_left + 12, summary_y + 60, AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
+        MoveWindow(g_highest_temp_caption_lbl, highest_x, summary_y + 40, HIGHEST_TEMP_BLOCK_W, 16, FALSE);
+        MoveWindow(g_highest_temp_block, highest_x, summary_y + 60, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
+        MoveWindow(g_mode_caption_lbl, mode_x, summary_y + 40, MODE_ICON_SIZE, 16, FALSE);
+        MoveWindow(g_mode_toggle_btn, mode_x, summary_y + 60, MODE_ICON_SIZE, MODE_ICON_SIZE, FALSE);
     }
 
     MoveWindow(g_log_header_icon, 22, log_y + 10, 14, 14, FALSE);
@@ -5334,6 +5409,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_mono_font = g_font;
             }
 
+            g_big_font = CreateFontA(-56, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                      ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+            if (!g_big_font) {
+                g_big_font = g_mono_font;
+            }
+
+            g_huge_font = CreateFontA(-84, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                       ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                       DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, "Consolas");
+            if (!g_huge_font) {
+                g_huge_font = g_big_font;
+            }
+
             g_small_font = CreateFontA(-9, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                         ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                         DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, "Segoe UI");
@@ -5375,7 +5464,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             set_channel_controls_enabled(false);
             ui_refresh_all_channels();
             ui_refresh_sensor();
-            ui_refresh_kill_switch();
 
             /* Auto-connect on launch (direct request - the app "needs to
              * connect to retrieve data" on open, not wait for a manual
@@ -5492,7 +5580,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
                 ui_refresh_sensor();
                 check_kill_switch();
-                ui_refresh_kill_switch();
 
                 /* Per-channel uptime accounting - every tick (cheap: just
                  * comparing output_on to last tick's value), so the
@@ -5605,10 +5692,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_sensor_connect_clicked();
                 return 0;
             }
-            if (id == IDC_KILL_RESET_BTN && code == BN_CLICKED) {
-                on_kill_reset_clicked();
-                return 0;
-            }
             if (id == IDC_CLOSE_ALL_BTN && code == BN_CLICKED) {
                 on_close_all_clicked();
                 return 0;
@@ -5623,15 +5706,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             if (id == IDC_THEME_TOGGLE_BTN && code == BN_CLICKED) {
                 on_theme_toggle_clicked();
-                return 0;
-            }
-            if (id == IDC_KILL_TRIP_BTN && code == BN_CLICKED) {
-                int choice = MessageBoxA(hwnd,
-                    "Force every channel off immediately?\n\nThis trips the kill switch manually, same as an automatic overtemp trip - every channel stays off until reset.",
-                    "Confirm Kill Switch", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
-                if (choice == IDYES) {
-                    on_kill_switch_manual_trip();
-                }
                 return 0;
             }
             if (id == IDC_LOG_CLEAR_BTN && code == BN_CLICKED) {
@@ -5806,10 +5880,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetBkMode(hdc, TRANSPARENT);
                 return (LRESULT)g_brush_panel;
             }
-            /* Plain text, not a pill (see add_ctrl call site) - only the
-             * Avg reading next to it is a pill
-             * (sensor_avg_pill_subclass_proc, which bypasses
-             * WM_CTLCOLORSTATIC entirely and doesn't need a case here). */
+            /* Plain text, not a pill (see add_ctrl call site) - the Avg
+             * reading itself moved to the Summary card's own
+             * avg_temp_block_subclass_proc, which bypasses
+             * WM_CTLCOLORSTATIC entirely and doesn't need a case here. */
             if (ctl == GetDlgItem(hwnd, IDC_SENSOR_STATUS_LBL)) {
                 float avg_c;
                 bool has_avg = sensor_average_temperature(&g_sensor, &avg_c);
@@ -6002,13 +6076,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                  * "Dark Mode" label, lived in the Command Panel; this
                  * replaces it entirely - same IDC_THEME_TOGGLE_BTN ID,
                  * same on_theme_toggle_clicked()/g_light_mode-driven
-                 * icon choice, just relocated and redrawn). Sun (click
-                 * to switch TO light) or moon ("Dark Mode") - same "the
-                 * icon always shows the destination, not the current
-                 * state" convention Connect/Disconnect's own text uses.
-                 * No trig (avoids pulling in math.h/-lm for 8 lines) -
-                 * the diagonal rays are a few px short of true 45 deg,
-                 * invisible at this size. */
+                 * icon choice, just relocated and redrawn). Direct
+                 * correction - the icon now shows the CURRENT mode
+                 * (sun while in Light mode, moon while in Dark mode),
+                 * not the destination clicking it switches to - the
+                 * opposite of the Connect/Disconnect convention this
+                 * used to follow. No trig (avoids pulling in math.h/-lm
+                 * for 8 lines) - the diagonal rays are a few px short
+                 * of true 45 deg, invisible at this size. */
                 if (dis->CtlID == IDC_THEME_TOGGLE_BTN) {
                     int icx = (rc.left + rc.right) / 2;
                     int icy = (rc.top + rc.bottom) / 2;
@@ -6028,26 +6103,27 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     old_pen_i = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
                     old_brush_i = (HBRUSH)SelectObject(dis->hDC, glyph_brush);
 
-                    if (g_light_mode) {
+                    if (!g_light_mode) {
                         /* Moon: a disc, then a second disc offset
                          * up-right and filled in the panel's own
                          * background color, masking a crescent out of
                          * it - same layering trick the padlock's
-                         * shackle uses above. */
-                        Ellipse(dis->hDC, icx - 28, icy - 28, icx + 28, icy + 28);
+                         * shackle uses above. Shown while in Dark
+                         * mode (current state, not destination). */
+                        Ellipse(dis->hDC, icx - 56, icy - 56, icx + 56, icy + 56);
                         SelectObject(dis->hDC, g_brush_panel);
-                        Ellipse(dis->hDC, icx - 10, icy - 33, icx + 33, icy + 10);
+                        Ellipse(dis->hDC, icx - 20, icy - 66, icx + 66, icy + 20);
                     } else {
                         static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
                         static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
-                        HPEN ray_pen = CreatePen(PS_SOLID, 5, COLOR_APP_HEADER);
+                        HPEN ray_pen = CreatePen(PS_SOLID, 10, COLOR_APP_HEADER);
                         int ri;
 
-                        Ellipse(dis->hDC, icx - 18, icy - 18, icx + 18, icy + 18);
+                        Ellipse(dis->hDC, icx - 36, icy - 36, icx + 36, icy + 36);
                         SelectObject(dis->hDC, ray_pen);
                         for (ri = 0; ri < 8; ri++) {
-                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 23, icy + ray_dy[ri] * 23, NULL);
-                            LineTo(dis->hDC, icx + ray_dx[ri] * 33, icy + ray_dy[ri] * 33);
+                            MoveToEx(dis->hDC, icx + ray_dx[ri] * 46, icy + ray_dy[ri] * 46, NULL);
+                            LineTo(dis->hDC, icx + ray_dx[ri] * 66, icy + ray_dy[ri] * 66);
                         }
                         DeleteObject(ray_pen);
                     }
@@ -6136,6 +6212,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          * but the button looked identical either way,
                          * direct complaint it didn't visibly "light up". */
                         fill = g_bulk_select_mode ? g_brush_connected : g_brush_accent;
+                    } else if (dis->CtlID == IDC_CLOSE_ALL_BTN) {
+                        /* Command Panel's 4 buttons each get their own
+                         * color now (direct request) instead of all
+                         * sharing the generic accent blue - Close/Open
+                         * All reuse the same green-ON/red-OFF convention
+                         * Bulk Actions' own ON/OFF buttons use above,
+                         * since they're the same action at rack scale. */
+                        fill = g_brush_disconnected;
+                    } else if (dis->CtlID == IDC_OPEN_ALL_BTN) {
+                        fill = g_brush_connected;
+                    } else if (dis->CtlID == IDC_OPEN_LOG_BTN) {
+                        fill = g_brush_accent;
+                    } else if (dis->CtlID == IDC_CMD_CHANGE_ICON_BTN) {
+                        fill = g_brush_level_medium; /* orange - distinct from the other 3 */
                     }
                     {
                         HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
@@ -6183,22 +6273,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     SelectObject(dis->hDC, old_brush_i);
                     SelectObject(dis->hDC, old_pen_i);
                     DeleteObject(white_pen);
-                    rc.left += 22;
-                }
-                if (dis->CtlID == IDC_KILL_TRIP_BTN || dis->CtlID == IDC_KILL_RESET_BTN) {
-                    int icx = rc.left + 13;
-                    int icy = (rc.top + rc.bottom) / 2;
-                    POINT tri[3];
-                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
-                    HBRUSH white_brush = CreateSolidBrush(RGB(255, 255, 255));
-                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, white_brush);
-                    tri[0].x = icx;     tri[0].y = icy - 6;
-                    tri[1].x = icx - 6; tri[1].y = icy + 5;
-                    tri[2].x = icx + 6; tri[2].y = icy + 5;
-                    Polygon(dis->hDC, tri, 3);
-                    SelectObject(dis->hDC, old_brush_i);
-                    SelectObject(dis->hDC, old_pen_i);
-                    DeleteObject(white_brush);
                     rc.left += 22;
                 }
                 if (dis->CtlID == IDC_OPEN_LOG_BTN) {
@@ -6293,6 +6367,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (g_logo_font && g_logo_font != g_header_font && g_logo_font != g_font) DeleteObject(g_logo_font);
             if (g_mono_font && g_mono_font != g_font) DeleteObject(g_mono_font);
             if (g_small_font && g_small_font != g_font) DeleteObject(g_small_font);
+            if (g_big_font && g_big_font != g_mono_font) DeleteObject(g_big_font);
+            if (g_huge_font && g_huge_font != g_big_font) DeleteObject(g_huge_font);
             if (g_custom_logo_bmp) DeleteObject(g_custom_logo_bmp);
             if (g_custom_icon_big) DestroyIcon(g_custom_icon_big);
             if (g_custom_icon_small) DestroyIcon(g_custom_icon_small);
