@@ -1644,9 +1644,8 @@ static LRESULT CALLBACK avg_temp_block_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * one boxed and one bare). */
         FillRect(hdc, &rc, g_brush_panel);
 
-        old_font = (HFONT)SelectObject(hdc, g_huge_font);
-
         if (has_avg) {
+            old_font = (HFONT)SelectObject(hdc, g_huge_font);
             wsprintfA(text, "%d.%dC", (int)avg_c, (int)(avg_c * 10) % 10);
             text_len = lstrlenA(text);
             GetTextExtentPoint32A(hdc, text, text_len, &text_size);
@@ -1665,13 +1664,14 @@ static LRESULT CALLBACK avg_temp_block_subclass_proc(HWND hwnd, UINT msg, WPARAM
                 DeleteObject(text_rgn);
             }
         } else {
-            /* Plain muted text, no gradient-clip - a single "-" glyph
-             * run through the same clip-to-text-path gradient fill as a
-             * real reading rendered as a tiny, unreadable colored smudge
-             * (direct report: "what the fuck" reaction to exactly this).
-             * "--.-C" reads as "no reading yet" at a glance, same shape
-             * as the real "24.6C" text, plain muted color so it's
-             * clearly not a live thermal gradient. */
+            /* Plain muted text at g_header_font (13pt, matches the "AVG
+             * TEMP" caption above it), not g_huge_font (100pt) - direct
+             * correction, "--.-C" at the same giant size a real reading
+             * uses looked oversized/out of place for a placeholder. No
+             * gradient-clip either, same reasoning as before (a single
+             * "-" glyph run through that effect rendered as a tiny
+             * unreadable colored smudge - direct report). */
+            old_font = (HFONT)SelectObject(hdc, g_header_font);
             lstrcpynA(text, "--.-C", (int)sizeof(text));
             text_len = lstrlenA(text);
             GetTextExtentPoint32A(hdc, text, text_len, &text_size);
@@ -1714,9 +1714,8 @@ static LRESULT CALLBACK highest_temp_block_subclass_proc(HWND hwnd, UINT msg, WP
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, g_brush_panel);
 
-        old_font = (HFONT)SelectObject(hdc, g_big_font);
-
         if (g_highest_temp_today_valid) {
+            old_font = (HFONT)SelectObject(hdc, g_big_font);
             wsprintfA(text, "%d.%dC - BAY%d", (int)g_highest_temp_today_c,
                       (int)(g_highest_temp_today_c * 10) % 10, g_highest_temp_today_bay + 1);
             text_len = lstrlenA(text);
@@ -1737,9 +1736,12 @@ static LRESULT CALLBACK highest_temp_block_subclass_proc(HWND hwnd, UINT msg, WP
             }
         } else {
             /* Same fix as avg_temp_block_subclass_proc's own "-" glyph -
-             * plain muted text instead of a single dash run through the
-             * gradient-clip-to-text-path effect (rendered as a tiny
-             * unreadable colored smudge, direct report). */
+             * plain muted text at g_header_font (not g_big_font/72pt -
+             * direct correction, looked oversized for a placeholder)
+             * instead of a single dash run through the gradient-clip-
+             * to-text-path effect (rendered as a tiny unreadable
+             * colored smudge, direct report). */
+            old_font = (HFONT)SelectObject(hdc, g_header_font);
             lstrcpynA(text, "No Data", (int)sizeof(text));
             text_len = lstrlenA(text);
             GetTextExtentPoint32A(hdc, text, text_len, &text_size);
@@ -2280,6 +2282,20 @@ static void log_add_status_change(const char *message) {
 /* Forward declaration - defined below, needs log_add() to already
  * exist; on_log_view_clicked() (also below) needs it sooner. */
 static void ui_show_warning(const char *message);
+
+/* Forward declarations - defined below (need get_ini_path()), used
+ * sooner by on_sensor_connect_clicked()/auto_connect_sensor_on_startup()/
+ * WM_CREATE. Sensor Port is the one piece of .ini persistence brought
+ * back after removing all of it (see save_settings()'s own removal
+ * comment) - direct report: with no memory of which port is actually
+ * the sensor, the combo just defaults to whatever enumerates first,
+ * which isn't necessarily correct and isn't a fix, just luck. Scoped
+ * to Sensor Port ONLY - not channel state, not RS422 settings, not
+ * Light Mode - since this is hardware identity ("which port is the
+ * sensor wired to"), not operational state that should reset for
+ * safety the way channel mode/output now does. */
+static void save_sensor_port(void);
+static void load_sensor_port(void);
 
 /* Full-log popup's own WndProc - a plain secondary window (WS_POPUP,
  * not a dialog resource), same "build it directly with CreateWindowEx"
@@ -2844,6 +2860,8 @@ static void auto_connect_sensor_on_startup(void) {
         char msg[128];
         wsprintfA(msg, "Failed to open %s", port);
         ui_show_warning(msg);
+    } else {
+        save_sensor_port();
     }
 }
 
@@ -3032,6 +3050,8 @@ static void on_sensor_connect_clicked(void) {
         char msg[128];
         wsprintfA(msg, "Failed to open %s", port);
         ui_show_warning(msg);
+    } else {
+        save_sensor_port();
     }
 }
 
@@ -4409,6 +4429,42 @@ static void get_ini_path(char *path /* at least MAX_PATH + 8 bytes */) {
     lstrcatA(path, ".ini");
 }
 
+/* Writes whatever's currently in the Sensor Port combo - called right
+ * after a successful sensor_connect() (manual click or startup auto-
+ * connect), not on close, so it's remembered even if the app never
+ * gets a clean exit. See these functions' own forward-declaration
+ * comment for why only this one field still persists. */
+static void save_sensor_port(void) {
+    char path[MAX_PATH + 8];
+    char buf[32];
+
+    get_ini_path(path);
+    GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, buf, sizeof(buf));
+    WritePrivateProfileStringA("Sensor", "Port", buf, path);
+}
+
+/* Call after refresh_sensor_port_list() has populated the combo -
+ * selects the remembered port by name if it's still in the list
+ * (matches whatever real port name got saved, any COM number); a
+ * port no longer present (unplugged, or none ever saved) just leaves
+ * refresh_combo_ports()'s own index-0 default in place. */
+static void load_sensor_port(void) {
+    char path[MAX_PATH + 8];
+    char buf[32];
+    HWND combo;
+    LRESULT idx;
+
+    get_ini_path(path);
+    if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) == 0) {
+        return;
+    }
+    combo = GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO);
+    idx = SendMessageA(combo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)buf);
+    if (idx != CB_ERR) {
+        SendMessageA(combo, CB_SETCURSEL, (WPARAM)idx, 0);
+    }
+}
+
 /* branding.bmp, sibling to the .exe and .ini - a fixed name/location,
  * not the user's originally-picked file's own path. Copying into a
  * name this app owns (rather than just remembering their path) means
@@ -5751,6 +5807,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             build_controls(hwnd);
             refresh_port_list();
             refresh_sensor_port_list();
+            load_sensor_port();
             load_custom_logo();
             apply_custom_app_icon(hwnd);
             load_branding_icon(hwnd);
@@ -6491,10 +6548,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          * background color, masking a crescent out of
                          * it - same layering trick the padlock's
                          * shackle uses above. Shown while in Dark
-                         * mode (current state, not destination). */
+                         * mode (current state, not destination).
+                         * Direct report ("icon got cutoff") - a smaller/
+                         * closer mask circle just eats a corner, leaving
+                         * a fat wedge with a flat edge, not a crescent.
+                         * The classic crescent-icon proportions are a
+                         * SAME-size mask circle offset by roughly one
+                         * radius (a 44px offset here, radius 56, so
+                         * sqrt(44^2+44^2)~=62 =~ 56) - close to same-
+                         * size, offset-by-one-radius circles overlap
+                         * heavily and leave a genuinely thin sliver on
+                         * the far side, instead of a mask circle that's
+                         * both smaller AND closer, which just bites a
+                         * corner out. */
                         Ellipse(dis->hDC, icx - 56, icy - 56, icx + 56, icy + 56);
                         SelectObject(dis->hDC, g_brush_panel);
-                        Ellipse(dis->hDC, icx - 20, icy - 66, icx + 66, icy + 20);
+                        Ellipse(dis->hDC, icx - 12, icy - 100, icx + 100, icy + 12);
                     } else {
                         static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
                         static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
