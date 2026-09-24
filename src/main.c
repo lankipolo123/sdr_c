@@ -104,13 +104,20 @@
  * nudged to keep that gap, same as the old CONN/BULK relationship. */
 #define CONN_X_SHIFT 256
 #define AMBIENT_X_SHIFT (-428)
-#define BULK_X_SHIFT 1002
+/* BULK_X_SHIFT was 1002 (right edge flush with the panel's own 30px
+ * corner-rivet margin, same convention as the heatmap's old right
+ * edge) - direct report the High/Mid/Low/Off column read as crowded
+ * against the panel's rounded corner there. Pulled left 80px for real
+ * breathing room (110px total from the panel's right edge now);
+ * HEATMAP_RIGHT below moves the same 80px to keep the same 40px gap
+ * to Bulk Actions' new left edge. */
+#define BULK_X_SHIFT 922
 
 /* Heatmap fills the gap between Ambient Temperature and Bulk Actions -
  * see add_sensor_heatmap()'s own call in build_controls() for the full
  * derivation of these two numbers. */
 #define HEATMAP_LEFT 781
-#define HEATMAP_RIGHT 1432
+#define HEATMAP_RIGHT 1352
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -385,15 +392,9 @@ static HICON g_custom_icon_small;
 static HICON g_default_icon_big;
 static HICON g_default_icon_small;
 
-/* Whether Change Logo/Reset are currently shown - see IDC_LOGO_LOCK_BTN's
- * comment in resource.h. Starts false: those two buttons sit hidden
- * until the lock badge is clicked, the same as a profile picture's edit
- * options staying tucked away until you tap the little badge on it. */
-static bool g_logo_options_visible;
-
 /* The shared admin-unlock flag - gates both arming Continuous Wave (CW,
- * a fixed undithered carrier) via a channel's Set/Bulk Set, AND opening
- * the logo lock badge (IDC_LOGO_LOCK_BTN) to reveal Change Logo/Reset.
+ * a fixed undithered carrier) via a channel's Set/Bulk Set, AND the
+ * Command Panel's "Icon" button popup menu (Change Logo/Reset).
  * The real password comes from the vendor DLL itself (Transit.dll's
  * GetDllPassword export - confirmed to take no arguments and return a
  * pointer to a static string it already has baked in, not anything
@@ -4718,8 +4719,11 @@ static INT_PTR CALLBACK cw_password_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam,
 /* The shared admin gate - originally just for arming Continuous Wave
  * (a fixed, undithered carrier - the one mode this app gates behind a
  * password before a channel's Set/Bulk Set can arm it), now also
- * covering the logo lock badge (IDC_LOGO_LOCK_BTN, revealing Change
- * Logo/Reset). Checked against Transit.dll itself, not anything this
+ * covering the Command Panel's "Icon" button (IDC_CMD_CHANGE_ICON_BTN,
+ * whose popup menu offers Change Logo/Reset - see its own WM_COMMAND
+ * handler; this used to gate a separate lock badge that revealed those
+ * two as plain buttons, before they moved onto that popup menu).
+ * Checked against Transit.dll itself, not anything this
  * app invents or stores - but which export does that depends on the DLL
  * build (see transit_dll.h): the older build exports GetDllPassword
  * (fetch the real password, compare locally), a newer one drops that
@@ -4800,39 +4804,17 @@ static void build_controls(HWND hwnd) {
      * try to fill it. */
     g_header_panel = add_panel(hwnd, SIDEBAR_X, 6, CLIENT_WIDTH - 2 * SIDEBAR_X, HEADER_H);
 
-    /* Sit under the HelixDefender wordmark (drawn inline in
-     * panel_subclass_proc, not a real control - these buttons are,
-     * because they need a click), side by side, the pair centered as a
-     * block under the logo mark's own cx=135 - see browse_and_set_logo().
-     * Reset is the narrower of the two - it's the occasional-use
-     * escape hatch, not the primary action. Hidden until
-     * IDC_LOGO_LOCK_BTN is clicked - see g_logo_options_visible. */
-    add_ctrl(hwnd, "BUTTON", "Change Logo", BS_OWNERDRAW | WS_TABSTOP,
-             47, 148, 110, 20, IDC_CHANGE_LOGO_BTN);
-    add_ctrl(hwnd, "BUTTON", "Reset", BS_OWNERDRAW | WS_TABSTOP,
-             163, 148, 60, 20, IDC_RESET_LOGO_BTN);
-    ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), SW_HIDE);
-    ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), SW_HIDE);
-
-    /* The lock badge itself - just outside the logo's own box.
-     *
-     * CAUTION, the actual bug the last two placements had: the logo
-     * mark/wordmark are drawn inline in panel_subclass_proc using
-     * coordinates relative to g_header_panel's OWN client area (mark
-     * centered at (135,68), a 96x96 box spanning x:87-183/y:20-116;
-     * wordmark at y:118-142) - but this button, like every other control
-     * in build_controls(), is a child of hwnd (the MAIN window, passed
-     * into build_controls() - see its call in WM_CREATE), parented via
-     * add_ctrl(hwnd, ...), so ITS x/y are main-window-client-relative,
-     * NOT panel-relative. g_header_panel itself sits at (SIDEBAR_X, 6).
-     * Reusing the panel-relative box numbers directly (as both earlier
-     * placements did) put the badge ~(10,6) short of where it needed to
-     * be - close enough to look plausible in a quick check, but actually
-     * overlapping the box's true bottom-right corner. The real box in
-     * THIS button's coordinate space is x:97-193/y:26-122, wordmark
-     * y:124-148 - the numbers below are converted (+10,+6) accordingly. */
-    add_ctrl(hwnd, "BUTTON", NULL, BS_OWNERDRAW | WS_TABSTOP,
-             196, 94, 24, 24, IDC_LOGO_LOCK_BTN);
+    /* Change Logo/Reset no longer live as their own buttons under the
+     * wordmark, and the lock badge that used to gate/reveal them is
+     * gone too (direct request) - both actions moved onto the Command
+     * Panel's "Icon" button instead (IDC_CMD_CHANGE_ICON_BTN's own
+     * WM_COMMAND handler below): a click there still goes through the
+     * same unlock_cw() admin gate the lock badge used to, then shows a
+     * small popup menu with both actions, reusing IDC_CHANGE_LOGO_BTN/
+     * IDC_RESET_LOGO_BTN as the popup's own menu-item IDs (a menu
+     * selection's WM_COMMAND has HIWORD(wParam)==0, same as
+     * BN_CLICKED, so the existing handlers for those two IDs fire
+     * unchanged - no new IDs needed). */
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -5779,11 +5761,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_log_view_clicked();
                 return 0;
             }
+            /* Reused as the popup menu's own item IDs below (a menu
+             * selection's WM_COMMAND has HIWORD(wParam)==0, same as
+             * BN_CLICKED, so these fire the same way a real button
+             * click would) - see IDC_CMD_CHANGE_ICON_BTN's handler. */
             if (id == IDC_CHANGE_LOGO_BTN && code == BN_CLICKED) {
-                browse_and_set_logo(hwnd);
-                return 0;
-            }
-            if (id == IDC_CMD_CHANGE_ICON_BTN && code == BN_CLICKED) {
                 browse_and_set_logo(hwnd);
                 return 0;
             }
@@ -5791,25 +5773,29 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 reset_custom_logo(hwnd);
                 return 0;
             }
-            if (id == IDC_LOGO_LOCK_BTN && code == BN_CLICKED) {
-                /* Opening requires the same password as arming Continuous
-                 * Wave (see unlock_cw()) - Change Logo/Reset are just as
-                 * much an admin-only action as CW is, and sharing one
-                 * password/one unlocked-for-the-session flag means
-                 * unlocking either one covers both for the rest of the
-                 * run. Closing never re-prompts - hiding them back away
-                 * isn't the sensitive part. */
-                if (!g_logo_options_visible) {
-                    if (!unlock_cw(hwnd)) {
-                        return 0;
-                    }
-                    g_logo_options_visible = true;
-                } else {
-                    g_logo_options_visible = false;
+            if (id == IDC_CMD_CHANGE_ICON_BTN && code == BN_CLICKED) {
+                /* Same admin password gate the old lock badge used to
+                 * require before revealing Change Logo/Reset as plain
+                 * buttons (direct request to fold that into this
+                 * button instead) - see unlock_cw()'s own comment.
+                 * Once unlocked this run, later clicks skip straight
+                 * to the menu (unlock_cw() itself checks
+                 * g_cw_authorized first). */
+                HMENU menu;
+                RECT btn_rc;
+
+                if (!unlock_cw(hwnd)) {
+                    return 0;
                 }
-                ShowWindow(GetDlgItem(hwnd, IDC_CHANGE_LOGO_BTN), g_logo_options_visible ? SW_SHOW : SW_HIDE);
-                ShowWindow(GetDlgItem(hwnd, IDC_RESET_LOGO_BTN), g_logo_options_visible ? SW_SHOW : SW_HIDE);
-                InvalidateRect(GetDlgItem(hwnd, IDC_LOGO_LOCK_BTN), NULL, FALSE);
+
+                menu = CreatePopupMenu();
+                AppendMenuA(menu, MF_STRING, IDC_CHANGE_LOGO_BTN, "Change Logo");
+                AppendMenuA(menu, MF_STRING, IDC_RESET_LOGO_BTN, "Reset to Default");
+                GetWindowRect(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), &btn_rc);
+                SetForegroundWindow(hwnd);
+                TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN, btn_rc.left, btn_rc.bottom, 0, hwnd, NULL);
+                PostMessageA(hwnd, WM_NULL, 0, 0); /* MSDN-recommended after TrackPopupMenu */
+                DestroyMenu(menu);
                 return 0;
             }
             if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
@@ -6085,49 +6071,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         SelectObject(dis->hDC, old_check_pen);
                         DeleteObject(check_pen);
                     }
-                    return TRUE;
-                }
-
-                /* The logo's lock badge - no filled circle behind it:
-                 * FillRect with g_brush_panel first (same trick
-                 * icon_subclass_proc uses for the header icons) so it
-                 * blends into the panel's own flat background instead of
-                 * standing out as a solid dot - direct request.
-                 *
-                 * The glyph itself is a real padlock silhouette, not two
-                 * thin outline shapes barely touching (the first attempt,
-                 * reported as reading like a broken squiggle at this
-                 * size): a FILLED body drawn last, overlapping and
-                 * masking the bottom of the shackle loop drawn under it,
-                 * the same layering trick a bitmap padlock icon uses -
-                 * only the loop's top arc ends up visible, peeking above
-                 * a solid body, which is what actually reads as "lock" at
-                 * 22px. Closed normally, shackle swung right and up once
-                 * g_logo_options_visible is true. */
-                if (dis->CtlID == IDC_LOGO_LOCK_BTN) {
-                    int cx = (rc.left + rc.right) / 2;
-                    int cy = (rc.top + rc.bottom) / 2;
-                    HBRUSH glyph_brush = CreateSolidBrush(COLOR_APP_HEADER);
-                    HPEN glyph_pen = CreatePen(PS_SOLID, 2, COLOR_APP_HEADER);
-                    HPEN old_gp;
-                    HBRUSH old_gb;
-                    int shackle_dx = g_logo_options_visible ? 4 : 0;
-                    int shackle_dy = g_logo_options_visible ? -2 : 0;
-
-                    FillRect(dis->hDC, &rc, g_brush_panel);
-
-                    old_gp = (HPEN)SelectObject(dis->hDC, glyph_pen);
-                    old_gb = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
-                    Ellipse(dis->hDC, cx - 4 + shackle_dx, cy - 8 + shackle_dy,
-                            cx + 4 + shackle_dx, cy + shackle_dy);
-
-                    SelectObject(dis->hDC, glyph_brush);
-                    RoundRect(dis->hDC, cx - 5, cy - 2, cx + 5, cy + 6, 3, 3);
-
-                    SelectObject(dis->hDC, old_gb);
-                    SelectObject(dis->hDC, old_gp);
-                    DeleteObject(glyph_brush);
-                    DeleteObject(glyph_pen);
                     return TRUE;
                 }
 
