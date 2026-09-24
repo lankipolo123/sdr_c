@@ -5442,16 +5442,25 @@ static void build_controls(HWND hwnd) {
      * summary card's full width, which would let a wider AVG TEMP or
      * Highest Temp block collide into the other (direct report - see
      * relayout_for_size()'s matching highest_x comment for the full
-     * reasoning). Same WM_CREATE-time CLIENT_WIDTH guess as everything
-     * else in this card; relayout_for_size() recomputes against the
-     * real client_w once the window's actual size is known. */
-    g_highest_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "Highest Temp Today", SS_CENTER | SS_NOPREFIX,
-                                           (GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
-                                           SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, HIGHEST_TEMP_BLOCK_W, 16, IDC_HIGHEST_TEMP_CAPTION_LBL);
-    g_highest_temp_block = add_pill(hwnd, "",
-                                     (GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP + AVG_TEMP_BLOCK_W + CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE) / 2 - HIGHEST_TEMP_BLOCK_W / 2,
-                                     SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE,
-                                     IDC_HIGHEST_TEMP_BLOCK, (WNDPROC)highest_temp_block_subclass_proc);
+     * reasoning, including why this is now clamped rather than a bare
+     * centering formula). Same WM_CREATE-time CLIENT_WIDTH guess as
+     * everything else in this card; relayout_for_size() recomputes
+     * against the real client_w once the window's actual size is known. */
+    {
+        int wm_create_mode_x = CLIENT_WIDTH - SIDEBAR_X - MODE_ICON_MARGIN - MODE_ICON_SIZE;
+        int wm_create_avg_right = GRID_LEFT + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP + AVG_TEMP_BLOCK_W;
+        int wm_create_highest_x = (wm_create_avg_right + wm_create_mode_x) / 2 - HIGHEST_TEMP_BLOCK_W / 2;
+        if (wm_create_highest_x + HIGHEST_TEMP_BLOCK_W > wm_create_mode_x) {
+            wm_create_highest_x = wm_create_mode_x - HIGHEST_TEMP_BLOCK_W;
+        }
+        g_highest_temp_caption_lbl = add_ctrl(hwnd, "STATIC", "Highest Temp Today", SS_CENTER | SS_NOPREFIX,
+                                               wm_create_highest_x,
+                                               SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, HIGHEST_TEMP_BLOCK_W, 16, IDC_HIGHEST_TEMP_CAPTION_LBL);
+        g_highest_temp_block = add_pill(hwnd, "",
+                                         wm_create_highest_x,
+                                         SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y, HIGHEST_TEMP_BLOCK_W, MODE_ICON_SIZE,
+                                         IDC_HIGHEST_TEMP_BLOCK, (WNDPROC)highest_temp_block_subclass_proc);
+    }
     if (g_quick_panel_label && g_header_font) {
         SendMessageA(g_quick_panel_label, WM_SETFONT, (WPARAM)g_header_font, (LPARAM)TRUE);
     }
@@ -5714,6 +5723,20 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         int avg_x = grid_left + 12 + COMMANDS_COL_W + COMMANDS_COL_GAP;
         int avg_right = avg_x + AVG_TEMP_BLOCK_W;
         int highest_x = (avg_right + mode_x) / 2 - HIGHEST_TEMP_BLOCK_W / 2;
+        /* Direct report, actually root-caused this time: Highest Temp
+         * Today is created AFTER the Mode icon (see build_controls()),
+         * so it paints on top of it in z-order - widening Commands
+         * shrank the avg_right..mode_x gap this block centers in by the
+         * same 104px, and once that gap got smaller than
+         * HIGHEST_TEMP_BLOCK_W, this block started overlapping and
+         * painting over the icon (icon only looked right right after
+         * a click forced its own redraw, until the next periodic
+         * repaint covered it again - never a crescent-shape bug at
+         * all). Hard-clamp so this block can never cross into Mode's
+         * own space, regardless of how tight the gap gets. */
+        if (highest_x + HIGHEST_TEMP_BLOCK_W > mode_x) {
+            highest_x = mode_x - HIGHEST_TEMP_BLOCK_W;
+        }
         if (summary_h < MIN_SUMMARY_H) {
             summary_h = MIN_SUMMARY_H;
         }
