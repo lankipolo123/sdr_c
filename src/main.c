@@ -2937,6 +2937,19 @@ static void ui_update_all_select_checkbox_visibility(void);
  * level) after connecting until something else happened to change. */
 static void ui_invalidate_all_channel_cache(void);
 static void ui_refresh_all_channels(void);
+/* Also defined below (needs channel_set_mode()/channel_turn_output_on()
+ * already declared via channels.h, and g_kill_switch_tripped) - RS422
+ * connecting for the first time this session fires the same "power
+ * everything on" sequence Reset to Default and close now both use (see
+ * that function's own comment on the 3-way scope decision). */
+static void on_reset_to_default_clicked(void);
+static bool g_launch_power_on_done; /* one-shot - only the FIRST RS422
+                                      * connect this session triggers
+                                      * the auto power-on, not every
+                                      * reconnect (e.g. after a manual
+                                      * Disconnect/Connect mid-session,
+                                      * which shouldn't silently power
+                                      * everything back on unasked). */
 
 static void conn_on_connected_changed(bool connected, void *ctx) {
     (void)ctx;
@@ -2954,6 +2967,17 @@ static void conn_on_connected_changed(bool connected, void *ctx) {
      * that's the border covered too, not just the status text. */
     ui_invalidate_all_channel_cache();
     ui_refresh_all_channels();
+
+    /* Direct instruction: the first time RS422 connects this session
+     * (launch's own auto-connect, or the background retry catching up
+     * a few seconds later - either way, whichever actually succeeds
+     * first), power every channel on with Pseudo Random Noise - so
+     * opening the app and having it connect is enough on its own,
+     * nothing left to click before it's ready to demo. */
+    if (connected && !g_launch_power_on_done) {
+        g_launch_power_on_done = true;
+        on_reset_to_default_clicked();
+    }
 }
 
 static void conn_on_frame(const ProtoParsedFrame *frame, void *ctx) {
@@ -3641,14 +3665,39 @@ static void on_open_all_clicked(void) {
  * resets each card's own mode combo back to White Noise (index 0) so
  * it reads as "what was just sent", matching a fresh card's own
  * initial selection in add_channel_card(). */
+/* Direct decision - the "default" state changed from White Noise/OFF
+ * to White Noise/ON: every channel powered on with Pseudo Random
+ * Noise. This is the SAME function used by the Reset to Default
+ * button, the close-time safety reset (WM_DESTROY), and once after a
+ * successful launch auto-connect (see conn_on_connected_changed()) -
+ * all 3 now power on instead of off, a direct instruction acknowledging
+ * this means closing the app no longer leaves every channel OFF.
+ * Kill-switch-tripped channels are skipped, same convention
+ * on_open_all_clicked()/bulk_turn_output_on() already use - a tripped
+ * channel never gets powered back on by an automatic/bulk action. */
 static void on_reset_to_default_clicked(void) {
     int i;
+    int skipped = 0;
     for (i = 0; i < MAX_CHANNELS; i++) {
         channel_set_mode(i, PROTO_MODE_WHITE_NOISE);
-        channel_turn_output_off(i);
         SendMessageA(GetDlgItem(g_hwnd, channel_mode_id(i)), CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
+        if (!g_kill_switch_tripped[i]) {
+            channel_turn_output_on(i);
+        } else {
+            skipped++;
+        }
     }
-    log_add_status_change("Reset to Default: every channel set to White Noise, OFF");
+    if (skipped > 0) {
+        /* 128, not 96 - this exact message (97 chars + NUL) would have
+         * overflowed a 96-byte buffer; measured before shipping this
+         * time instead of finding out the hard way (see Global
+         * Activate's own comment on the same class of bug). */
+        char msg[128];
+        wsprintfA(msg, "Reset to Default: every channel set to Pseudo Random Noise, ON (%d skipped - kill switch tripped)", skipped);
+        log_add_status_change(msg);
+    } else {
+        log_add_status_change("Reset to Default: every channel set to Pseudo Random Noise, ON");
+    }
 }
 
 static void bulk_apply_level(int level) {
@@ -5868,10 +5917,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             conn_init(&g_conn, ccb);
             channels_init(&g_conn);
             /* load_channel_settings() intentionally NOT called - direct
-             * decision: every launch now starts every channel at its
+             * decision: every launch starts every channel at its plain
              * channels_init() defaults (White Noise, OFF) regardless of
-             * whatever was saved before closing, same as clicking Reset
-             * to Default but automatic on open. Nothing is persisted to
+             * whatever was saved before closing - this is only the
+             * split-second in-memory state before RS422 actually
+             * connects, though; once it does, conn_on_connected_changed()
+             * fires on_reset_to_default_clicked() once (see its own
+             * comment), which now powers everything ON instead. Nothing
+             * is persisted to
              * the .ini at all anymore now (save_settings() itself is
              * gone too, see its own removal comment) - Close performs
              * the same reset for real instead of writing it to disk. */
@@ -6190,20 +6243,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return 0;
             }
             if (id == IDC_CMD_CHANGE_ICON_BTN && code == BN_CLICKED) {
-                /* Same admin password gate the old lock badge used to
-                 * require before revealing Change Logo/Reset as plain
-                 * buttons (direct request to fold that into this
-                 * button instead) - see unlock_cw()'s own comment.
-                 * Once unlocked this run, later clicks skip straight
-                 * to the menu (unlock_cw() itself checks
-                 * g_cw_authorized first). */
+                /* Password gate removed (direct request) - Change Logo/
+                 * Reset behind this menu used to require unlock_cw()
+                 * first (the same admin password Continuous Wave uses),
+                 * folded in from the old lock badge. Now opens straight
+                 * to the menu, no gate. */
                 HMENU menu;
                 RECT btn_rc;
                 MENUINFO mi;
-
-                if (!unlock_cw(hwnd)) {
-                    return 0;
-                }
 
                 menu = CreatePopupMenu();
                 /* Owner-drawn (see WM_MEASUREITEM/WM_DRAWITEM's own
@@ -6897,7 +6944,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
              * close. Cancel just swallows WM_CLOSE (no DestroyWindow
              * call), which is the standard Win32 "stay open" idiom. */
             int result = MessageBoxA(hwnd,
-                "Every channel will be reset to its default settings (White Noise, OFF) before the app closes.\n\nClose ECM Controller?",
+                "Every channel will be set to Pseudo Random Noise and turned ON before the app closes - it will keep transmitting after you exit.\n\nClose ECM Controller?",
                 "Terminate ECM Controller", MB_OKCANCEL | MB_ICONWARNING);
             if (result == IDOK) {
                 DestroyWindow(hwnd);
