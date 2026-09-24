@@ -4970,53 +4970,12 @@ static void load_settings(void) {
     }
 }
 
-/* Must run AFTER channels_init() (which sets every channel back to its
- * hardcoded defaults) and after build_controls() (which needs the mode
- * combos/labels to already exist) - restores each channel's saved mode/
- * resume-to level/output_on via channel_restore_saved() (data only, no
- * serial send - see its own comment), then mirrors mode into the mode
- * combo's selection and the card's mode label so the UI actually shows
- * it. output_on/level need no manual mirroring here - ui_refresh_all_
- * channels() (called right after this, in WM_CREATE) reads them straight
- * off channels_get() same as any other state change.
- * GetPrivateProfileIntA's own default (-1) means "key missing", so a
- * channel with no saved entry is left exactly as channels_init() set it.
- * Output defaults to 0 (off) when missing - an .ini saved before this
- * field existed should not suddenly claim a channel is transmitting.
- *
- * Restored level is capped to LEVEL_LOW, never MEDIUM/HIGH - a channel
- * that was left running at High before the app closed used to reopen
- * showing "HIGH" (lit green border, right there on launch) which reads
- * as the rack coming up at full power the instant you open the app,
- * even though nothing is actually (re-)transmitted by this (see
- * channel_restore_saved()'s own comment - restoring state is never the
- * same as re-arming RF). Direct request: every card should default to
- * LOW on open, never a level that looks alarming at a glance. */
-static void load_channel_settings(void) {
-    char path[MAX_PATH + 8];
-    char section[8];
-    int i;
-
-    get_ini_path(path);
-
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        int mode, level, output_on;
-        wsprintfA(section, "Ch%d", i + 1);
-        mode = GetPrivateProfileIntA(section, "Mode", -1, path);
-        level = GetPrivateProfileIntA(section, "Level", -1, path);
-        output_on = GetPrivateProfileIntA(section, "Output", 0, path);
-        g_channel_uptime_base_seconds[i] = (ULONGLONG)(unsigned long)GetPrivateProfileIntA(section, "UptimeSeconds", 0, path);
-        if (mode < 0 || level < 0) {
-            continue;
-        }
-        if (level > LEVEL_LOW) {
-            level = LEVEL_LOW;
-        }
-        channel_restore_saved(i, (uint8_t)mode, level, output_on != 0);
-        SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
-        SetWindowTextA(g_card_mode_lbl[i], proto_mode_name((uint8_t)mode));
-    }
-}
+/* load_channel_settings() (restored each channel's saved mode/level/
+ * output_on/uptime from the .ini on launch) was removed here - direct
+ * decision: every launch now starts every channel at its channels_init()
+ * defaults, ignoring whatever was saved before closing. Full original
+ * implementation (including why restored level was capped to LEVEL_LOW)
+ * is recoverable from git history if this ever needs reverting. */
 
 /* IDD_CW_PASSWORD's DLGPROC - just collects whatever was typed into
  * IDC_CW_PW_EDIT on OK, leaves g_cw_pw_input untouched on Cancel (caller
@@ -5828,7 +5787,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             ccb.on_error = conn_on_error;
             conn_init(&g_conn, ccb);
             channels_init(&g_conn);
-            load_channel_settings(); /* after channels_init(), which it would otherwise overwrite */
+            /* load_channel_settings() intentionally NOT called - direct
+             * decision: every launch now starts every channel at its
+             * channels_init() defaults (White Noise, OFF) regardless of
+             * whatever was saved before closing, same as clicking Reset
+             * to Default but automatic on open. save_settings() still
+             * writes Ch1..16's Mode/Level/Output/UptimeSeconds to the
+             * .ini on close (untouched, in case this gets reverted) -
+             * it's just never read back on the way back in anymore. */
             sensor_init(&g_sensor);
             {
                 int addr_i;
