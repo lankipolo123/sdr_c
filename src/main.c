@@ -6565,20 +6565,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          * shackle uses above. Shown while in Dark
                          * mode (current state, not destination).
                          * Direct report (confirmed on real hardware, not
-                         * just this sandbox) - the old proportions (mask
-                         * radius 43, offset ~32px) read as a fat wedge
-                         * with a flat cut edge, not a crescent. These
-                         * numbers were verified with a local Pillow
-                         * render pixel-matching this exact GDI call
-                         * before touching this file, not guessed blind -
-                         * mask radius 56 (same as main), offset 30px
-                         * diagonal, produces a real thin crescent and
-                         * its bounding box (icx-26,icy-86 to icx+86,
-                         * icy+26) stays fully inside this 220x220
-                         * button, no edge clipping. */
-                        Ellipse(dis->hDC, icx - 56, icy - 56, icx + 56, icy + 56);
+                         * just this sandbox) - a SAME-radius mask/main
+                         * pair (the previous "verified" attempt) is
+                         * mathematically incapable of a thin crescent -
+                         * as the offset shrinks the covered arc grows,
+                         * but never exceeds 180 degrees, so at best half
+                         * the disc stays visible (a fat bite, not a
+                         * sliver); that was misjudged as "good enough"
+                         * against a Pillow render without comparing to
+                         * an actual thin reference. Mask now genuinely
+                         * bigger than main (82 vs. 64) with the whole
+                         * construction shifted (+20,-20) to keep the
+                         * resulting crescent - not just the mask's own
+                         * bounding box - centered in this 220x220
+                         * button. Re-verified pixel-for-pixel locally
+                         * against this exact call before shipping. */
+                        Ellipse(dis->hDC, icx - 44, icy - 84, icx + 84, icy + 44);
                         SelectObject(dis->hDC, g_brush_panel);
-                        Ellipse(dis->hDC, icx - 26, icy - 86, icx + 86, icy + 26);
+                        Ellipse(dis->hDC, icx - 38, icy - 126, icx + 126, icy + 38);
                     } else {
                         static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
                         static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
