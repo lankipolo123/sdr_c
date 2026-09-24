@@ -3515,7 +3515,7 @@ static void on_close_all_clicked(void) {
     for (i = 0; i < MAX_CHANNELS; i++) {
         channel_turn_output_off(i);
     }
-    log_add_status_change("Close All: every channel commanded OFF");
+    log_add_status_change("Emergency Shutdown: every channel commanded OFF");
 }
 
 static void on_open_all_clicked(void) {
@@ -3529,11 +3529,17 @@ static void on_open_all_clicked(void) {
         }
     }
     if (skipped > 0) {
-        char msg[64];
-        wsprintfA(msg, "Open All: channels commanded ON (%d skipped - kill switch tripped)", skipped);
+        /* 96, not the 64 this used to be - "Global Activate: channels
+         * commanded ON (16 skipped - kill switch tripped)" alone is 73
+         * chars + NUL, already past 64 (the old "Open All:" wording was
+         * already right at that edge too - wsprintfA doesn't bounds-
+         * check, so this was silently one rename away from overflowing
+         * the stack). */
+        char msg[96];
+        wsprintfA(msg, "Global Activate: channels commanded ON (%d skipped - kill switch tripped)", skipped);
         log_add_status_change(msg);
     } else {
-        log_add_status_change("Open All: every channel commanded ON");
+        log_add_status_change("Global Activate: every channel commanded ON");
     }
 }
 
@@ -5362,11 +5368,11 @@ static void build_controls(HWND hwnd) {
      * right at GRID_LEFT + 12. */
     g_quick_panel_label = add_ctrl(hwnd, "STATIC", "Commands", SS_CENTER | SS_NOPREFIX,
                                     GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, 0);
-    add_ctrl(hwnd, "BUTTON", "Close All", BS_OWNERDRAW | WS_TABSTOP,
+    add_ctrl(hwnd, "BUTTON", "Emergency Shutdown", BS_OWNERDRAW | WS_TABSTOP,
              GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, IDC_CLOSE_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open All", BS_OWNERDRAW | WS_TABSTOP,
+    add_ctrl(hwnd, "BUTTON", "Global Activate", BS_OWNERDRAW | WS_TABSTOP,
              GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, IDC_OPEN_ALL_BTN);
-    add_ctrl(hwnd, "BUTTON", "Open Log", BS_OWNERDRAW | WS_TABSTOP,
+    add_ctrl(hwnd, "BUTTON", "Open Csv Logs", BS_OWNERDRAW | WS_TABSTOP,
              GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, IDC_OPEN_LOG_BTN);
     add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP,
              GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, IDC_CMD_CHANGE_ICON_BTN);
@@ -6706,6 +6712,26 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     DeleteObject(white_brush);
                     rc.left += 22;
                 }
+                /* Reset/refresh glyph (circular arrow, open on one side,
+                 * with a small arrowhead at the open end) - the one
+                 * button in this row with no icon before, direct
+                 * request. Same left-inset/rc.left-shift convention as
+                 * every other icon here. */
+                if (dis->CtlID == IDC_RESET_TO_DEFAULT_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                    Arc(dis->hDC, icx - 6, icy - 6, icx + 6, icy + 6, icx, icy - 6, icx + 2, icy - 6);
+                    MoveToEx(dis->hDC, icx - 3, icy - 9, NULL);
+                    LineTo(dis->hDC, icx + 2, icy - 6);
+                    LineTo(dis->hDC, icx - 2, icy - 3);
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_pen);
+                    rc.left += 22;
+                }
                 /* Dimmed text on top of the dimmed fill - white text on
                  * a gray disabled button still read as "basically the
                  * same brightness" as white text on a bright enabled
@@ -6713,7 +6739,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 SetTextColor(dis->hDC, disabled ? COLOR_APP_MUTED : RGB(255, 255, 255));
                 SetBkMode(dis->hDC, TRANSPARENT);
                 GetWindowTextA(dis->hwndItem, text, sizeof(text));
-                DrawTextA(dis->hDC, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                /* "Emergency Shutdown"/"Global Activate" don't fit this
+                 * row's 84px buttons on one line - word-wrap to 2 lines
+                 * instead of DT_SINGLELINE, then center that wrapped
+                 * block vertically by hand (DT_VCENTER only works with
+                 * DT_SINGLELINE). Everything else's text still fits on
+                 * one line, so DT_CALCRECT's height comes back the same
+                 * as a single line and this is a no-op for them. */
+                {
+                    RECT calc_rc = rc;
+                    int text_h;
+                    DrawTextA(dis->hDC, text, -1, &calc_rc, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+                    text_h = calc_rc.bottom - calc_rc.top;
+                    calc_rc = rc;
+                    calc_rc.top += ((rc.bottom - rc.top) - text_h) / 2;
+                    calc_rc.bottom = calc_rc.top + text_h;
+                    DrawTextA(dis->hDC, text, -1, &calc_rc, DT_CENTER | DT_WORDBREAK);
+                }
                 /* No dashed focus-rect after a click - the fill color
                  * already shows which button is active/current, the
                  * extra dotted outline just read as a stray line. */
