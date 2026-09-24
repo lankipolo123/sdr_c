@@ -6549,21 +6549,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          * it - same layering trick the padlock's
                          * shackle uses above. Shown while in Dark
                          * mode (current state, not destination).
-                         * Direct report ("icon got cutoff") - a smaller/
-                         * closer mask circle just eats a corner, leaving
-                         * a fat wedge with a flat edge, not a crescent.
-                         * The classic crescent-icon proportions are a
-                         * SAME-size mask circle offset by roughly one
-                         * radius (a 44px offset here, radius 56, so
-                         * sqrt(44^2+44^2)~=62 =~ 56) - close to same-
-                         * size, offset-by-one-radius circles overlap
-                         * heavily and leave a genuinely thin sliver on
-                         * the far side, instead of a mask circle that's
-                         * both smaller AND closer, which just bites a
-                         * corner out. */
+                         * Reverted back to the original, shipped-for-
+                         * months geometry - several same-session
+                         * attempts to thin this into a more "classic"
+                         * crescent each made it worse (a fat wedge, then
+                         * a barely-visible sliver in the wrong spot),
+                         * never actually verified good before shipping.
+                         * This shape is a known-good, recognizable moon;
+                         * not touching it again without a confirmed-
+                         * good screenshot in hand first. */
                         Ellipse(dis->hDC, icx - 56, icy - 56, icx + 56, icy + 56);
                         SelectObject(dis->hDC, g_brush_panel);
-                        Ellipse(dis->hDC, icx - 12, icy - 100, icx + 100, icy + 12);
+                        Ellipse(dis->hDC, icx - 20, icy - 66, icx + 66, icy + 20);
                     } else {
                         static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
                         static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
