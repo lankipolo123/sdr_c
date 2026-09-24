@@ -75,25 +75,42 @@
 #define CONTENT_TOP  194 /* shifts down by the same 12px HEADER_H grew,
                             * keeping the usual 8px gap below the panel */
 
-/* Connection & Settings and Bulk Actions pushed right, compressing the
- * gaps to Bulk Actions and Ambient Temperature respectively (which
- * stays fixed, unshifted) - not making either section smaller, just
- * packing them closer together so the freed space shows up on the far
- * left of the header (before Connection & Settings) instead of just
- * sitting unused between the three sections. Applied as a flat offset
- * added to every one of that section's own x-coordinates below, rather
- * than hand-recomputing each one, so the original per-control layout
- * numbers stay visible/auditable in the source. */
-/* CONN_X_SHIFT is capped relative to whatever BULK_X_SHIFT currently
- * is - the "Disconnected" status label is Connection & Settings'
- * widest-reaching control (right edge at 301+CONN_X_SHIFT), and it
- * overlaps the Bulk Actions card's left border (444+BULK_X_SHIFT) once
- * CONN_X_SHIFT gets within ~5px of BULK_X_SHIFT+143. When BULK_X_SHIFT
- * changes, CONN_X_SHIFT needs to move by the same delta to keep this
- * gap - forgetting that once already caused the card's left edge to
- * look cut/incomplete. */
+/* Connection & Settings, Ambient Temperature and Bulk Actions each get
+ * a flat x-offset added to every one of that section's own coordinates
+ * below, rather than hand-recomputing each one, so the original
+ * per-control layout numbers stay visible/auditable in the source.
+ *
+ * Header row order (direct request): Connection & Settings, then
+ * Ambient Temperature right beside it, then the heatmap filling the
+ * gap between Ambient Temperature and Bulk Actions (so it reads as
+ * centered), then Bulk Actions in the header's own right corner.
+ * CONN_X_SHIFT is unchanged from before this reorder - Connection &
+ * Settings stays put on the far left. AMBIENT_X_SHIFT and
+ * BULK_X_SHIFT are calibrated against this app's actual maximized
+ * width (1920 - see CLAUDE.md/this session's own testing, not the
+ * CLIENT_WIDTH=1660 design-minimum): Bulk Actions is fixed-position
+ * like the other two sections (not resize-aware the way the heatmap
+ * is - see add_sensor_heatmap()'s own call below), so at exactly the
+ * 1660px minimum window size it would run past the header's right
+ * edge. Not a practical issue - SW_SHOWMAXIMIZED means the window is
+ * always at the real screen width in normal use - but worth knowing
+ * if this window is ever manually shrunk to its floor size.
+ *
+ * CONN_X_SHIFT still caps relative to AMBIENT_X_SHIFT the same way it
+ * used to relative to BULK_X_SHIFT: Connection & Settings' widest
+ * control (right edge at 301+CONN_X_SHIFT = 557) must stay clear of
+ * Ambient Temperature's new leftmost control (1025+AMBIENT_X_SHIFT =
+ * 597) - a 40px gap right now. Moving either shift needs the other
+ * nudged to keep that gap, same as the old CONN/BULK relationship. */
 #define CONN_X_SHIFT 256
-#define BULK_X_SHIFT 118
+#define AMBIENT_X_SHIFT (-428)
+#define BULK_X_SHIFT 1002
+
+/* Heatmap fills the gap between Ambient Temperature and Bulk Actions -
+ * see add_sensor_heatmap()'s own call in build_controls() for the full
+ * derivation of these two numbers. */
+#define HEATMAP_LEFT 781
+#define HEATMAP_RIGHT 1432
 
 static const int BAUD_OPTIONS[] = { 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 2000000 };
 #define BAUD_OPTIONS_COUNT 9
@@ -4958,36 +4975,31 @@ static void build_controls(HWND hwnd) {
      * Port+Refresh+Connect sharing one wide row - direct request to
      * take up less width and more height, freeing more of the header's
      * resize gap for the heatmap next to it. */
-    add_header_icon(hwnd, 1033, 14, ICON_WAVE);
-    add_header(hwnd, "Ambient Temperature", 1051, 14, 260, 18);
-    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025, 36, 32, 16, 0);
-    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059, 34, 90, 140, IDC_SENSOR_PORT_COMBO));
-    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1025, 58, 64, 18, IDC_SENSOR_REFRESH_BTN);
-    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1097, 58, 72, 18, IDC_SENSOR_CONNECT_BTN);
-    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1025, 82, 130, 16, IDC_SENSOR_STATUS_LBL);
+    add_header_icon(hwnd, 1033 + AMBIENT_X_SHIFT, 14, ICON_WAVE);
+    add_header(hwnd, "Ambient Temperature", 1051 + AMBIENT_X_SHIFT, 14, 260, 18);
+    add_ctrl(hwnd, "STATIC", "Port:", SS_LEFT, 1025 + AMBIENT_X_SHIFT, 36, 32, 16, 0);
+    make_combo_readonly(add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP, 1059 + AMBIENT_X_SHIFT, 34, 90, 140, IDC_SENSOR_PORT_COMBO));
+    add_ctrl(hwnd, "BUTTON", "Refresh", BS_OWNERDRAW | WS_TABSTOP, 1025 + AMBIENT_X_SHIFT, 58, 64, 18, IDC_SENSOR_REFRESH_BTN);
+    add_ctrl(hwnd, "BUTTON", "Connect", BS_OWNERDRAW | WS_TABSTOP, 1097 + AMBIENT_X_SHIFT, 58, 72, 18, IDC_SENSOR_CONNECT_BTN);
+    add_ctrl(hwnd, "STATIC", "Disconnected", SS_LEFT, 1025 + AMBIENT_X_SHIFT, 82, 130, 16, IDC_SENSOR_STATUS_LBL);
     /* Kill Switch status/trip/reset and Open Log moved out of here into
      * their own small panel above Spectrum - see g_quick_panel below.
      * The Avg pill moved out too - now the large AVG TEMP block on the
      * Summary card's left side (see IDC_SENSOR_TEMP_LBL below, mode_x's
      * comment). */
 
-    /* The heatmap fills the empty gap that opens up inside the header
-     * panel itself once the window is wider than the design minimum -
-     * the panel stretches (see relayout_for_size()) but Ambient
-     * Temperature's own controls stay fixed-position, leaving a growing
-     * unused strip to their right. Horizontal, right of those controls,
-     * stretching to track the panel's right edge on resize instead of
-     * a fixed width. */
-    /* Left edge moved 1320 -> 1190 -> 1240 - the 1190 value used the
-     * space the narrower commands block freed up, but left Ambient
-     * Temperature's own Port/Connect/Kill Switch column cramped right
-     * up against the heatmap with barely any gap (direct request for
-     * more room there) - 1240 gives that column ~50px more breathing
-     * space (its widest control, Kill Switch, ends at x=1135) and
-     * narrows the heatmap by the same amount. Right margin widened
-     * 15 -> 30 so it clears the panel's corner rivet decoration
-     * instead of running under it. */
-    g_sensor_heatmap = add_sensor_heatmap(hwnd, 1240, 14, CLIENT_WIDTH - SIDEBAR_X - 1240 - 30, 150);
+    /* The heatmap fills the gap between Ambient Temperature (left) and
+     * Bulk Actions (right), so it reads as centered in the header row -
+     * direct request for this reorder (was: Connection & Settings,
+     * Bulk Actions, Ambient Temperature, heatmap off to the right of
+     * everything). Both HEATMAP_LEFT and HEATMAP_RIGHT below are fixed,
+     * not resize-aware, matching Bulk Actions' own now-fixed position
+     * (see BULK_X_SHIFT's comment) - left edge is Ambient Temperature's
+     * widest control (Connect button, 1097+AMBIENT_X_SHIFT+72=741) plus
+     * the same 40px gap used elsewhere in this header; right edge is
+     * Bulk Actions' leftmost control (470+BULK_X_SHIFT=1472) minus that
+     * same 40px gap. */
+    g_sensor_heatmap = add_sensor_heatmap(hwnd, HEATMAP_LEFT, 14, HEATMAP_RIGHT - HEATMAP_LEFT, 150);
 
     /* Command Panel: 4 buttons, 1 row, max height - direct request/
      * correction. Kill Switch came out of this panel entirely (manual
@@ -5333,9 +5345,13 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     }
 
     MoveWindow(g_header_panel, SIDEBAR_X, 6, client_w - 2 * SIDEBAR_X, HEADER_H, FALSE);
-    /* Stretches right along with the header panel itself, filling the
-     * gap that opens up next to it on resize (see build_controls()). */
-    MoveWindow(g_sensor_heatmap, 1240, 14, client_w - SIDEBAR_X - 1240 - 30, 150, FALSE);
+    /* Fixed between Ambient Temperature and Bulk Actions, same as its
+     * own creation in build_controls() - see HEATMAP_LEFT/HEATMAP_RIGHT
+     * there. Not resize-aware, same as Bulk Actions itself now isn't
+     * (see BULK_X_SHIFT's comment) - this only ever moves because the
+     * header panel it's sitting in also moves position (SIDEBAR_X, 6
+     * never actually change), not because it resizes with the window. */
+    MoveWindow(g_sensor_heatmap, HEATMAP_LEFT, 14, HEATMAP_RIGHT - HEATMAP_LEFT, 150, FALSE);
     MoveWindow(g_quick_panel, SIDEBAR_X, CONTENT_TOP, sidebar_w, QUICK_PANEL_H, FALSE);
     MoveWindow(g_quick_panel_label, 22, CONTENT_TOP + 16, 76, 16, FALSE);
     MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), 108, CONTENT_TOP + 6, 76, 36, FALSE);
@@ -6141,7 +6157,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                      * flipped to Light mode, the icon vanished entirely,
                      * same class of bug the heatmap's idle color had).
                      * COLOR_APP_HEADER matches the padlock glyph's own
-                     * color above, for the same reason. */
+                     * color above, for the same reason - used for the
+                     * moon (Dark mode). The sun (Light mode) gets its
+                     * own warm yellow instead - direct request - which
+                     * reads fine on both the white Light-mode panel and
+                     * (moot, since the sun only ever shows in Light
+                     * mode) the dark one. */
                     HBRUSH glyph_brush = CreateSolidBrush(COLOR_APP_HEADER);
                     HPEN old_pen_i;
                     HBRUSH old_brush_i;
@@ -6163,9 +6184,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     } else {
                         static const int ray_dx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };
                         static const int ray_dy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
-                        HPEN ray_pen = CreatePen(PS_SOLID, 10, COLOR_APP_HEADER);
+                        HBRUSH sun_brush = CreateSolidBrush(RGB(255, 196, 0));
+                        HPEN ray_pen = CreatePen(PS_SOLID, 10, RGB(255, 196, 0));
                         int ri;
 
+                        SelectObject(dis->hDC, sun_brush);
                         Ellipse(dis->hDC, icx - 36, icy - 36, icx + 36, icy + 36);
                         SelectObject(dis->hDC, ray_pen);
                         for (ri = 0; ri < 8; ri++) {
@@ -6173,6 +6196,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                             LineTo(dis->hDC, icx + ray_dx[ri] * 66, icy + ray_dy[ri] * 66);
                         }
                         DeleteObject(ray_pen);
+                        DeleteObject(sun_brush);
                     }
                     SelectObject(dis->hDC, old_brush_i);
                     SelectObject(dis->hDC, old_pen_i);
