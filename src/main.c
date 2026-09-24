@@ -295,9 +295,17 @@ static COLORREF COLOR_APP_SHADOW;
  * MODE_ICON_SIZE (220) height as the pill/icon blocks below its own
  * caption (64*3 + 14*2 = 220) - direct correction, the buttons were
  * still the original single-row panel's 36px tall, leaving Commands
- * looking short with dead space under it next to the other 3 columns. */
-#define COMMANDS_COL_W 176
+ * looking short with dead space under it next to the other 3 columns.
+ * COMMANDS_COL_W itself grown 176 -> 280 (direct request - it read as
+ * noticeably narrower than AVG TEMP/Highest Temp/Mode's own footprint
+ * next to it) - SUMMARY_CMD_BTN_W/COL2_X derive the 2 button columns'
+ * width/spacing from it instead of the old hardcoded 84/104, so this
+ * is the only number to change to resize the whole block again. */
+#define COMMANDS_COL_W 280
 #define COMMANDS_COL_GAP 40
+#define SUMMARY_CMD_BTN_GAP 8
+#define SUMMARY_CMD_BTN_W ((COMMANDS_COL_W - SUMMARY_CMD_BTN_GAP) / 2)
+#define SUMMARY_CMD_COL2_X (12 + SUMMARY_CMD_BTN_W + SUMMARY_CMD_BTN_GAP)
 #define SUMMARY_CMD_ROW_H 64
 #define SUMMARY_CMD_ROW1_Y 0
 #define SUMMARY_CMD_ROW2_Y 78
@@ -467,6 +475,11 @@ static HBRUSH g_brush_connected;
 static HBRUSH g_brush_disconnected;
 static HBRUSH g_brush_level_medium; /* matches ch_gauge_stop_color(LEVEL_MEDIUM) */
 static HBRUSH g_brush_level_off;    /* matches ch_gauge_stop_color(LEVEL_OFF) */
+static HBRUSH g_brush_reset_default; /* Reset to Default's own light-gray
+                                       * fill (black text on top) - direct
+                                       * request, distinct from the dark
+                                       * COLOR_APP_MUTED every other
+                                       * "off/neutral" fill here uses. */
 static HBRUSH g_brush_shadow;
 static COLORREF g_shadow_color; /* was `static const` - now set by
                                   * create_theme_brushes(), see its own
@@ -1475,6 +1488,7 @@ static void create_theme_brushes(void) {
     if (g_brush_connected) DeleteObject(g_brush_connected);
     if (g_brush_disconnected) DeleteObject(g_brush_disconnected);
     if (g_brush_level_off) DeleteObject(g_brush_level_off);
+    if (g_brush_reset_default) DeleteObject(g_brush_reset_default);
     if (g_brush_shadow) DeleteObject(g_brush_shadow);
     if (g_brush_dot_pattern) DeleteObject(g_brush_dot_pattern);
     if (g_dot_pattern_bmp) DeleteObject(g_dot_pattern_bmp);
@@ -1488,6 +1502,7 @@ static void create_theme_brushes(void) {
     g_brush_connected = CreateSolidBrush(COLOR_APP_CONNECTED);
     g_brush_disconnected = CreateSolidBrush(COLOR_APP_DISCONNECTED);
     g_brush_level_off = CreateSolidBrush(COLOR_APP_MUTED);
+    g_brush_reset_default = CreateSolidBrush(RGB(200, 200, 200));
     g_brush_shadow = CreateSolidBrush(COLOR_APP_SHADOW);
     g_shadow_color = COLOR_APP_SHADOW;
     build_dot_pattern_brush();
@@ -2742,8 +2757,11 @@ static HWND loading_dialog_show(const char *message) {
      * as an owner specifically. Real Windows (the actual deployment
      * target) shows dialogs from WM_DESTROY/WM_CLOSE routinely - this
      * couldn't be verified visually in-sandbox, only that the code
-     * itself runs correctly (blocks, calls save_settings(), the .ini
-     * comes out with the right data - confirmed). NULL owner is kept
+     * itself runs correctly (blocked and returned as expected - the
+     * WM_DESTROY call this was originally verified against was
+     * save_settings(), since removed; WM_DESTROY's "Restoring to
+     * default..." now wraps on_reset_to_default_clicked() instead,
+     * same blocking-call shape). NULL owner is kept
      * anyway since it's the more correct/defensive choice regardless -
      * no window should depend on an owner that might be mid-teardown -
      * just don't read it as "the fix" for the black-screen report. */
@@ -4866,13 +4884,6 @@ static void reset_custom_logo(HWND hwnd) {
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
-static void select_combo_by_text(HWND combo, const char *text) {
-    int idx = (int)SendMessageA(combo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)text);
-    if (idx != CB_ERR) {
-        SendMessageA(combo, CB_SETCURSEL, idx, 0);
-    }
-}
-
 /* 'Xd HH:MM:SS' past a day, else plain 'HH:MM:SS' - see the uptime
  * globals' comment. out must be at least 20 bytes (wsprintfA itself has
  * no length limit to pass through, so that's on the caller). */
@@ -4898,89 +4909,16 @@ static ULONGLONG channel_uptime_seconds(int idx) {
     return total;
 }
 
-static void save_settings(void) {
-    char path[MAX_PATH + 8];
-    char buf[32];
-
-    get_ini_path(path);
-
-    GetDlgItemTextA(g_hwnd, IDC_PORT_COMBO, buf, sizeof(buf));
-    WritePrivateProfileStringA("RS422", "Port", buf, path);
-    GetDlgItemTextA(g_hwnd, IDC_BAUD_COMBO, buf, sizeof(buf));
-    WritePrivateProfileStringA("RS422", "Baud", buf, path);
-    GetDlgItemTextA(g_hwnd, IDC_DATABITS_COMBO, buf, sizeof(buf));
-    WritePrivateProfileStringA("RS422", "DataBits", buf, path);
-    GetDlgItemTextA(g_hwnd, IDC_PARITY_COMBO, buf, sizeof(buf));
-    WritePrivateProfileStringA("RS422", "Parity", buf, path);
-
-    GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, buf, sizeof(buf));
-    WritePrivateProfileStringA("Sensor", "Port", buf, path);
-
-    WritePrivateProfileStringA("UI", "LightMode", g_light_mode ? "1" : "0", path);
-
-    /* Per-channel mode + resume-to level + output_on, never saved before -
-     * reopening the app silently reset every channel back to White Noise/
-     * no level/OFF with no way to get a saved setup back. Saving output_on
-     * does NOT mean this app auto-resumes transmission on launch - see
-     * channel_restore_saved()'s comment: the amplifier hardware holds its
-     * own commanded state independently of whether this app is running,
-     * so restoring output_on into the UI just keeps it honest about what's
-     * actually still out there, without sending anything to get there. */
-    {
-        int i;
-        char section[8];
-        for (i = 0; i < MAX_CHANNELS; i++) {
-            const ChannelState *ch = channels_get(i);
-            wsprintfA(section, "Ch%d", i + 1);
-            wsprintfA(buf, "%u", (unsigned)ch->mode);
-            WritePrivateProfileStringA(section, "Mode", buf, path);
-            wsprintfA(buf, "%d", ch->last_level);
-            WritePrivateProfileStringA(section, "Level", buf, path);
-            wsprintfA(buf, "%d", ch->output_on ? 1 : 0);
-            WritePrivateProfileStringA(section, "Output", buf, path);
-            wsprintfA(buf, "%lu", (unsigned long)channel_uptime_seconds(i));
-            WritePrivateProfileStringA(section, "UptimeSeconds", buf, path);
-        }
-    }
-}
-
-/* Call after build_controls() has populated every combo's item list -
- * this only ever picks an existing item by matching text, never adds
- * one, so a saved port that's no longer plugged in just falls back to
- * whatever refresh_port_list() already defaulted to. */
-static void load_settings(void) {
-    char path[MAX_PATH + 8];
-    char buf[32];
-
-    get_ini_path(path);
-
-    if (GetPrivateProfileStringA("RS422", "Port", "", buf, sizeof(buf), path) > 0) {
-        select_combo_by_text(GetDlgItem(g_hwnd, IDC_PORT_COMBO), buf);
-    }
-    if (GetPrivateProfileStringA("RS422", "Baud", "", buf, sizeof(buf), path) > 0) {
-        select_combo_by_text(GetDlgItem(g_hwnd, IDC_BAUD_COMBO), buf);
-    }
-    if (GetPrivateProfileStringA("RS422", "DataBits", "", buf, sizeof(buf), path) > 0) {
-        select_combo_by_text(GetDlgItem(g_hwnd, IDC_DATABITS_COMBO), buf);
-    }
-    if (GetPrivateProfileStringA("RS422", "Parity", "", buf, sizeof(buf), path) > 0) {
-        select_combo_by_text(GetDlgItem(g_hwnd, IDC_PARITY_COMBO), buf);
-    }
-    if (GetPrivateProfileStringA("Sensor", "Port", "", buf, sizeof(buf), path) > 0) {
-        select_combo_by_text(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), buf);
-    }
-
-    /* g_light_mode/every brush already defaulted dark in WinMain, before
-     * this .ini could even be read - only need to act here if the saved
-     * value disagrees. Runs before ShowWindow(), so no explicit repaint
-     * is needed for this first application. */
-    if (GetPrivateProfileIntA("UI", "LightMode", 0, path) != 0) {
-        g_light_mode = true;
-        apply_theme();
-        create_theme_brushes();
-        SetWindowTextA(GetDlgItem(g_hwnd, IDC_THEME_TOGGLE_BTN), "Dark Mode");
-    }
-}
+/* save_settings()/load_settings() (RS422 Port/Baud/DataBits/Parity,
+ * Sensor Port, Light Mode, and per-channel Mode/Level/Output/Uptime,
+ * read/written to the .ini next to the exe) were removed here - direct
+ * decision, same reasoning as load_channel_settings() above: nothing
+ * persists across a close/reopen anymore, every launch starts at
+ * defaults and whatever port actually gets auto-connected, not a
+ * remembered one. Close now resets every channel to default for real
+ * (see WM_CLOSE/WM_DESTROY) instead of writing state to disk. Full
+ * original implementation is recoverable from git history if this
+ * ever needs reverting. */
 
 /* load_channel_settings() (restored each channel's saved mode/level/
  * output_on/uptime from the .ini on launch) was removed here - direct
@@ -5369,15 +5307,15 @@ static void build_controls(HWND hwnd) {
     g_quick_panel_label = add_ctrl(hwnd, "STATIC", "Commands", SS_CENTER | SS_NOPREFIX,
                                     GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, 0);
     add_ctrl(hwnd, "BUTTON", "Emergency Shutdown", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, IDC_CLOSE_ALL_BTN);
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_CLOSE_ALL_BTN);
     add_ctrl(hwnd, "BUTTON", "Global Activate", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, IDC_OPEN_ALL_BTN);
+             GRID_LEFT + SUMMARY_CMD_COL2_X, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_OPEN_ALL_BTN);
     add_ctrl(hwnd, "BUTTON", "Open Csv Logs", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, IDC_OPEN_LOG_BTN);
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_OPEN_LOG_BTN);
     add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 104, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, IDC_CMD_CHANGE_ICON_BTN);
+             GRID_LEFT + SUMMARY_CMD_COL2_X, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_CMD_CHANGE_ICON_BTN);
     add_ctrl(hwnd, "BUTTON", "Reset to Default", BS_OWNERDRAW | WS_TABSTOP,
-             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, SUMMARY_CMD_ROW_H, IDC_RESET_TO_DEFAULT_BTN);
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, COMMANDS_COL_W, SUMMARY_CMD_ROW_H, IDC_RESET_TO_DEFAULT_BTN);
     /* AVG TEMP/Mode/Highest Temp Today's shared content row - Commands
      * (above) is now this same row's leftmost column, so AVG TEMP
      * starts after it instead of at GRID_LEFT + 12 directly. Same
@@ -5676,11 +5614,11 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         MoveWindow(g_summary_header_icon, grid_left + 12, summary_y + 10, 14, 14, FALSE);
         MoveWindow(g_summary_header_lbl, grid_left + 30, summary_y + 10, 188, 18, FALSE);
         MoveWindow(g_quick_panel_label, grid_left + 12, summary_y + SUMMARY_CONTENT_Y, COMMANDS_COL_W, 16, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), grid_left + 104, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, 84, SUMMARY_CMD_ROW_H, FALSE);
-        MoveWindow(GetDlgItem(hwnd, IDC_RESET_TO_DEFAULT_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, 176, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_CLOSE_ALL_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), grid_left + SUMMARY_CMD_COL2_X, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), grid_left + SUMMARY_CMD_COL2_X, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_RESET_TO_DEFAULT_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, COMMANDS_COL_W, SUMMARY_CMD_ROW_H, FALSE);
         MoveWindow(g_avg_temp_caption_lbl, avg_x, summary_y + SUMMARY_CONTENT_Y, AVG_TEMP_BLOCK_W, 16, FALSE);
         MoveWindow(g_avg_temp_block, avg_x, summary_y + SUMMARY_CONTENT_BLOCK_Y, AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
         MoveWindow(g_highest_temp_caption_lbl, highest_x, summary_y + SUMMARY_CONTENT_Y, HIGHEST_TEMP_BLOCK_W, 16, FALSE);
@@ -5788,7 +5726,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             build_controls(hwnd);
             refresh_port_list();
             refresh_sensor_port_list();
-            load_settings();
             load_custom_logo();
             apply_custom_app_icon(hwnd);
             load_branding_icon(hwnd);
@@ -5803,10 +5740,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
              * decision: every launch now starts every channel at its
              * channels_init() defaults (White Noise, OFF) regardless of
              * whatever was saved before closing, same as clicking Reset
-             * to Default but automatic on open. save_settings() still
-             * writes Ch1..16's Mode/Level/Output/UptimeSeconds to the
-             * .ini on close (untouched, in case this gets reverted) -
-             * it's just never read back on the way back in anymore. */
+             * to Default but automatic on open. Nothing is persisted to
+             * the .ini at all anymore now (save_settings() itself is
+             * gone too, see its own removal comment) - Close performs
+             * the same reset for real instead of writing it to disk. */
             sensor_init(&g_sensor);
             {
                 int addr_i;
@@ -5901,6 +5838,36 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         case WM_TIMER:
             if (wParam == ID_POLL_TIMER) {
                 conn_poll(&g_conn);
+                /* Background retry while disconnected - the RS422 dongle
+                 * previously only ever got one AutoConnectSDR() attempt,
+                 * at launch (WM_APP_AUTOCONNECT). If Windows hadn't
+                 * finished enumerating it yet at that exact instant (a
+                 * real race - USB enumeration vs. this app's own
+                 * startup), that one shot failed and nothing ever tried
+                 * again without a manual Connect click. Every 5s (50
+                 * ticks @ 100ms) while still disconnected, retry the
+                 * same on_connect_clicked() path silently in the
+                 * background - covers both the startup race AND
+                 * plugging the dongle in after the app's already open.
+                 * ui_show_warning()'s failure logging is a plain Activity
+                 * Log line (see conn_on_error()), not a blocking dialog,
+                 * so this is safe to run unattended. Gated strictly on
+                 * !conn_is_connected() - on_connect_clicked() itself
+                 * toggles (Connect vs. Disconnect), so calling it while
+                 * already connected would disconnect it, the opposite of
+                 * what this is for. */
+                {
+                    static int rs422_retry_counter = 0;
+                    if (!conn_is_connected(&g_conn)) {
+                        rs422_retry_counter++;
+                        if (rs422_retry_counter >= 50) {
+                            rs422_retry_counter = 0;
+                            on_connect_clicked();
+                        }
+                    } else {
+                        rs422_retry_counter = 0;
+                    }
+                }
                 channels_poll();
                 ui_refresh_all_channels();
                 /* The background sensor service (once installed) polls
@@ -5961,10 +5928,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
 
                 /* ID_POLL_TIMER fires every 100ms, so every 10th tick is
-                 * ~1s (display update) and every 300th is ~30s (persist
-                 * to the .ini via save_settings() - not just at
-                 * WM_DESTROY - so a crash only loses a few seconds of
-                 * credit). */
+                 * ~1s (display update). Used to also persist to the
+                 * .ini every 300th tick (~30s) via save_settings() - no
+                 * longer, see that removal's own comment; uptime is
+                 * in-memory only now, same as every other channel
+                 * value, reset to 0 by Close's real hardware reset. */
                 g_uptime_tick_counter++;
                 if (g_uptime_tick_counter % 10 == 0) {
                     int ci;
@@ -5975,10 +5943,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         wsprintfA(label, "Up %s", uptime_str);
                         SetDlgItemTextA(hwnd, channel_uptime_id(ci), label);
                     }
-                }
-                if (g_uptime_tick_counter >= 300) {
-                    g_uptime_tick_counter = 0;
-                    save_settings();
                 }
 
                 InvalidateRect(GetDlgItem(hwnd, IDC_SPECTRUM_PLOT), NULL, FALSE);
@@ -6623,7 +6587,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     } else if (dis->CtlID == IDC_CMD_CHANGE_ICON_BTN) {
                         fill = g_brush_level_medium; /* orange - distinct from the other 3 */
                     } else if (dis->CtlID == IDC_RESET_TO_DEFAULT_BTN) {
-                        fill = g_brush_level_off; /* muted gray - a neutral "clear" action, distinct from the other 4 */
+                        /* Light gray + black text (below) instead of the
+                         * dark COLOR_APP_MUTED every other "off/neutral"
+                         * fill uses - direct request, reads as a plain
+                         * default/reset control rather than another
+                         * colored action next to Emergency Shutdown/
+                         * Global Activate/Open Csv Logs/Icon. */
+                        fill = g_brush_reset_default;
                     }
                     {
                         HPEN old_pen = (HPEN)SelectObject(dis->hDC, GetStockObject(NULL_PEN));
@@ -6720,8 +6690,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 if (dis->CtlID == IDC_RESET_TO_DEFAULT_BTN) {
                     int icx = rc.left + 13;
                     int icy = (rc.top + rc.bottom) / 2;
-                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
-                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    /* Black, not white - this button's fill is now light
+                     * gray (g_brush_reset_default), same reasoning as its
+                     * text below. */
+                    HPEN black_pen = CreatePen(PS_SOLID, 1, RGB(0, 0, 0));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, black_pen);
                     HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
                     Arc(dis->hDC, icx - 6, icy - 6, icx + 6, icy + 6, icx, icy - 6, icx + 2, icy - 6);
                     MoveToEx(dis->hDC, icx - 3, icy - 9, NULL);
@@ -6729,14 +6702,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     LineTo(dis->hDC, icx - 2, icy - 3);
                     SelectObject(dis->hDC, old_brush_i);
                     SelectObject(dis->hDC, old_pen_i);
-                    DeleteObject(white_pen);
+                    DeleteObject(black_pen);
                     rc.left += 22;
                 }
                 /* Dimmed text on top of the dimmed fill - white text on
                  * a gray disabled button still read as "basically the
                  * same brightness" as white text on a bright enabled
-                 * one from a few feet away. */
-                SetTextColor(dis->hDC, disabled ? COLOR_APP_MUTED : RGB(255, 255, 255));
+                 * one from a few feet away. Reset to Default is the one
+                 * exception - its fill is light gray, not a dark theme
+                 * color, so it gets black text instead (direct request),
+                 * still muted-gray when disabled like everything else. */
+                SetTextColor(dis->hDC, disabled ? COLOR_APP_MUTED
+                              : (dis->CtlID == IDC_RESET_TO_DEFAULT_BTN) ? RGB(0, 0, 0)
+                              : RGB(255, 255, 255));
                 SetBkMode(dis->hDC, TRANSPARENT);
                 GetWindowTextA(dis->hwndItem, text, sizeof(text));
                 /* "Emergency Shutdown"/"Global Activate" don't fit this
@@ -6764,17 +6742,35 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             break;
         }
 
+        case WM_CLOSE: {
+            /* Direct decision: closing now resets every channel to its
+             * default settings for real (same as the Reset to Default
+             * button), not just a local .ini write - so it needs a
+             * confirmation before doing it, unlike the old silent
+             * close. Cancel just swallows WM_CLOSE (no DestroyWindow
+             * call), which is the standard Win32 "stay open" idiom. */
+            int result = MessageBoxA(hwnd,
+                "Every channel will be reset to its default settings (White Noise, OFF) before the app closes.\n\nClose ECM Controller?",
+                "Terminate ECM Controller", MB_OKCANCEL | MB_ICONWARNING);
+            if (result == IDOK) {
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
+
         case WM_DESTROY:
-            /* Direct request - a loading dialog while closing saves,
-             * matching the one on launch. save_settings() itself is a
-             * handful of local .ini writes (genuinely fast), so
-             * loading_dialog_hide()'s own minimum-visible-time is what
-             * actually makes this readable rather than a one-frame
-             * flash. */
+            /* Direct decision - replaces the old "Saving..." .ini write
+             * (save_settings() removed, see its own comment) with an
+             * actual hardware reset: every channel back to White
+             * Noise/OFF, same real-send path the Reset to Default
+             * button uses, run while the connection is still open
+             * (before conn_disconnect() below). Loading dialog matches
+             * the one on launch/the old Saving one - same minimum-
+             * visible-time reasoning, this is genuinely fast too. */
             {
                 DWORD loading_t0 = GetTickCount();
-                HWND loading_hwnd = loading_dialog_show("Saving...");
-                save_settings();
+                HWND loading_hwnd = loading_dialog_show("Restoring to default...");
+                on_reset_to_default_clicked();
                 loading_dialog_hide(loading_hwnd, loading_t0);
             }
             KillTimer(hwnd, ID_POLL_TIMER);
