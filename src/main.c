@@ -1644,28 +1644,42 @@ static LRESULT CALLBACK avg_temp_block_subclass_proc(HWND hwnd, UINT msg, WPARAM
          * one boxed and one bare). */
         FillRect(hdc, &rc, g_brush_panel);
 
+        old_font = (HFONT)SelectObject(hdc, g_huge_font);
+
         if (has_avg) {
             wsprintfA(text, "%d.%dC", (int)avg_c, (int)(avg_c * 10) % 10);
+            text_len = lstrlenA(text);
+            GetTextExtentPoint32A(hdc, text, text_len, &text_size);
+            text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
+            text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
+
+            SetBkMode(hdc, TRANSPARENT);
+            BeginPath(hdc);
+            TextOutA(hdc, text_x, text_y, text, text_len);
+            EndPath(hdc);
+            text_rgn = PathToRegion(hdc);
+            if (text_rgn) {
+                SelectClipRgn(hdc, text_rgn);
+                gradient_fill_rect(hdc, rc, vivid_thermal_color(0.0f), vivid_thermal_color(1.0f), false);
+                SelectClipRgn(hdc, NULL);
+                DeleteObject(text_rgn);
+            }
         } else {
-            lstrcpynA(text, "-", (int)sizeof(text));
-        }
-        text_len = lstrlenA(text);
-
-        old_font = (HFONT)SelectObject(hdc, g_huge_font);
-        GetTextExtentPoint32A(hdc, text, text_len, &text_size);
-        text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
-        text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
-
-        SetBkMode(hdc, TRANSPARENT);
-        BeginPath(hdc);
-        TextOutA(hdc, text_x, text_y, text, text_len);
-        EndPath(hdc);
-        text_rgn = PathToRegion(hdc);
-        if (text_rgn) {
-            SelectClipRgn(hdc, text_rgn);
-            gradient_fill_rect(hdc, rc, vivid_thermal_color(0.0f), vivid_thermal_color(1.0f), false);
-            SelectClipRgn(hdc, NULL);
-            DeleteObject(text_rgn);
+            /* Plain muted text, no gradient-clip - a single "-" glyph
+             * run through the same clip-to-text-path gradient fill as a
+             * real reading rendered as a tiny, unreadable colored smudge
+             * (direct report: "what the fuck" reaction to exactly this).
+             * "--.-C" reads as "no reading yet" at a glance, same shape
+             * as the real "24.6C" text, plain muted color so it's
+             * clearly not a live thermal gradient. */
+            lstrcpynA(text, "--.-C", (int)sizeof(text));
+            text_len = lstrlenA(text);
+            GetTextExtentPoint32A(hdc, text, text_len, &text_size);
+            text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
+            text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLOR_APP_MUTED);
+            TextOutA(hdc, text_x, text_y, text, text_len);
         }
         SelectObject(hdc, old_font);
 
@@ -1700,29 +1714,40 @@ static LRESULT CALLBACK highest_temp_block_subclass_proc(HWND hwnd, UINT msg, WP
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, g_brush_panel);
 
+        old_font = (HFONT)SelectObject(hdc, g_big_font);
+
         if (g_highest_temp_today_valid) {
             wsprintfA(text, "%d.%dC - BAY%d", (int)g_highest_temp_today_c,
                       (int)(g_highest_temp_today_c * 10) % 10, g_highest_temp_today_bay + 1);
+            text_len = lstrlenA(text);
+            GetTextExtentPoint32A(hdc, text, text_len, &text_size);
+            text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
+            text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
+
+            SetBkMode(hdc, TRANSPARENT);
+            BeginPath(hdc);
+            TextOutA(hdc, text_x, text_y, text, text_len);
+            EndPath(hdc);
+            text_rgn = PathToRegion(hdc);
+            if (text_rgn) {
+                SelectClipRgn(hdc, text_rgn);
+                gradient_fill_rect(hdc, rc, vivid_thermal_color(0.0f), vivid_thermal_color(1.0f), false);
+                SelectClipRgn(hdc, NULL);
+                DeleteObject(text_rgn);
+            }
         } else {
-            lstrcpynA(text, "-", (int)sizeof(text));
-        }
-        text_len = lstrlenA(text);
-
-        old_font = (HFONT)SelectObject(hdc, g_big_font);
-        GetTextExtentPoint32A(hdc, text, text_len, &text_size);
-        text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
-        text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
-
-        SetBkMode(hdc, TRANSPARENT);
-        BeginPath(hdc);
-        TextOutA(hdc, text_x, text_y, text, text_len);
-        EndPath(hdc);
-        text_rgn = PathToRegion(hdc);
-        if (text_rgn) {
-            SelectClipRgn(hdc, text_rgn);
-            gradient_fill_rect(hdc, rc, vivid_thermal_color(0.0f), vivid_thermal_color(1.0f), false);
-            SelectClipRgn(hdc, NULL);
-            DeleteObject(text_rgn);
+            /* Same fix as avg_temp_block_subclass_proc's own "-" glyph -
+             * plain muted text instead of a single dash run through the
+             * gradient-clip-to-text-path effect (rendered as a tiny
+             * unreadable colored smudge, direct report). */
+            lstrcpynA(text, "No Data", (int)sizeof(text));
+            text_len = lstrlenA(text);
+            GetTextExtentPoint32A(hdc, text, text_len, &text_size);
+            text_x = rc.left + ((rc.right - rc.left) - text_size.cx) / 2;
+            text_y = rc.top + ((rc.bottom - rc.top) - text_size.cy) / 2;
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLOR_APP_MUTED);
+            TextOutA(hdc, text_x, text_y, text, text_len);
         }
         SelectObject(hdc, old_font);
 
