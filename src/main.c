@@ -2301,38 +2301,14 @@ static void ui_show_warning(const char *message);
 static void save_sensor_port(void);
 static void load_sensor_port(void);
 
-/* Shared owner-draw paint for the single "Close" button both of this
- * app's dedicated popup windows use (Activity Log/Highest Temp Log full
- * views, see log_view_wnd_proc()/templog_view_wnd_proc() below) - same
- * RoundRect+accent-fill+white-text shape every other owner-drawn button
- * in this app uses, factored out once since two separate WndProcs need
- * the identical thing. Direct correction: these used to be plain native
- * pushbuttons - the last non-owner-drawn buttons left in the app after
- * IDD_CLOSE_CONFIRM got themed. Accent blue, same as Cancel on that
- * dialog - a plain dismiss action, not an ON/OFF one. */
-static void draw_close_popup_button(DRAWITEMSTRUCT *dis) {
-    HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-    HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
-    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, g_brush_accent);
-    char text[32];
-    RoundRect(dis->hDC, dis->rcItem.left, dis->rcItem.top, dis->rcItem.right, dis->rcItem.bottom,
-              BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
-    SelectObject(dis->hDC, old_brush);
-    SelectObject(dis->hDC, old_pen);
-    DeleteObject(pen);
-    SetTextColor(dis->hDC, RGB(255, 255, 255));
-    SetBkMode(dis->hDC, TRANSPARENT);
-    GetWindowTextA(dis->hwndItem, text, sizeof(text));
-    DrawTextA(dis->hDC, text, -1, &dis->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-
 /* Full-log popup's own WndProc - a plain secondary window (WS_POPUP,
  * not a dialog resource), same "build it directly with CreateWindowEx"
  * approach every other control in this app already uses rather than
  * introducing a second, resource-file-based UI paradigm just for this.
- * Its Close button is owner-drawn now (see draw_close_popup_button()
- * above) - only the OS-native titlebar chrome is left alone, same as
- * every popup window in this app. */
+ * Native (non-owner-drawn) Close button is intentional, not an
+ * oversight - this app's own established precedent for "native OS
+ * chrome is fine for an occasional secondary/utility window" (also
+ * followed by IDD_CLOSE_CONFIRM - see close_confirm_dlg_proc()). */
 static LRESULT CALLBACK log_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_ERASEBKGND: {
@@ -2348,12 +2324,6 @@ static LRESULT CALLBACK log_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
             SetBkColor(hdc, COLOR_APP_FIELD_BG);
             return (LRESULT)g_brush_field;
         }
-        case WM_DRAWITEM:
-            if (((DRAWITEMSTRUCT *)lParam)->CtlID == IDC_LOG_VIEW_CLOSE_BTN) {
-                draw_close_popup_button((DRAWITEMSTRUCT *)lParam);
-                return TRUE;
-            }
-            return 0;
         case WM_SIZE: {
             int w = LOWORD(lParam);
             int h = HIWORD(lParam);
@@ -2393,12 +2363,6 @@ static LRESULT CALLBACK templog_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam
             SetBkColor(hdc, COLOR_APP_FIELD_BG);
             return (LRESULT)g_brush_field;
         }
-        case WM_DRAWITEM:
-            if (((DRAWITEMSTRUCT *)lParam)->CtlID == IDC_TEMPLOG_VIEW_CLOSE_BTN) {
-                draw_close_popup_button((DRAWITEMSTRUCT *)lParam);
-                return TRUE;
-            }
-            return 0;
         case WM_SIZE: {
             int w = LOWORD(lParam);
             int h = HIWORD(lParam);
@@ -2645,10 +2609,15 @@ static void on_highest_temp_log_clicked(void) {
     if (edit_ctrl) {
         SendMessageA(edit_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
     }
-    CreateWindowExA(0, "BUTTON", "Close",
-                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                     win_w - 12 - 80, win_h - 32, 80, 24, g_templog_view_hwnd,
-                     (HMENU)(INT_PTR)IDC_TEMPLOG_VIEW_CLOSE_BTN, g_hinst, NULL);
+    {
+        HWND close_btn = CreateWindowExA(0, "BUTTON", "Close",
+                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                          win_w - 12 - 80, win_h - 32, 80, 24, g_templog_view_hwnd,
+                                          (HMENU)(INT_PTR)IDC_TEMPLOG_VIEW_CLOSE_BTN, g_hinst, NULL);
+        if (close_btn) {
+            SendMessageA(close_btn, WM_SETFONT, (WPARAM)g_font, TRUE);
+        }
+    }
 
     free(buf);
     ShowWindow(g_templog_view_hwnd, SW_SHOW);
@@ -2759,10 +2728,15 @@ static void on_log_view_clicked(void) {
     if (edit_ctrl) {
         SendMessageA(edit_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
     }
-    CreateWindowExA(0, "BUTTON", "Close",
-                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                     win_w - 12 - 80, win_h - 32, 80, 24, g_log_view_hwnd,
-                     (HMENU)(INT_PTR)IDC_LOG_VIEW_CLOSE_BTN, g_hinst, NULL);
+    {
+        HWND close_btn = CreateWindowExA(0, "BUTTON", "Close",
+                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                          win_w - 12 - 80, win_h - 32, 80, 24, g_log_view_hwnd,
+                                          (HMENU)(INT_PTR)IDC_LOG_VIEW_CLOSE_BTN, g_hinst, NULL);
+        if (close_btn) {
+            SendMessageA(close_btn, WM_SETFONT, (WPARAM)g_font, TRUE);
+        }
+    }
 
     free(buf);
     ShowWindow(g_log_view_hwnd, SW_SHOW);
@@ -5824,65 +5798,20 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
-/* IDD_CLOSE_CONFIRM's DLGPROC - reports back which of the 3 buttons was
- * clicked (IDOK/IDC_CLOSE_KEEP_RUNNING_BTN/IDCANCEL) via EndDialog's
- * return value; WM_CLOSE (below) does the actual work once
+/* IDD_CLOSE_CONFIRM's DLGPROC - just reports back which of the 3
+ * buttons was clicked (IDOK/IDC_CLOSE_KEEP_RUNNING_BTN/IDCANCEL) via
+ * EndDialog's return value; WM_CLOSE (below) does the actual work once
  * DialogBoxParamA returns. WM_CLOSE on the dialog itself (its own
  * titlebar X) is handled explicitly as a Cancel - a modal dialog's
- * default proc does NOT do this on its own.
- *
- * Also themes the dialog to match the rest of the app (direct
- * correction - a stock native dialog stuck out badly against this
- * app's dark theme everywhere else): WM_ERASEBKGND fills with
- * g_brush_panel same as log_view_wnd_proc()'s own popup windows do,
- * WM_CTLCOLORSTATIC colors the message text COLOR_APP_TEXT on that same
- * background, and WM_DRAWITEM paints each of the 3 buttons with this
- * app's own semantic colors instead of stock Windows buttons - red
- * (g_brush_disconnected, same as Emergency Shutdown/OFF) for Turn Off,
- * green (g_brush_connected, same as Global Activate/ON) for Keep
- * Running, blue (g_brush_accent, this app's default/neutral action
- * color) for Cancel. All 3 globals already track the current Light/
- * Dark Mode toggle, so this dialog follows it automatically too - no
- * separate light/dark branch needed here. Only the OS-native titlebar
- * chrome is left alone, same precedent log_view_wnd_proc()'s own
- * comment already established for this app's occasional secondary
- * windows. */
+ * default proc does NOT do this on its own. Plain native buttons/
+ * background, no owner-draw theming - direct correction, matches this
+ * app's own established precedent for occasional secondary windows
+ * (see log_view_wnd_proc()'s own comment). */
 static INT_PTR CALLBACK close_confirm_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    (void)lParam;
     switch (msg) {
         case WM_INITDIALOG:
             return TRUE; /* let the dialog manager focus the default button */
-        case WM_ERASEBKGND: {
-            RECT rc;
-            GetClientRect(hDlg, &rc);
-            FillRect((HDC)wParam, &rc, g_brush_panel);
-            return TRUE;
-        }
-        case WM_CTLCOLORSTATIC: {
-            HDC hdc = (HDC)wParam;
-            SetTextColor(hdc, COLOR_APP_TEXT);
-            SetBkMode(hdc, TRANSPARENT);
-            return (LRESULT)g_brush_panel;
-        }
-        case WM_DRAWITEM: {
-            DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
-            HBRUSH fill = (dis->CtlID == IDOK) ? g_brush_disconnected
-                        : (dis->CtlID == IDC_CLOSE_KEEP_RUNNING_BTN) ? g_brush_connected
-                        : g_brush_accent;
-            char text[32];
-            HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
-            HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
-            HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, fill);
-            RoundRect(dis->hDC, dis->rcItem.left, dis->rcItem.top, dis->rcItem.right, dis->rcItem.bottom,
-                      BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
-            SelectObject(dis->hDC, old_brush);
-            SelectObject(dis->hDC, old_pen);
-            DeleteObject(pen);
-            SetTextColor(dis->hDC, RGB(255, 255, 255));
-            SetBkMode(dis->hDC, TRANSPARENT);
-            GetWindowTextA(dis->hwndItem, text, sizeof(text));
-            DrawTextA(dis->hDC, text, -1, &dis->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            return TRUE;
-        }
         case WM_COMMAND:
             if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDC_CLOSE_KEEP_RUNNING_BTN ||
                 LOWORD(wParam) == IDCANCEL) {
