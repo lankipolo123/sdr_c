@@ -5787,15 +5787,65 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
-/* IDD_CLOSE_CONFIRM's DLGPROC - just reports back which of the 3
- * buttons was clicked (IDOK/IDC_CLOSE_KEEP_RUNNING_BTN/IDCANCEL) via
- * EndDialog's return value; WM_CLOSE (below) does the actual work once
+/* IDD_CLOSE_CONFIRM's DLGPROC - reports back which of the 3 buttons was
+ * clicked (IDOK/IDC_CLOSE_KEEP_RUNNING_BTN/IDCANCEL) via EndDialog's
+ * return value; WM_CLOSE (below) does the actual work once
  * DialogBoxParamA returns. WM_CLOSE on the dialog itself (its own
  * titlebar X) is handled explicitly as a Cancel - a modal dialog's
- * default proc does NOT do this on its own. */
+ * default proc does NOT do this on its own.
+ *
+ * Also themes the dialog to match the rest of the app (direct
+ * correction - a stock native dialog stuck out badly against this
+ * app's dark theme everywhere else): WM_ERASEBKGND fills with
+ * g_brush_panel same as log_view_wnd_proc()'s own popup windows do,
+ * WM_CTLCOLORSTATIC colors the message text COLOR_APP_TEXT on that same
+ * background, and WM_DRAWITEM paints each of the 3 buttons with this
+ * app's own semantic colors instead of stock Windows buttons - red
+ * (g_brush_disconnected, same as Emergency Shutdown/OFF) for Turn Off,
+ * green (g_brush_connected, same as Global Activate/ON) for Keep
+ * Running, blue (g_brush_accent, this app's default/neutral action
+ * color) for Cancel. All 3 globals already track the current Light/
+ * Dark Mode toggle, so this dialog follows it automatically too - no
+ * separate light/dark branch needed here. Only the OS-native titlebar
+ * chrome is left alone, same precedent log_view_wnd_proc()'s own
+ * comment already established for this app's occasional secondary
+ * windows. */
 static INT_PTR CALLBACK close_confirm_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-    (void)lParam;
     switch (msg) {
+        case WM_INITDIALOG:
+            return TRUE; /* let the dialog manager focus the default button */
+        case WM_ERASEBKGND: {
+            RECT rc;
+            GetClientRect(hDlg, &rc);
+            FillRect((HDC)wParam, &rc, g_brush_panel);
+            return TRUE;
+        }
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, COLOR_APP_TEXT);
+            SetBkMode(hdc, TRANSPARENT);
+            return (LRESULT)g_brush_panel;
+        }
+        case WM_DRAWITEM: {
+            DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
+            HBRUSH fill = (dis->CtlID == IDOK) ? g_brush_disconnected
+                        : (dis->CtlID == IDC_CLOSE_KEEP_RUNNING_BTN) ? g_brush_connected
+                        : g_brush_accent;
+            char text[32];
+            HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+            HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
+            HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, fill);
+            RoundRect(dis->hDC, dis->rcItem.left, dis->rcItem.top, dis->rcItem.right, dis->rcItem.bottom,
+                      BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
+            SelectObject(dis->hDC, old_brush);
+            SelectObject(dis->hDC, old_pen);
+            DeleteObject(pen);
+            SetTextColor(dis->hDC, RGB(255, 255, 255));
+            SetBkMode(dis->hDC, TRANSPARENT);
+            GetWindowTextA(dis->hwndItem, text, sizeof(text));
+            DrawTextA(dis->hDC, text, -1, &dis->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            return TRUE;
+        }
         case WM_COMMAND:
             if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDC_CLOSE_KEEP_RUNNING_BTN ||
                 LOWORD(wParam) == IDCANCEL) {
