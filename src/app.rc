@@ -42,21 +42,3 @@ BEGIN
         VALUE "Translation", 0x409, 1200
     END
 END
-
-/* Modal prompt gating every admin-only action this app has - arming
- * Continuous Wave and revealing Change Logo/Reset (see unlock_cw() in
- * main.c, shared by both via g_cw_authorized). Generic wording since it
- * covers more than just CW now. DS_CENTER centers it on screen (this
- * app has no other dialog to center it relative to besides the main
- * window, and centering on the main window vs. the screen looks the
- * same in practice at this size). */
-IDD_CW_PASSWORD DIALOGEX 0, 0, 200, 86
-STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Admin Password"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    LTEXT           "Enter the admin password to continue:", -1, 7, 7, 186, 18
-    EDITTEXT        IDC_CW_PW_EDIT, 7, 28, 186, 14, ES_PASSWORD | ES_AUTOHSCROLL
-    DEFPUSHBUTTON   "OK", IDOK, 63, 62, 50, 14
-    PUSHBUTTON      "Cancel", IDCANCEL, 117, 62, 50, 14
-END

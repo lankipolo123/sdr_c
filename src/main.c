@@ -301,16 +301,15 @@ static COLORREF COLOR_APP_SHADOW;
  * (SUMMARY_CONTENT_Y) and all 4 content blocks share the same Y
  * (SUMMARY_CONTENT_BLOCK_Y), same as AVG TEMP/Highest/Mode always did
  * with each other. Commands' own content is a 2x2 button grid (Close
- * All/Open All on row 1, Open Log/Icon on row 2) with Reset to Default
- * spanning both columns below it, all within COMMANDS_COL_W so AVG
- * TEMP starts right after it (see avg_right's own comment further
- * down, which already recenters Highest Temp off of AVG TEMP's real
- * start - inserting a column before it needed no other change there).
- * 3 rows of SUMMARY_CMD_ROW_H (64) with 14px gaps fill the exact same
- * MODE_ICON_SIZE (220) height as the pill/icon blocks below its own
- * caption (64*3 + 14*2 = 220) - direct correction, the buttons were
- * still the original single-row panel's 36px tall, leaving Commands
- * looking short with dead space under it next to the other 3 columns.
+ * All/Open All on row 1, Open Log/Icon on row 2), then Load Config/
+ * Save Config on row 3 (direct request, added once every channel's
+ * Mode became fixed to Pseudo Random Noise and the per-card/Bulk
+ * Actions Mode dropdowns were removed - see on_save_config_clicked()/
+ * on_load_config_clicked()), with Reset to Default spanning both
+ * columns below all of that, all within COMMANDS_COL_W so AVG TEMP
+ * starts right after it (see avg_right's own comment further down,
+ * which already recenters Highest Temp off of AVG TEMP's real start -
+ * inserting a column before it needed no other change there).
  * COMMANDS_COL_W itself grown 176 -> 280 (direct request - it read as
  * noticeably narrower than AVG TEMP/Highest Temp/Mode's own footprint
  * next to it) - SUMMARY_CMD_BTN_W/COL2_X derive the 2 button columns'
@@ -324,24 +323,37 @@ static COLORREF COLOR_APP_SHADOW;
 #define SUMMARY_CMD_ROW_H 64
 #define SUMMARY_CMD_ROW1_Y 0
 #define SUMMARY_CMD_ROW2_Y 78
-#define SUMMARY_CMD_RESET_Y 156
+#define SUMMARY_CMD_ROW3_Y 156
+#define SUMMARY_CMD_RESET_Y 234
+/* 4 rows of SUMMARY_CMD_ROW_H (64) with 14px gaps now (298 total - was
+ * 3 rows/220 before Load/Save Config's row was added), which no longer
+ * matches MODE_ICON_SIZE (220) the way it used to - see
+ * SUMMARY_CMD_TOTAL_H/MIN_SUMMARY_H below, which account for that
+ * directly instead of assuming the two stay equal. Commands simply
+ * extends a bit further down than AVG TEMP/Highest Temp/Mode now; they
+ * don't grow to match it (that would mean touching MODE_ICON_SIZE and
+ * re-deriving the Mode icon's own crescent geometry, which nothing
+ * about this request needs). */
+#define SUMMARY_CMD_TOTAL_H (SUMMARY_CMD_RESET_Y + SUMMARY_CMD_ROW_H)
 #define SUMMARY_CONTENT_Y 40
 #define SUMMARY_CONTENT_BLOCK_Y 60
 
 /* Summary card's minimum content height - SUMMARY_CONTENT_BLOCK_Y (the
  * 4 content blocks' own top offset, which already accounts for the
- * header above it) + the MODE_ICON_SIZE square + a
- * bottom breather (20). Commands' own content (124px tall) fits well
- * inside that same MODE_ICON_SIZE budget. channel_card_height() reserves this (plus a
- * CARD_GAP) off the top of the grid's own budget so the grid shrinks
- * first on a short window instead of the Summary card being forced to
- * this floor with nowhere left to put it (direct report: worked at
- * 1920x1200, overflowed off the bottom of the window at 1920x1080 -
- * the grid was maxing cards out at CARD_H_MAX with no idea the Summary
- * card still needed room below it). relayout_for_size() still floors
- * summary_h at this value too, as a safety net for windows shorter
- * than even the reservation accounts for. */
-#define MIN_SUMMARY_H (SUMMARY_CONTENT_BLOCK_Y + MODE_ICON_SIZE + 20)
+ * header above it) + the taller of MODE_ICON_SIZE (AVG TEMP/Highest
+ * Temp/Mode's shared height) and SUMMARY_CMD_TOTAL_H (Commands' own,
+ * now taller by one row - see its own comment above) + a bottom
+ * breather (20). channel_card_height() reserves this (plus a CARD_GAP)
+ * off the top of the grid's own budget so the grid shrinks first on a
+ * short window instead of the Summary card being forced to this floor
+ * with nowhere left to put it (direct report: worked at 1920x1200,
+ * overflowed off the bottom of the window at 1920x1080 - the grid was
+ * maxing cards out at CARD_H_MAX with no idea the Summary card still
+ * needed room below it). relayout_for_size() still floors summary_h at
+ * this value too, as a safety net for windows shorter than even the
+ * reservation accounts for. */
+#define MIN_SUMMARY_H (SUMMARY_CONTENT_BLOCK_Y + \
+                       (SUMMARY_CMD_TOTAL_H > MODE_ICON_SIZE ? SUMMARY_CMD_TOTAL_H : MODE_ICON_SIZE) + 20)
 
 /* Highest Temp Today block's own width - wider than MODE_ICON_SIZE
  * since "<temp>C - BAY<N>" is a much longer string than AVG TEMP's
@@ -441,20 +453,6 @@ static HICON g_custom_icon_small;
  * restore the original icon, not just stop showing a custom one. */
 static HICON g_default_icon_big;
 static HICON g_default_icon_small;
-
-/* The shared admin-unlock flag - gates both arming Continuous Wave (CW,
- * a fixed undithered carrier) via a channel's Set/Bulk Set, AND the
- * Command Panel's "Icon" button popup menu (Change Logo/Reset).
- * The real password comes from the vendor DLL itself (Transit.dll's
- * GetDllPassword export - confirmed to take no arguments and return a
- * pointer to a static string it already has baked in, not anything
- * hardware/dongle-dependent - see transit_dll.h's header comment),
- * never anything this app invents or stores on its own. Authorized once
- * per run - unlocking through either entry point covers both for the
- * rest of the session instead of re-prompting per click. See
- * unlock_cw(). */
-static bool g_cw_authorized;
-static char g_cw_pw_input[64]; /* transient scratch for cw_password_dlg_proc() */
 
 /* Per-channel cumulative ON-time - an odometer, not an app-uptime
  * counter: each of the 16 channels tracks its OWN time actually
@@ -601,21 +599,12 @@ static HWND g_log_header_lbl;
 static HWND g_card_panel[MAX_CHANNELS];
 static HWND g_card_icon[MAX_CHANNELS];
 static HWND g_card_header[MAX_CHANNELS];
-static HWND g_card_mode_lbl[MAX_CHANNELS]; /* muted mode name next to "Unit N",
-                                              * matching the design mockup's
-                                              * card header - reflects the
-                                              * applied mode (ch->mode), not
-                                              * the dropdown's uncommitted
-                                              * selection */
-/* Each channel's mode combo's readonly-theming overlay windows (see
- * make_combo_readonly_ex) - separate sibling windows, not children of
- * the combo, so a bare InvalidateRect on the combo itself doesn't touch
- * them. Not tracking these was the actual cause of a reported "white
- * dropdown" - selecting/deselecting a card invalidates+repaints it via
- * ui_invalidate_card(), and without these in that list, repaint timing
- * could leave the overlay unpainted, exposing the native COMBOBOX's own
- * white arrow/bevel underneath instead of the dark themed one. */
-static HWND g_card_combo_overlays[MAX_CHANNELS][5];
+static HWND g_card_mode_lbl[MAX_CHANNELS]; /* fixed "Pseudo Random Noise" label
+                                              * in each card's old mode-combo
+                                              * slot - every channel runs the
+                                              * same mode now, so this is just
+                                              * a static indicator, not a live
+                                              * combo/Set readout anymore */
 static HWND g_sensor_heatmap;
 static bool g_layout_ready; /* true once build_controls() has run - WM_SIZE
                               * fires during window creation, before that */
@@ -2919,9 +2908,9 @@ static void ui_show_warning_with_last_error(const char *prefix) {
 
 /* ---- connection -> UI callbacks ---- */
 
-/* Defined below, once channel_mode_id()/channel_set_id()/etc. exist -
- * forward-declared here so conn_on_connected_changed() can gate every
- * channel control on the RS422 link the instant it changes. */
+/* Defined below, once channel_on_id()/etc. exist - forward-declared here
+ * so conn_on_connected_changed() can gate every channel control on the
+ * RS422 link the instant it changes. */
 static void set_channel_controls_enabled(bool enabled);
 /* Also defined below (needs channel_select_id()) - the selection
  * checkbox is gated on conn_is_connected() too (see its own comment),
@@ -3301,8 +3290,6 @@ static void on_unit_kill_reset(int idx) {
 
 /* ---- channel card UI ---- */
 
-static int channel_mode_id(int idx)       { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_MODE_OFFSET; }
-static int channel_set_id(int idx)        { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_SET_OFFSET; }
 static int channel_on_id(int idx)         { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_ON_OFFSET; }
 static int channel_off_id(int idx)        { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_OFF_OFFSET; }
 static int channel_select_id(int idx)     { return IDC_CH_BASE + idx * IDC_CH_STRIDE + IDC_CH_SELECT_OFFSET; }
@@ -3317,30 +3304,22 @@ static int channel_freq_lbl_id(int idx)   { return IDC_CH_BASE + idx * IDC_CH_ST
 
 
 /* Invalidates a card's background panel AND every one of its own
- * foreground siblings (title, mode label, mode combo, Set, ON, OFF,
- * status, gauge, tick labels) together, every time. WS_CLIPSIBLINGS on
- * the panel (see add_card_panel()) is supposed to keep its repaint from
- * touching them at all - and does most of the time - but it isn't
- * reliably enough to trust alone (confirmed: a card clicked for Bulk
- * Actions selection could still end up erased under Wine even with the
- * flag set). Explicitly telling every sibling to repaint alongside the
- * panel is the actually-guaranteed fix, independent of z-order/clipping
- * timing. Call this instead of invalidating g_card_panel[index] alone,
- * anywhere a card's panel needs to repaint. */
+ * foreground siblings (title, mode label, ON, OFF, status, gauge, tick
+ * labels) together, every time. WS_CLIPSIBLINGS on the panel (see
+ * add_card_panel()) is supposed to keep its repaint from touching them
+ * at all - and does most of the time - but it isn't reliably enough to
+ * trust alone (confirmed: a card clicked for Bulk Actions selection
+ * could still end up erased under Wine even with the flag set).
+ * Explicitly telling every sibling to repaint alongside the panel is the
+ * actually-guaranteed fix, independent of z-order/clipping timing. Call
+ * this instead of invalidating g_card_panel[index] alone, anywhere a
+ * card's panel needs to repaint. */
 static void ui_invalidate_card(int index) {
-    int oi;
     InvalidateRect(g_card_panel[index], NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_select_id(index)), NULL, FALSE);
     InvalidateRect(g_card_icon[index], NULL, FALSE);
     InvalidateRect(g_card_header[index], NULL, FALSE);
     InvalidateRect(g_card_mode_lbl[index], NULL, FALSE);
-    InvalidateRect(GetDlgItem(g_hwnd, channel_mode_id(index)), NULL, FALSE);
-    for (oi = 0; oi < 5; oi++) {
-        if (g_card_combo_overlays[index][oi]) {
-            InvalidateRect(g_card_combo_overlays[index][oi], NULL, FALSE);
-        }
-    }
-    InvalidateRect(GetDlgItem(g_hwnd, channel_set_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_on_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_off_id(index)), NULL, FALSE);
     InvalidateRect(GetDlgItem(g_hwnd, channel_status_id(index)), NULL, FALSE);
@@ -3352,24 +3331,15 @@ static void ui_invalidate_card(int index) {
     InvalidateRect(GetDlgItem(g_hwnd, channel_uptime_id(index)), NULL, FALSE);
 }
 
-/* Every control that can actually command a channel (mode Set, ON, OFF,
- * the level gauge) is disabled while RS422 isn't connected - there's no
- * bus to blind-send on, so letting the user "arm" 16 channels' worth of
- * mode/level/output first and have it silently go nowhere is worse than
+/* Every control that can actually command a channel (ON, OFF, the level
+ * gauge) is disabled while RS422 isn't connected - there's no bus to
+ * blind-send on, so letting the user "arm" 16 channels' worth of
+ * level/output first and have it silently go nowhere is worse than
  * just not letting them touch it yet. Mirrors conn_is_connected() on
  * every connect/disconnect and once at startup. EnableWindow() alone
  * already blocks all mouse input to a disabled window at the OS level
  * (WM_NCHITTEST returns HTTRANSPARENT for it) - the gauge's click/drag
- * handling in channel_gauge_subclass_proc never even runs disabled.
- *
- * The mode combo itself is deliberately left out: selecting a mode is
- * local/uncommitted until Set is clicked (see the WM_COMMAND handler),
- * so it's harmless while disconnected - and a disabled native COMBOBOX
- * stops sending WM_CTLCOLORSTATIC at all, falling back to Windows' own
- * plain white/gray disabled look, which would blow a bright hole
- * through the dark theme (that took five attempts to get right - see
- * the big comment above combo_arrow_subclass_proc). Set/ON/OFF/gauge
- * are all custom-painted, so they stay fully themed either way. */
+ * handling in channel_gauge_subclass_proc never even runs disabled. */
 /* Gated on the connection alone, not on there being a selection (unlike
  * BULK_TARGET_BTN_IDS below) - Clear/Select All act on the selection
  * itself, and Card Click (IDC_BULK_TOGGLE_BTN) just arms a way to
@@ -3381,19 +3351,19 @@ static const int BULK_ALWAYS_BTN_IDS[] = {
 };
 #define BULK_ALWAYS_BTN_COUNT (sizeof(BULK_ALWAYS_BTN_IDS) / sizeof(BULK_ALWAYS_BTN_IDS[0]))
 
-/* Set/ON/OFF/High/Medium/Low/Off - these are the ones that actually DO
+/* ON/OFF/High/Medium/Low/Off - these are the ones that actually DO
  * something to the selected channels, unlike Clear/Select All (which act
  * on the selection itself, not through it). Lighting up in full color
  * the instant you connect - before picking a single channel - read as
  * "ready to fire" when clicking any of them would just be a no-op
- * (bulk_apply_mode() etc. already skip everything when nothing's
+ * (bulk_apply_level() etc. already skip everything when nothing's
  * selected). Gated on bulk_has_selection() too now (see
  * ui_refresh_bulk_target_buttons_enabled()) so they only look armed once
  * there's actually something for them to act on - reuses the exact same
  * EnableWindow+ODS_DISABLED dimming every other button in this app
  * already gets while disconnected, just gated on selection too. */
 static const int BULK_TARGET_BTN_IDS[] = {
-    IDC_BULK_SET_BTN, IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
+    IDC_BULK_ON_BTN, IDC_BULK_OFF_BTN,
     IDC_BULK_HIGH_BTN, IDC_BULK_MEDIUM_BTN, IDC_BULK_LOW_BTN, IDC_BULK_LEVEL_OFF_BTN
 };
 #define BULK_TARGET_BTN_COUNT (sizeof(BULK_TARGET_BTN_IDS) / sizeof(BULK_TARGET_BTN_IDS[0]))
@@ -3419,7 +3389,7 @@ static void ui_refresh_bulk_target_buttons_enabled(void) {
      * selection, which read as "nothing happens when I turn Card Click
      * on" since 0-selected is the normal starting state. Matches
      * BULK_ALWAYS_BTN_IDS' own gating now. A click with nothing selected
-     * is still a no-op in practice (bulk_apply_mode() etc. skip an empty
+     * is still a no-op in practice (bulk_apply_level() etc. skip an empty
      * selection) - this only changes how the buttons LOOK, not what a
      * click with nothing picked actually does. */
     bool enabled = conn_is_connected(&g_conn) && g_bulk_select_mode;
@@ -3446,17 +3416,14 @@ static void set_channel_controls_enabled(bool enabled) {
         }
     }
     for (i = 0; i < MAX_CHANNELS; i++) {
-        HWND set_btn = GetDlgItem(g_hwnd, channel_set_id(i));
         HWND on_btn = GetDlgItem(g_hwnd, channel_on_id(i));
         HWND off_btn = GetDlgItem(g_hwnd, channel_off_id(i));
         HWND gauge = GetDlgItem(g_hwnd, channel_track_id(i));
 
-        EnableWindow(set_btn, enabled);
         EnableWindow(on_btn, enabled);
         EnableWindow(off_btn, enabled);
         EnableWindow(gauge, enabled);
 
-        InvalidateRect(set_btn, NULL, FALSE);
         InvalidateRect(on_btn, NULL, FALSE);
         InvalidateRect(off_btn, NULL, FALSE);
         InvalidateRect(gauge, NULL, FALSE);
@@ -3580,17 +3547,6 @@ static void bulk_select_row(int row) {
     bulk_set_rowselect_combo(row);
 }
 
-static void bulk_apply_mode(uint8_t mode) {
-    int i;
-    for (i = 0; i < MAX_CHANNELS; i++) {
-        if (g_channel_selected[i] && !g_kill_switch_tripped[i]) {
-            channel_set_mode(i, mode);
-            SetWindowTextA(g_card_mode_lbl[i], proto_mode_name(mode));
-            SendDlgItemMessageA(g_hwnd, channel_mode_id(i), CB_SETCURSEL, (WPARAM)mode, 0);
-        }
-    }
-}
-
 static void bulk_turn_output_on(void) {
     int i;
     for (i = 0; i < MAX_CHANNELS; i++) {
@@ -3652,14 +3608,11 @@ static void on_open_all_clicked(void) {
 }
 
 /* Summary card's Reset to Default - every channel back to its true
- * factory default (mode White Noise, output off - matches
+ * factory default (mode Pseudo Random Noise, output off - matches
  * channels_init()'s own values), sent as real commands the same way
  * Close All/Open All above do, not a silent local-only reset. Runs
  * regardless of kill switch trips or Bulk Actions' selection - a
- * rack-wide action like Close All, not a selection-based one. Also
- * resets each card's own mode combo back to White Noise (index 0) so
- * it reads as "what was just sent", matching a fresh card's own
- * initial selection in add_channel_card(). */
+ * rack-wide action like Close All, not a selection-based one. */
 /* Direct decision - the "default" state changed from White Noise/OFF
  * to White Noise/ON: every channel powered on with Pseudo Random
  * Noise. This is the SAME function used by the Reset to Default
@@ -3675,7 +3628,6 @@ static void on_reset_to_default_clicked(void) {
     int skipped = 0;
     for (i = 0; i < MAX_CHANNELS; i++) {
         channel_set_mode(i, PROTO_MODE_WHITE_NOISE);
-        SendMessageA(GetDlgItem(g_hwnd, channel_mode_id(i)), CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
         if (!g_kill_switch_tripped[i]) {
             channel_turn_output_on(i);
         } else {
@@ -3692,6 +3644,110 @@ static void on_reset_to_default_clicked(void) {
         log_add_status_change(msg);
     } else {
         log_add_status_change("Reset to Default: every channel set to Pseudo Random Noise, ON");
+    }
+}
+
+/* Command Panel's Save Config - writes every channel's Output/Level (not
+ * Mode - every channel is Pseudo Random Noise only, nothing to save
+ * there) to a user-chosen .ini file via the same GetSaveFileNameA/
+ * commdlg.h pattern browse_and_set_logo() already uses for its own file
+ * picker. Saves last_level (the resume level, never LEVEL_OFF - see
+ * ChannelState's own comment), not the possibly-OFF ch->level, so a
+ * channel saved while off still remembers what level it should come
+ * back on to once Load Config turns it on again. */
+static void on_save_config_clicked(HWND hwnd) {
+    char path[MAX_PATH];
+    OPENFILENAMEA ofn;
+    int i;
+
+    path[0] = '\0';
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = "Config Files (*.ini)\0*.ini\0All Files\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = sizeof(path);
+    ofn.lpstrDefExt = "ini";
+    ofn.lpstrTitle = "Save Configuration";
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY;
+
+    if (!GetSaveFileNameA(&ofn)) {
+        return; /* cancelled - no error, nothing to do */
+    }
+
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        const ChannelState *ch = channels_get(i);
+        char section[16];
+        char buf[8];
+        wsprintfA(section, "Unit%d", i + 1);
+        wsprintfA(buf, "%d", ch->output_on ? 1 : 0);
+        WritePrivateProfileStringA(section, "Output", buf, path);
+        wsprintfA(buf, "%d", ch->last_level);
+        WritePrivateProfileStringA(section, "Level", buf, path);
+    }
+    log_add_status_change("Save Config: current channel state written to file");
+}
+
+/* Command Panel's Load Config - reads a file Save Config wrote (or any
+ * .ini with the same [UnitN] Output/Level keys) and applies it to every
+ * channel for real: channel_set_level() (which is what actually
+ * commands a channel on at a given level - see its own comment in
+ * channels.c) for a channel that was saved on, channel_turn_output_off()
+ * for one saved off. Same kill-switch-skip convention every other rack-
+ * wide action in this app uses - OFF always applies even tripped, ON
+ * skips a tripped channel. Mode is never touched - it's fixed to
+ * Pseudo Random Noise for every channel regardless of what a file (even
+ * an old one saved before that became true) says. */
+static void on_load_config_clicked(HWND hwnd) {
+    char path[MAX_PATH];
+    OPENFILENAMEA ofn;
+    int i;
+    int skipped = 0;
+
+    path[0] = '\0';
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = "Config Files (*.ini)\0*.ini\0All Files\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = sizeof(path);
+    ofn.lpstrTitle = "Load Configuration";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+
+    if (!GetOpenFileNameA(&ofn)) {
+        return; /* cancelled */
+    }
+
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        char section[16];
+        int level;
+        bool output_on;
+
+        wsprintfA(section, "Unit%d", i + 1);
+        level = GetPrivateProfileIntA(section, "Level", LEVEL_LOW, path);
+        if (level < LEVEL_LOW || level > LEVEL_HIGH) {
+            level = LEVEL_LOW;
+        }
+        output_on = GetPrivateProfileIntA(section, "Output", 0, path) != 0;
+
+        if (output_on) {
+            if (!g_kill_switch_tripped[i]) {
+                channel_set_level(i, level);
+            } else {
+                skipped++;
+            }
+        } else {
+            channel_turn_output_off(i);
+        }
+    }
+    if (skipped > 0) {
+        /* 128, not a guess - see Reset to Default's own comment on this
+         * exact class of bug (wsprintfA doesn't bounds-check). */
+        char msg[128];
+        wsprintfA(msg, "Load Config: channel state applied from file (%d skipped - kill switch tripped)", skipped);
+        log_add_status_change(msg);
+    } else {
+        log_add_status_change("Load Config: channel state applied from file");
     }
 }
 
@@ -3953,18 +4009,16 @@ static HWND add_channel_gauge(HWND parent, int x, int y, int w, int h, int id) {
     return ctrl;
 }
 
-/* Card layout: a left column (Mode combo + Set button, ON/OFF power
- * buttons, status line), a right column with the level gauge + tick
- * labels, then a bottom row of this unit's fixed config (bandwidth,
- * wired sensor address). */
+/* Card layout: a left column (fixed mode label, ON/OFF power buttons,
+ * status line), a right column with the level gauge + tick labels, then
+ * a bottom row of this unit's fixed config (bandwidth, wired sensor
+ * address). */
 static void add_channel_card(HWND hwnd, int index) {
     int col = index % GRID_COLS;
     int row = index / GRID_COLS;
     int x = GRID_LEFT + col * (CARD_W + CARD_GAP);
     int y = GRID_TOP + row * (CARD_H + CARD_GAP);
     char header[16];
-    int i;
-    HWND mode_combo;
 
     g_card_panel[index] = add_card_panel(hwnd, x, y, CARD_W, CARD_H, index);
     /* Bulk Actions selection checkbox - a real, always-there, always-
@@ -3979,30 +4033,15 @@ static void add_channel_card(HWND hwnd, int index) {
     g_card_icon[index] = add_header_icon(hwnd, x + 8, y + 6, ICON_WAVE);
     wsprintfA(header, "Unit %d", index + 1);
     g_card_header[index] = add_header(hwnd, header, x + 26, y + 6, 58, 16);
-    /* Muted mode name next to the header - kept as a real control (still
-     * updated via SetWindowTextA everywhere the applied mode changes),
-     * just hidden: direct request was to remove it from the card, and
-     * the mode is already shown in full in the combo directly below it,
-     * so the truncated "Pseudo ..." repeat here was redundant. */
+    /* Fixed mode indicator - every channel is Pseudo Random Noise only
+     * now (direct decision, removing the per-channel Mode combo/Set
+     * button entirely, see the revision that removed them). Moved into
+     * the combo's old slot (x+8,y+24) instead of the cramped truncated
+     * spot next to the header it used to occupy while hidden - no
+     * longer needs SS_ENDELLIPSIS/hiding since there's nothing below it
+     * to be redundant with anymore. */
     g_card_mode_lbl[index] = add_ctrl(hwnd, "STATIC", proto_mode_name(PROTO_MODE_WHITE_NOISE),
-                                        SS_LEFT | SS_NOPREFIX | SS_ENDELLIPSIS, x + 88, y + 8, 60, 14, 0);
-    ShowWindow(g_card_mode_lbl[index], SW_HIDE);
-
-    mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                           x + 8, y + 24, 98, 100, channel_mode_id(index));
-    for (i = 0; i < PROTO_MODE_COUNT; i++) {
-        const char *name = proto_mode_name((uint8_t)i);
-        SendMessageA(mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
-    }
-    SendMessageA(mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
-    SendMessageA(mode_combo, CB_SETDROPPEDWIDTH, 190, 0);
-    make_combo_readonly_ex(mode_combo, g_card_combo_overlays[index]);
-
-    /* Set narrowed from 40 to 32 and the gap before the gauge column
-     * trimmed from 14 to 6 - both borrowed to give the mode combo above
-     * (previously truncating every mode name) the extra width instead. */
-    add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-             x + 110, y + 24, 32, 21, channel_set_id(index));
+                                        SS_LEFT | SS_NOPREFIX, x + 8, y + 24, 134, 16, 0);
 
     add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
              x + 8, y + 47, 60, 21, channel_on_id(index));
@@ -5078,104 +5117,6 @@ static ULONGLONG channel_uptime_seconds(int idx) {
  * implementation (including why restored level was capped to LEVEL_LOW)
  * is recoverable from git history if this ever needs reverting. */
 
-/* IDD_CW_PASSWORD's DLGPROC - just collects whatever was typed into
- * IDC_CW_PW_EDIT on OK, leaves g_cw_pw_input untouched on Cancel (caller
- * checks the DialogBoxParamA return value to tell the two apart). */
-static INT_PTR CALLBACK cw_password_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
-    (void)lParam;
-    switch (msg) {
-        case WM_INITDIALOG:
-            SendDlgItemMessageA(hDlg, IDC_CW_PW_EDIT, EM_LIMITTEXT, sizeof(g_cw_pw_input) - 1, 0);
-            return TRUE; /* let the dialog manager focus the first tab stop (the edit box) */
-        case WM_COMMAND:
-            if (LOWORD(wParam) == IDOK) {
-                GetDlgItemTextA(hDlg, IDC_CW_PW_EDIT, g_cw_pw_input, sizeof(g_cw_pw_input));
-                EndDialog(hDlg, IDOK);
-                return TRUE;
-            }
-            if (LOWORD(wParam) == IDCANCEL) {
-                EndDialog(hDlg, IDCANCEL);
-                return TRUE;
-            }
-            break;
-        default:
-            break;
-    }
-    return FALSE;
-}
-
-/* The shared admin gate - originally just for arming Continuous Wave
- * (a fixed, undithered carrier - the one mode this app gates behind a
- * password before a channel's Set/Bulk Set can arm it), now also
- * covering the Command Panel's "Icon" button (IDC_CMD_CHANGE_ICON_BTN,
- * whose popup menu offers Change Logo/Reset - see its own WM_COMMAND
- * handler; this used to gate a separate lock badge that revealed those
- * two as plain buttons, before they moved onto that popup menu).
- * Checked against Transit.dll itself, not anything this
- * app invents or stores - but which export does that depends on the DLL
- * build (see transit_dll.h): the older build exports GetDllPassword
- * (fetch the real password, compare locally), a newer one drops that
- * and exports ValidateDllPassword instead (best guess: hand it the
- * candidate password, it tells you if that's correct) - so the prompt
- * has to come first here and the two paths diverge only in how the
- * entered text gets checked. Authorized once per run: unlocking through
- * either entry point covers both for the rest of the session, via the
- * one shared g_cw_authorized flag. */
-static bool unlock_cw(HWND hwnd) {
-    INT_PTR result;
-
-    if (g_cw_authorized) {
-        return true;
-    }
-
-    if (!transit_dll_is_loaded(&g_conn.dll) ||
-        (g_conn.dll.get_dll_password == NULL && g_conn.dll.validate_dll_password == NULL)) {
-        ui_show_warning("Admin password check needs Transit.dll loaded first - "
-                         "connect to the RS422 dongle, then try again.");
-        return false;
-    }
-
-    if (g_conn.dll.get_dll_password != NULL) {
-        const char *real_password = g_conn.dll.get_dll_password();
-        if (real_password == NULL || real_password[0] == '\0') {
-            ui_show_warning("Admin password check failed - GetDllPassword returned nothing.");
-            return false;
-        }
-
-        g_cw_pw_input[0] = '\0';
-        result = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CW_PASSWORD), hwnd, cw_password_dlg_proc, 0);
-        if (result != IDOK) {
-            return false; /* cancelled */
-        }
-
-        if (lstrcmpA(g_cw_pw_input, real_password) != 0) {
-            ui_show_warning("Wrong password.");
-            SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
-            return false;
-        }
-    } else {
-        long valid;
-
-        g_cw_pw_input[0] = '\0';
-        result = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CW_PASSWORD), hwnd, cw_password_dlg_proc, 0);
-        if (result != IDOK) {
-            return false; /* cancelled */
-        }
-
-        valid = g_conn.dll.validate_dll_password(g_cw_pw_input);
-        if (valid == 0) {
-            ui_show_warning("Wrong password.");
-            SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
-            return false;
-        }
-    }
-
-    SecureZeroMemory(g_cw_pw_input, sizeof(g_cw_pw_input));
-    g_cw_authorized = true;
-    log_add("Admin access unlocked for this session.");
-    return true;
-}
-
 /* ---- layout ---- */
 
 static void build_controls(HWND hwnd) {
@@ -5196,13 +5137,12 @@ static void build_controls(HWND hwnd) {
      * wordmark, and the lock badge that used to gate/reveal them is
      * gone too (direct request) - both actions moved onto the Command
      * Panel's "Icon" button instead (IDC_CMD_CHANGE_ICON_BTN's own
-     * WM_COMMAND handler below): a click there still goes through the
-     * same unlock_cw() admin gate the lock badge used to, then shows a
-     * small popup menu with both actions, reusing IDC_CHANGE_LOGO_BTN/
-     * IDC_RESET_LOGO_BTN as the popup's own menu-item IDs (a menu
-     * selection's WM_COMMAND has HIWORD(wParam)==0, same as
-     * BN_CLICKED, so the existing handlers for those two IDs fire
-     * unchanged - no new IDs needed). */
+     * WM_COMMAND handler below): a click there shows a small popup menu
+     * with both actions (no password gate - that was removed by a later
+     * direct request), reusing IDC_CHANGE_LOGO_BTN/IDC_RESET_LOGO_BTN as
+     * the popup's own menu-item IDs (a menu selection's WM_COMMAND has
+     * HIWORD(wParam)==0, same as BN_CLICKED, so the existing handlers
+     * for those two IDs fire unchanged - no new IDs needed). */
 
     /* Left-aligned against the header panel's own left edge, matching
      * every other section's left margin (22px) - was right-of-center
@@ -5238,22 +5178,22 @@ static void build_controls(HWND hwnd) {
 
     /* Bulk Actions - middle column of the header, between Connection &
      * Settings (left) and Amplifier Temperature (right). Always
-     * expanded - the combo, Set, ON/OFF, Clear/Select All, level
-     * buttons, and every card's selection checkbox are all visible
-     * from launch; nothing here hides. Click a card's checkbox to
-     * select it (lit accent border), then one of these applies to
-     * every selected channel at once - IDC_BULK_TOGGLE_BTN just
-     * arms/disarms an extra convenience (see its own comment below),
-     * it doesn't reveal anything. Same safety gating as each card's
-     * own controls: OFF always works even kill-switch-tripped, ON/Set/
-     * level skip a tripped channel. The action controls are also
-     * disabled alongside every per-channel control until RS422
-     * connects - see set_channel_controls_enabled(). Two rows, same
-     * row-pitch as Connection & Settings' own rows (y=36/63). */
+     * expanded - the ON/OFF, Clear/Select All, level buttons, and every
+     * card's selection checkbox are all visible from launch; nothing
+     * here hides. Click a card's checkbox to select it (lit accent
+     * border), then one of these applies to every selected channel at
+     * once - IDC_BULK_TOGGLE_BTN just arms/disarms an extra convenience
+     * (see its own comment below), it doesn't reveal anything. Same
+     * safety gating as each card's own controls: OFF always works even
+     * kill-switch-tripped, ON/level skip a tripped channel. The action
+     * controls are also disabled alongside every per-channel control
+     * until RS422 connects - see set_channel_controls_enabled(). Row 2
+     * (the old mode combo + Set row) is deliberately left blank now -
+     * every channel is Pseudo Random Noise only, so there's nothing left
+     * to bulk-set a mode to (direct decision, removing the mode combo
+     * everywhere in the app). */
     {
-        HWND bulk_mode_combo;
         HWND row_select_combo;
-        int mi;
         int ri;
         static const char *const row_select_items[] = {
             "1st Row", "2nd Row", "3rd Row", "4th Row", "Select All", "Custom"
@@ -5265,19 +5205,7 @@ static void build_controls(HWND hwnd) {
          * section in this header meant to read as a distinct,
          * occasional-use card rather than blending into the shared
          * header background like Connection & Settings and Amplifier
-         * Temperature do.
-         *
-         * Layout is a bigger version of a channel card's own layout
-         * (see add_channel_card()), not an unrelated arrangement: icon +
-         * title + a caption + a corner control on row 1 (title/mode-
-         * name/selection-checkbox there -> title/selected-count/arm-
-         * toggle button here), combo + a button on row 2 (mode combo +
-         * Set, same on both), a primary on/off row on row 3, a status-
-         * line row at the bottom-left on row 4 (STANDBY there -> Clear
-         * here), and a right-side vertical column spanning rows 2-4 (the
-         * level gauge + High/Medium/Low/Off tick labels there -> the
-         * same 4 levels as actual buttons here, since bulk applies a
-         * level with a click rather than a drag). */
+         * Temperature do. */
         add_header_icon(hwnd, 470 + BULK_X_SHIFT, 24, ICON_LIST);
         add_header(hwnd, "Bulk Actions", 488 + BULK_X_SHIFT, 24, 150, 18);
         add_ctrl(hwnd, "STATIC", "0 selected", SS_LEFT | SS_NOPREFIX,
@@ -5290,29 +5218,23 @@ static void build_controls(HWND hwnd) {
         add_ctrl(hwnd, "BUTTON", "Card Click: Off", BS_OWNERDRAW | WS_TABSTOP,
                  740 + BULK_X_SHIFT, 22, 138, 22, IDC_BULK_TOGGLE_BTN);
 
-        bulk_mode_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                    470 + BULK_X_SHIFT, 54, 230, 140, IDC_BULK_MODE_COMBO);
-        for (mi = 0; mi < PROTO_MODE_COUNT; mi++) {
-            const char *name = proto_mode_name((uint8_t)mi);
-            SendMessageA(bulk_mode_combo, CB_ADDSTRING, 0, (LPARAM)(name ? name : "?"));
-        }
-        SendMessageA(bulk_mode_combo, CB_SETCURSEL, PROTO_MODE_WHITE_NOISE, 0);
-        make_combo_readonly(bulk_mode_combo);
-        add_ctrl(hwnd, "BUTTON", "Set", BS_OWNERDRAW | WS_TABSTOP,
-                 710 + BULK_X_SHIFT, 54, 60, 20, IDC_BULK_SET_BTN);
-
+        /* Shifted up 30px from their old y (84/116/140) to close the gap
+         * the removed mode combo + Set row left behind - see this
+         * block's own comment above. High/Medium/Low/Off (below) stay
+         * put, since they still can't move any higher without colliding
+         * with the title row above them. */
         add_ctrl(hwnd, "BUTTON", "ON", BS_OWNERDRAW | WS_TABSTOP,
-                 470 + BULK_X_SHIFT, 84, 110, 22, IDC_BULK_ON_BTN);
+                 470 + BULK_X_SHIFT, 54, 110, 22, IDC_BULK_ON_BTN);
         add_ctrl(hwnd, "BUTTON", "OFF", BS_OWNERDRAW | WS_TABSTOP,
-                 590 + BULK_X_SHIFT, 84, 110, 22, IDC_BULK_OFF_BTN);
+                 590 + BULK_X_SHIFT, 54, 110, 22, IDC_BULK_OFF_BTN);
 
         add_ctrl(hwnd, "BUTTON", "Clear", BS_OWNERDRAW | WS_TABSTOP,
-                 470 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_CLEAR_BTN);
+                 470 + BULK_X_SHIFT, 86, 90, 20, IDC_BULK_CLEAR_BTN);
         /* Select All's real value is the opposite case: select all,
          * then uncheck the few you want left out, instead of clicking
          * 12+ individual checkboxes by hand. */
         add_ctrl(hwnd, "BUTTON", "Select All", BS_OWNERDRAW | WS_TABSTOP,
-                 568 + BULK_X_SHIFT, 116, 90, 20, IDC_BULK_SELECT_ALL_BTN);
+                 568 + BULK_X_SHIFT, 86, 90, 20, IDC_BULK_SELECT_ALL_BTN);
 
         /* Quick-select presets - see bulk_select_row() and
          * IDC_BULK_ROWSELECT_COMBO's comment in resource.h. Applies
@@ -5321,7 +5243,7 @@ static void build_controls(HWND hwnd) {
          * simple. Starts on "Custom" (last item) so it doesn't fire a
          * selection change the instant the window opens. */
         row_select_combo = add_ctrl(hwnd, "COMBOBOX", NULL, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP,
-                                     470 + BULK_X_SHIFT, 140, 188, 120, IDC_BULK_ROWSELECT_COMBO);
+                                     470 + BULK_X_SHIFT, 110, 188, 120, IDC_BULK_ROWSELECT_COMBO);
         for (ri = 0; ri < (int)(sizeof(row_select_items) / sizeof(row_select_items[0])); ri++) {
             SendMessageA(row_select_combo, CB_ADDSTRING, 0, (LPARAM)row_select_items[ri]);
         }
@@ -5465,6 +5387,10 @@ static void build_controls(HWND hwnd) {
              GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_OPEN_LOG_BTN);
     add_ctrl(hwnd, "BUTTON", "Icon", BS_OWNERDRAW | WS_TABSTOP,
              GRID_LEFT + SUMMARY_CMD_COL2_X, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_CMD_CHANGE_ICON_BTN);
+    add_ctrl(hwnd, "BUTTON", "Load Config", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW3_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_LOAD_CONFIG_BTN);
+    add_ctrl(hwnd, "BUTTON", "Save Config", BS_OWNERDRAW | WS_TABSTOP,
+             GRID_LEFT + SUMMARY_CMD_COL2_X, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW3_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, IDC_SAVE_CONFIG_BTN);
     add_ctrl(hwnd, "BUTTON", "Reset to Default", BS_OWNERDRAW | WS_TABSTOP,
              GRID_LEFT + 12, SUMMARY_PANEL_Y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, COMMANDS_COL_W, SUMMARY_CMD_ROW_H, IDC_RESET_TO_DEFAULT_BTN);
     /* AVG TEMP/Mode/Highest Temp Today's shared content row - Commands
@@ -5574,44 +5500,8 @@ static void position_channel_card(HWND hwnd, int index, int x, int y, int card_w
     PLACE(GetDlgItem(hwnd, channel_select_id(index)), x + card_w - SX(24), y + SY(6), 16, 16);
     PLACE(g_card_icon[index], x + SX(8), y + SY(6), 14, 14);
     PLACE(g_card_header[index], x + SX(26), y + SY(6), SX(58), SY(16));
-    PLACE(g_card_mode_lbl[index], x + SX(88), y + SY(8), SX(60), SY(14));
+    PLACE(g_card_mode_lbl[index], x + SX(8), y + SY(24), SX(134), SY(16));
 
-    PLACE(GetDlgItem(hwnd, channel_mode_id(index)), x + SX(8), y + SY(24), SX(98), 100);
-    /* The mode combo's readonly-theming overlays (arrow + 4 border
-     * strips, see make_combo_readonly_ex) are separate sibling windows,
-     * not children of the combo, so moving the combo above does NOT
-     * move them - left in place, they'd sit at the combo's OLD rect
-     * while the real (undecorated) combo shows through at the new one.
-     * Re-derive their rect from the combo's own post-move GetWindowRect
-     * rather than re-deriving via SX/SY here too, since MoveWindow's
-     * closed-box height isn't simply SY(18) - it's whatever the font
-     * actually renders, same as make_combo_readonly_ex's own math. */
-    {
-        HWND combo = GetDlgItem(hwnd, channel_mode_id(index));
-        RECT crc;
-        int cw, ch2, arrow_w;
-        GetWindowRect(combo, &crc);
-        MapWindowPoints(HWND_DESKTOP, hwnd, (POINT *)&crc, 2);
-        cw = crc.right - crc.left;
-        ch2 = crc.bottom - crc.top;
-        arrow_w = GetSystemMetrics(SM_CXVSCROLL) + ARROW_OVERLAY_PAD_PX;
-        if (g_card_combo_overlays[index][0]) {
-            MoveWindow(g_card_combo_overlays[index][0], crc.right - arrow_w, crc.top, arrow_w, ch2, FALSE);
-        }
-        if (g_card_combo_overlays[index][1]) {
-            MoveWindow(g_card_combo_overlays[index][1], crc.left, crc.top, cw, COMBO_BORDER_PX, FALSE);
-        }
-        if (g_card_combo_overlays[index][2]) {
-            MoveWindow(g_card_combo_overlays[index][2], crc.left, crc.bottom - COMBO_BORDER_PX, cw, COMBO_BORDER_PX, FALSE);
-        }
-        if (g_card_combo_overlays[index][3]) {
-            MoveWindow(g_card_combo_overlays[index][3], crc.left, crc.top, COMBO_BORDER_PX, ch2, FALSE);
-        }
-        if (g_card_combo_overlays[index][4]) {
-            MoveWindow(g_card_combo_overlays[index][4], crc.right - COMBO_BORDER_PX, crc.top, COMBO_BORDER_PX, ch2, FALSE);
-        }
-    }
-    PLACE(GetDlgItem(hwnd, channel_set_id(index)), x + SX(110), y + SY(24), SX(32), SY(21));
     PLACE(GetDlgItem(hwnd, channel_on_id(index)), x + SX(8), y + SY(47), SX(60), SY(21));
     PLACE(GetDlgItem(hwnd, channel_off_id(index)), x + SX(72), y + SY(47), SX(60), SY(21));
     PLACE(GetDlgItem(hwnd, channel_status_id(index)), x + SX(8), y + SY(70), SX(130), SY(14));
@@ -5792,6 +5682,8 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
         MoveWindow(GetDlgItem(hwnd, IDC_OPEN_ALL_BTN), grid_left + SUMMARY_CMD_COL2_X, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW1_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
         MoveWindow(GetDlgItem(hwnd, IDC_OPEN_LOG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
         MoveWindow(GetDlgItem(hwnd, IDC_CMD_CHANGE_ICON_BTN), grid_left + SUMMARY_CMD_COL2_X, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW2_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_LOAD_CONFIG_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW3_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
+        MoveWindow(GetDlgItem(hwnd, IDC_SAVE_CONFIG_BTN), grid_left + SUMMARY_CMD_COL2_X, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_ROW3_Y, SUMMARY_CMD_BTN_W, SUMMARY_CMD_ROW_H, FALSE);
         MoveWindow(GetDlgItem(hwnd, IDC_RESET_TO_DEFAULT_BTN), grid_left + 12, summary_y + SUMMARY_CONTENT_BLOCK_Y + SUMMARY_CMD_RESET_Y, COMMANDS_COL_W, SUMMARY_CMD_ROW_H, FALSE);
         MoveWindow(g_avg_temp_caption_lbl, avg_x, summary_y + SUMMARY_CONTENT_Y, AVG_TEMP_BLOCK_W, 16, FALSE);
         MoveWindow(g_avg_temp_block, avg_x, summary_y + SUMMARY_CONTENT_BLOCK_Y, AVG_TEMP_BLOCK_W, MODE_ICON_SIZE, FALSE);
@@ -6276,6 +6168,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 on_reset_to_default_clicked();
                 return 0;
             }
+            if (id == IDC_LOAD_CONFIG_BTN && code == BN_CLICKED) {
+                on_load_config_clicked(hwnd);
+                return 0;
+            }
+            if (id == IDC_SAVE_CONFIG_BTN && code == BN_CLICKED) {
+                on_save_config_clicked(hwnd);
+                return 0;
+            }
             if (id == IDC_BULK_TOGGLE_BTN && code == BN_CLICKED) {
                 g_bulk_select_mode = !g_bulk_select_mode;
                 SetDlgItemTextA(hwnd, IDC_BULK_TOGGLE_BTN,
@@ -6304,13 +6204,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 }
                 /* sel == GRID_ROWS+1 is "Custom" - a deliberate no-op,
                  * leaves the current selection exactly as it was. */
-                return 0;
-            }
-            if (id == IDC_BULK_SET_BTN && code == BN_CLICKED) {
-                int sel = (int)SendDlgItemMessageA(hwnd, IDC_BULK_MODE_COMBO, CB_GETCURSEL, 0, 0);
-                if (sel >= 0 && (sel != PROTO_MODE_SINGLE || unlock_cw(hwnd))) {
-                    bulk_apply_mode((uint8_t)sel);
-                }
                 return 0;
             }
             if (id == IDC_BULK_ON_BTN && code == BN_CLICKED) {
@@ -6361,23 +6254,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 int idx;
                 if (channel_index_from_id(id, &idx)) {
                     int offset = (id - IDC_CH_BASE) % IDC_CH_STRIDE;
-                    /* Mode selection is local/uncommitted until Set is
-                     * clicked - matches the reference apps exactly
-                     * (selecting a mode does NOT apply it by itself). */
                     /* OFF always works, even tripped - turning things off
-                     * is never unsafe. SET/ON are blocked while tripped so
-                     * the kill switch can't be trivially defeated by just
+                     * is never unsafe. ON is blocked while tripped so the
+                     * kill switch can't be trivially defeated by just
                      * clicking a channel back on before acknowledging it -
                      * that's the whole point of "manual reset only". */
-                    if (offset == IDC_CH_SET_OFFSET && code == BN_CLICKED) {
-                        if (!g_kill_switch_tripped[idx]) {
-                            int sel = (int)SendDlgItemMessageA(hwnd, channel_mode_id(idx), CB_GETCURSEL, 0, 0);
-                            if (sel >= 0 && (sel != PROTO_MODE_SINGLE || unlock_cw(hwnd))) {
-                                channel_set_mode(idx, (uint8_t)sel);
-                                SetWindowTextA(g_card_mode_lbl[idx], proto_mode_name((uint8_t)sel));
-                            }
-                        }
-                    } else if (offset == IDC_CH_ON_OFFSET && code == BN_CLICKED) {
+                    if (offset == IDC_CH_ON_OFFSET && code == BN_CLICKED) {
                         if (!g_kill_switch_tripped[idx]) {
                             channel_turn_output_on(idx);
                         }
@@ -6762,12 +6644,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          * direct complaint it didn't visibly "light up". */
                         fill = g_bulk_select_mode ? g_brush_connected : g_brush_accent;
                     } else if (dis->CtlID == IDC_CLOSE_ALL_BTN) {
-                        /* Command Panel's 4 buttons each get their own
-                         * color now (direct request) instead of all
+                        /* Several of the Command Panel's buttons each get
+                         * their own color (direct request) instead of all
                          * sharing the generic accent blue - Close/Open
                          * All reuse the same green-ON/red-OFF convention
                          * Bulk Actions' own ON/OFF buttons use above,
-                         * since they're the same action at rack scale. */
+                         * since they're the same action at rack scale.
+                         * Load Config/Save Config aren't cased here - they
+                         * fall through to the plain accent blue every
+                         * other un-cased button in this app gets, same as
+                         * Open Csv Logs (restated explicitly below). */
                         fill = g_brush_disconnected;
                     } else if (dis->CtlID == IDC_OPEN_ALL_BTN) {
                         fill = g_brush_connected;
@@ -6809,15 +6695,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         DeleteObject(hl_pen);
                     }
                 }
-                /* Command Panel's 4 icon buttons - on/off dot (hollow vs
+                /* Command Panel's icon buttons - on/off dot (hollow vs
                  * filled circle, same convention a lot of hardware power
-                 * switches use), a warning triangle shared by Kill
-                 * Switch and Reset (same safety system, same glyph), and
-                 * a small document/lines icon for Open Log. Same
-                 * plain-white, drawn-before-text, rc.left-shifted-after
-                 * pattern as the theme toggle's sun/moon above, just a
-                 * smaller 22px offset - these buttons are only 90px
-                 * wide, not 110-130. */
+                 * switches use), a small document/lines icon for Open
+                 * Log, an import arrow for Load Config, a floppy disk
+                 * for Save Config, and a circular-arrow reset glyph.
+                 * Same plain-white, drawn-before-text, rc.left-shifted-
+                 * after pattern as the theme toggle's sun/moon above,
+                 * just a smaller 22px offset - these buttons are only
+                 * 90px wide, not 110-130. */
                 if (dis->CtlID == IDC_CLOSE_ALL_BTN || dis->CtlID == IDC_OPEN_ALL_BTN) {
                     int icx = rc.left + 13;
                     int icy = (rc.top + rc.bottom) / 2;
@@ -6869,6 +6755,45 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     SelectObject(dis->hDC, old_pen_i);
                     DeleteObject(white_pen);
                     DeleteObject(white_brush);
+                    rc.left += 22;
+                }
+                /* Import glyph (arrow pointing down into a tray) for Load
+                 * Config - a vertical line + downward arrowhead, then a
+                 * horizontal line below it for the tray. Same MoveToEx/
+                 * LineTo line-art style as Reset to Default's own arrow
+                 * below. */
+                if (dis->CtlID == IDC_LOAD_CONFIG_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    MoveToEx(dis->hDC, icx, icy - 6, NULL);
+                    LineTo(dis->hDC, icx, icy + 2);
+                    MoveToEx(dis->hDC, icx - 4, icy - 2, NULL);
+                    LineTo(dis->hDC, icx, icy + 2);
+                    LineTo(dis->hDC, icx + 4, icy - 2);
+                    MoveToEx(dis->hDC, icx - 6, icy + 6, NULL);
+                    LineTo(dis->hDC, icx + 6, icy + 6);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_pen);
+                    rc.left += 22;
+                }
+                /* Floppy disk glyph for Save Config - outer body, a
+                 * smaller rectangle near the top for the metal shutter,
+                 * a line below it for the label. */
+                if (dis->CtlID == IDC_SAVE_CONFIG_BTN) {
+                    int icx = rc.left + 13;
+                    int icy = (rc.top + rc.bottom) / 2;
+                    HPEN white_pen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
+                    HPEN old_pen_i = (HPEN)SelectObject(dis->hDC, white_pen);
+                    HBRUSH old_brush_i = (HBRUSH)SelectObject(dis->hDC, GetStockObject(NULL_BRUSH));
+                    Rectangle(dis->hDC, icx - 6, icy - 6, icx + 6, icy + 6);
+                    Rectangle(dis->hDC, icx - 3, icy - 6, icx + 3, icy - 2);
+                    MoveToEx(dis->hDC, icx - 4, icy + 1, NULL);
+                    LineTo(dis->hDC, icx + 4, icy + 1);
+                    SelectObject(dis->hDC, old_brush_i);
+                    SelectObject(dis->hDC, old_pen_i);
+                    DeleteObject(white_pen);
                     rc.left += 22;
                 }
                 /* Reset/refresh glyph (circular arrow, open on one side,

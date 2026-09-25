@@ -91,6 +91,15 @@
 #define IDC_HIGHEST_TEMP_LOG_BTN    1074
 #define IDC_TEMPLOG_VIEW_EDIT       1075
 #define IDC_TEMPLOG_VIEW_CLOSE_BTN  1076
+/* Command Panel's Load/Save Config - writes/reads every channel's
+ * Output/Level (mode is fixed to Pseudo Random Noise, not saved) to a
+ * user-chosen .ini via a real file picker, same commdlg.h pattern
+ * browse_and_set_logo() already uses. Direct request, added alongside
+ * removing the per-channel/Bulk Actions Mode dropdowns (the app is
+ * Pseudo Random Noise only now). See on_save_config_clicked()/
+ * on_load_config_clicked() in main.c. */
+#define IDC_LOAD_CONFIG_BTN         1079
+#define IDC_SAVE_CONFIG_BTN         1080
 
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
@@ -155,13 +164,6 @@
  * main.c. */
 #define IDC_BULK_ROWSELECT_COMBO 1038
 
-/* Modal password prompt gating Continuous Wave mode - see unlock_cw()
- * and cw_password_dlg_proc() in main.c. The real password comes from
- * the vendor DLL's GetDllPassword export, not anything this app makes
- * up itself. */
-#define IDD_CW_PASSWORD      1051
-#define IDC_CW_PW_EDIT       1052
-
 /* Spectrum panel - sits in the sidebar box above Activity Log (the
  * space that was always "reserved for other features" - see the
  * comment above g_sidebar_panel's creation in main.c). Not a capture -
@@ -188,13 +190,15 @@
 
 /* Each of the 16 channel cards gets its controls at
  * IDC_CH_BASE + channel_index*IDC_CH_STRIDE + offset, rather than a
- * separate #define per control per channel. Layout matches the
- * sdr_react/sdr_app channel-card pattern: Mode combo + explicit Set
- * button (mode is not applied until Set is clicked), separate ON/OFF
- * power buttons, a status line, and a vertical level trackbar with
- * High/Medium/Low/Off tick labels. */
+ * separate #define per control per channel. ON/OFF power buttons, a
+ * status line, and a vertical level trackbar with High/Medium/Low/Off
+ * tick labels. */
 #define IDC_CH_BASE               2000
 #define IDC_CH_STRIDE             13
+/* No live control at these two offsets anymore - every channel is
+ * Pseudo Random Noise only now (direct decision), so the per-card Mode
+ * combo + Set button were removed outright. Left defined, unused,
+ * rather than renumbering every offset after them. */
 #define IDC_CH_MODE_OFFSET        0
 #define IDC_CH_SET_OFFSET         1
 #define IDC_CH_ON_OFFSET          2
