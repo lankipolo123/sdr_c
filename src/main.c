@@ -2301,14 +2301,38 @@ static void ui_show_warning(const char *message);
 static void save_sensor_port(void);
 static void load_sensor_port(void);
 
+/* Shared owner-draw paint for the single "Close" button both of this
+ * app's dedicated popup windows use (Activity Log/Highest Temp Log full
+ * views, see log_view_wnd_proc()/templog_view_wnd_proc() below) - same
+ * RoundRect+accent-fill+white-text shape every other owner-drawn button
+ * in this app uses, factored out once since two separate WndProcs need
+ * the identical thing. Direct correction: these used to be plain native
+ * pushbuttons - the last non-owner-drawn buttons left in the app after
+ * IDD_CLOSE_CONFIRM got themed. Accent blue, same as Cancel on that
+ * dialog - a plain dismiss action, not an ON/OFF one. */
+static void draw_close_popup_button(DRAWITEMSTRUCT *dis) {
+    HPEN pen = CreatePen(PS_SOLID, 1, COLOR_APP_PANEL_BORDER);
+    HPEN old_pen = (HPEN)SelectObject(dis->hDC, pen);
+    HBRUSH old_brush = (HBRUSH)SelectObject(dis->hDC, g_brush_accent);
+    char text[32];
+    RoundRect(dis->hDC, dis->rcItem.left, dis->rcItem.top, dis->rcItem.right, dis->rcItem.bottom,
+              BTN_CORNER_DIAMETER, BTN_CORNER_DIAMETER);
+    SelectObject(dis->hDC, old_brush);
+    SelectObject(dis->hDC, old_pen);
+    DeleteObject(pen);
+    SetTextColor(dis->hDC, RGB(255, 255, 255));
+    SetBkMode(dis->hDC, TRANSPARENT);
+    GetWindowTextA(dis->hwndItem, text, sizeof(text));
+    DrawTextA(dis->hDC, text, -1, &dis->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
 /* Full-log popup's own WndProc - a plain secondary window (WS_POPUP,
  * not a dialog resource), same "build it directly with CreateWindowEx"
  * approach every other control in this app already uses rather than
  * introducing a second, resource-file-based UI paradigm just for this.
- * Native (non-owner-drawn) Close button is intentional, not an
- * oversight - MessageBoxA's Kill Switch confirmation already establishes
- * "native OS chrome is fine for an occasional secondary/utility window"
- * as this app's own precedent. */
+ * Its Close button is owner-drawn now (see draw_close_popup_button()
+ * above) - only the OS-native titlebar chrome is left alone, same as
+ * every popup window in this app. */
 static LRESULT CALLBACK log_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_ERASEBKGND: {
@@ -2324,6 +2348,12 @@ static LRESULT CALLBACK log_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LP
             SetBkColor(hdc, COLOR_APP_FIELD_BG);
             return (LRESULT)g_brush_field;
         }
+        case WM_DRAWITEM:
+            if (((DRAWITEMSTRUCT *)lParam)->CtlID == IDC_LOG_VIEW_CLOSE_BTN) {
+                draw_close_popup_button((DRAWITEMSTRUCT *)lParam);
+                return TRUE;
+            }
+            return 0;
         case WM_SIZE: {
             int w = LOWORD(lParam);
             int h = HIWORD(lParam);
@@ -2363,6 +2393,12 @@ static LRESULT CALLBACK templog_view_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam
             SetBkColor(hdc, COLOR_APP_FIELD_BG);
             return (LRESULT)g_brush_field;
         }
+        case WM_DRAWITEM:
+            if (((DRAWITEMSTRUCT *)lParam)->CtlID == IDC_TEMPLOG_VIEW_CLOSE_BTN) {
+                draw_close_popup_button((DRAWITEMSTRUCT *)lParam);
+                return TRUE;
+            }
+            return 0;
         case WM_SIZE: {
             int w = LOWORD(lParam);
             int h = HIWORD(lParam);
@@ -2425,7 +2461,7 @@ static void on_highest_temp_log_clicked(void) {
     RECT screen_rc;
     int win_w = 700, win_h = 550;
     int x, y;
-    HWND edit_ctrl, close_btn;
+    HWND edit_ctrl;
     static bool class_registered;
 
     if (g_templog_view_hwnd) {
@@ -2609,13 +2645,10 @@ static void on_highest_temp_log_clicked(void) {
     if (edit_ctrl) {
         SendMessageA(edit_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
     }
-    close_btn = CreateWindowExA(0, "BUTTON", "Close",
-                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                                 win_w - 12 - 80, win_h - 32, 80, 24, g_templog_view_hwnd,
-                                 (HMENU)(INT_PTR)IDC_TEMPLOG_VIEW_CLOSE_BTN, g_hinst, NULL);
-    if (close_btn) {
-        SendMessageA(close_btn, WM_SETFONT, (WPARAM)g_font, TRUE);
-    }
+    CreateWindowExA(0, "BUTTON", "Close",
+                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                     win_w - 12 - 80, win_h - 32, 80, 24, g_templog_view_hwnd,
+                     (HMENU)(INT_PTR)IDC_TEMPLOG_VIEW_CLOSE_BTN, g_hinst, NULL);
 
     free(buf);
     ShowWindow(g_templog_view_hwnd, SW_SHOW);
@@ -2637,7 +2670,7 @@ static void on_log_view_clicked(void) {
     RECT screen_rc;
     int win_w = 900, win_h = 650;
     int x, y;
-    HWND edit_ctrl, close_btn;
+    HWND edit_ctrl;
     static bool class_registered;
 
     if (g_log_view_hwnd) {
@@ -2726,13 +2759,10 @@ static void on_log_view_clicked(void) {
     if (edit_ctrl) {
         SendMessageA(edit_ctrl, WM_SETFONT, (WPARAM)g_mono_font, TRUE);
     }
-    close_btn = CreateWindowExA(0, "BUTTON", "Close",
-                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                                 win_w - 12 - 80, win_h - 32, 80, 24, g_log_view_hwnd,
-                                 (HMENU)(INT_PTR)IDC_LOG_VIEW_CLOSE_BTN, g_hinst, NULL);
-    if (close_btn) {
-        SendMessageA(close_btn, WM_SETFONT, (WPARAM)g_font, TRUE);
-    }
+    CreateWindowExA(0, "BUTTON", "Close",
+                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                     win_w - 12 - 80, win_h - 32, 80, 24, g_log_view_hwnd,
+                     (HMENU)(INT_PTR)IDC_LOG_VIEW_CLOSE_BTN, g_hinst, NULL);
 
     free(buf);
     ShowWindow(g_log_view_hwnd, SW_SHOW);
@@ -3080,7 +3110,14 @@ static void on_sensor_connect_clicked(void) {
     }
 
     if (GetDlgItemTextA(g_hwnd, IDC_SENSOR_PORT_COMBO, port, sizeof(port)) == 0) {
-        MessageBoxA(g_hwnd, "Select a port first", "No port", MB_OK | MB_ICONWARNING);
+        /* Native MessageBoxA replaced with the same in-app Activity Log
+         * warning every other error in this app uses now (see
+         * ui_show_warning()'s own comment) - direct correction, this
+         * was the last stock-Windows-chrome popup left after
+         * IDD_CLOSE_CONFIRM got themed; matches this app's own already-
+         * established move away from popups better than adding a 2nd
+         * themed dialog resource just for this one-line warning. */
+        ui_show_warning("Select a port first");
         return;
     }
 
