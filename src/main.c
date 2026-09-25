@@ -2929,9 +2929,13 @@ static void ui_refresh_all_channels(void);
 /* Also defined below (needs channel_set_mode()/channel_turn_output_on()
  * already declared via channels.h, and g_kill_switch_tripped) - RS422
  * connecting for the first time this session fires the same "power
- * everything on" sequence Reset to Default and close now both use (see
- * that function's own comment on the 3-way scope decision). */
+ * everything on" sequence the Reset to Default button uses. App close
+ * no longer shares this - see on_app_close_shutdown()'s own comment,
+ * which reverses that part of the original 3-way scope decision. */
 static void on_reset_to_default_clicked(void);
+/* Also defined below (needs get_ini_path()) - on_app_close_shutdown()
+ * (WM_DESTROY) calls this before turning everything off. */
+static void save_last_state_to_ini(void);
 static bool g_launch_power_on_done; /* one-shot - only the FIRST RS422
                                       * connect this session triggers
                                       * the auto power-on, not every
@@ -3615,11 +3619,12 @@ static void on_open_all_clicked(void) {
  * rack-wide action like Close All, not a selection-based one. */
 /* Direct decision - the "default" state changed from White Noise/OFF
  * to White Noise/ON: every channel powered on with Pseudo Random
- * Noise. This is the SAME function used by the Reset to Default
- * button, the close-time safety reset (WM_DESTROY), and once after a
- * successful launch auto-connect (see conn_on_connected_changed()) -
- * all 3 now power on instead of off, a direct instruction acknowledging
- * this means closing the app no longer leaves every channel OFF.
+ * Noise. This is the SAME function used by the Reset to Default button
+ * and once after a successful launch auto-connect (see
+ * conn_on_connected_changed()). App close used to also power on
+ * (a 3rd use of this same function) but a later direct request
+ * reversed that specific part - see on_app_close_shutdown()'s own
+ * comment - so this function's own scope is back to just those 2 uses.
  * Kill-switch-tripped channels are skipped, same convention
  * on_open_all_clicked()/bulk_turn_output_on() already use - a tripped
  * channel never gets powered back on by an automatic/bulk action. */
@@ -3645,6 +3650,25 @@ static void on_reset_to_default_clicked(void) {
     } else {
         log_add_status_change("Reset to Default: every channel set to Pseudo Random Noise, ON");
     }
+}
+
+/* App-close shutdown (WM_DESTROY) - direct request reversing part of
+ * on_reset_to_default_clicked()'s own "power on at close" decision
+ * (see its comment): closing now saves the current state first (see
+ * save_last_state_to_ini()) and then turns every channel OFF for real,
+ * same real-send path Close All uses, instead of powering everything
+ * on. Kill-switch-tripped channels are included too, same as every
+ * other OFF action in this app - turning off is never unsafe, unlike
+ * an ON action. Launch auto-connect and the Reset to Default button
+ * still power everything on with Pseudo Random Noise, unchanged - only
+ * app close's own behavior reversed. */
+static void on_app_close_shutdown(void) {
+    int i;
+    save_last_state_to_ini();
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        channel_turn_output_off(i);
+    }
+    log_add_status_change("App closing: last state saved, every channel commanded OFF");
 }
 
 /* Command Panel's Save Config - writes every channel's Output/Level (not
@@ -4536,6 +4560,35 @@ static void get_ini_path(char *path /* at least MAX_PATH + 8 bytes */) {
         *dot = '\0';
     }
     lstrcatA(path, ".ini");
+}
+
+/* Writes every channel's Output/Level to the app's own .ini (same file
+ * as Sensor Port/Branding/LightMode above - see get_ini_path()), as the
+ * "last state" right before app close commands everything off (see
+ * on_app_close_shutdown()) - same [UnitN] Output/Level format Save
+ * Config uses for a user-picked file (see on_save_config_clicked()),
+ * just written automatically to the app's own .ini instead of a file
+ * the user has to pick. Mode is never saved - every channel is Pseudo
+ * Random Noise only now. Not read back automatically anywhere (direct
+ * request was only to record it, not to auto-restore on next launch,
+ * which still powers everything on fresh via on_reset_to_default_clicked())
+ * - Load Config can be pointed at this same .ini by hand if it's ever
+ * needed. */
+static void save_last_state_to_ini(void) {
+    char path[MAX_PATH + 8];
+    int i;
+
+    get_ini_path(path);
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        const ChannelState *ch = channels_get(i);
+        char section[16];
+        char buf[8];
+        wsprintfA(section, "Unit%d", i + 1);
+        wsprintfA(buf, "%d", ch->output_on ? 1 : 0);
+        WritePrivateProfileStringA(section, "Output", buf, path);
+        wsprintfA(buf, "%d", ch->last_level);
+        WritePrivateProfileStringA(section, "Level", buf, path);
+    }
 }
 
 /* Writes whatever's currently in the Sensor Port combo - called right
@@ -6857,14 +6910,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         case WM_CLOSE: {
-            /* Direct decision: closing now resets every channel to its
-             * default settings for real (same as the Reset to Default
-             * button), not just a local .ini write - so it needs a
-             * confirmation before doing it, unlike the old silent
-             * close. Cancel just swallows WM_CLOSE (no DestroyWindow
-             * call), which is the standard Win32 "stay open" idiom. */
+            /* Direct decision: closing now saves the current state and
+             * turns every channel off for real (see
+             * on_app_close_shutdown()), not just a local .ini write - so
+             * it needs a confirmation before doing it, unlike the old
+             * silent close. Cancel just swallows WM_CLOSE (no
+             * DestroyWindow call), which is the standard Win32 "stay
+             * open" idiom. */
             int result = MessageBoxA(hwnd,
-                "Every channel will be set to Pseudo Random Noise and turned ON before the app closes - it will keep transmitting after you exit.\n\nClose ECM Controller?",
+                "Every channel's state will be saved, then every channel will be turned OFF before the app closes.\n\nClose ECM Controller?",
                 "Terminate ECM Controller", MB_OKCANCEL | MB_ICONWARNING);
             if (result == IDOK) {
                 DestroyWindow(hwnd);
@@ -6873,18 +6927,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         case WM_DESTROY:
-            /* Direct decision - replaces the old "Saving..." .ini write
-             * (save_settings() removed, see its own comment) with an
-             * actual hardware reset: every channel back to White
-             * Noise/OFF, same real-send path the Reset to Default
-             * button uses, run while the connection is still open
-             * (before conn_disconnect() below). Loading dialog matches
-             * the one on launch/the old Saving one - same minimum-
-             * visible-time reasoning, this is genuinely fast too. */
+            /* Direct decision (reversed from an earlier one - see
+             * on_app_close_shutdown()'s own comment): every channel's
+             * state is saved, then every channel is commanded OFF for
+             * real, run while the connection is still open (before
+             * conn_disconnect() below). Loading dialog matches the one
+             * on launch - same minimum-visible-time reasoning, this is
+             * genuinely fast too. */
             {
                 DWORD loading_t0 = GetTickCount();
-                HWND loading_hwnd = loading_dialog_show("Restoring to default...");
-                on_reset_to_default_clicked();
+                HWND loading_hwnd = loading_dialog_show("Saving state and shutting down...");
+                on_app_close_shutdown();
                 loading_dialog_hide(loading_hwnd, loading_t0);
             }
             KillTimer(hwnd, ID_POLL_TIMER);
