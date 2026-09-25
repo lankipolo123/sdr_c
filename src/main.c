@@ -2995,13 +2995,13 @@ static void conn_on_error(const char *message, void *ctx) {
 
 /* ---- port list / connect ---- */
 
-/* exclude (may be NULL/empty) - a port name to leave out of the
- * rebuilt list entirely, so the RS422 and Sensor Port dropdowns can
- * never both offer the same physical port (direct request - picking
- * the same COM port on both sides risks the two connections fighting
- * over it, since a serial port can't be opened by two processes at
- * once). */
-static void refresh_combo_ports(HWND combo, int (*list_fn)(char[][16], int), const char *exclude) {
+/* Direct revert - the exclude-the-other-dropdown's-port filter this
+ * used to take risked hiding the ONE correct port from the Sensor
+ * list if RS422's own (functionally-unused, per on_connect_clicked()'s
+ * own comment) Port combo happened to be showing that same port name.
+ * Back to no cross-filtering - each dropdown just lists everything it
+ * finds. */
+static void refresh_combo_ports(HWND combo, int (*list_fn)(char[][16], int)) {
     char names[32][16];
     char prev[16];
     int n, i;
@@ -3019,12 +3019,9 @@ static void refresh_combo_ports(HWND combo, int (*list_fn)(char[][16], int), con
     SendMessageA(combo, CB_RESETCONTENT, 0, 0);
     n = list_fn(names, 32);
     for (i = 0; i < n; i++) {
-        if (exclude && exclude[0] != '\0' && lstrcmpiA(names[i], exclude) == 0) {
-            continue;
-        }
         SendMessageA(combo, CB_ADDSTRING, 0, (LPARAM)names[i]);
     }
-    if (SendMessageA(combo, CB_GETCOUNT, 0, 0) == 0) {
+    if (n == 0) {
         return;
     }
 
@@ -3033,7 +3030,7 @@ static void refresh_combo_ports(HWND combo, int (*list_fn)(char[][16], int), con
 }
 
 static void refresh_port_list(void) {
-    refresh_combo_ports(GetDlgItem(g_hwnd, IDC_PORT_COMBO), conn_list_ports, NULL);
+    refresh_combo_ports(GetDlgItem(g_hwnd, IDC_PORT_COMBO), conn_list_ports);
 }
 
 static void on_connect_clicked(void) {
@@ -3078,9 +3075,7 @@ static void on_connect_clicked(void) {
  * open the same hardware the same way. */
 
 static void refresh_sensor_port_list(void) {
-    char rs422_port[16];
-    GetDlgItemTextA(g_hwnd, IDC_PORT_COMBO, rs422_port, sizeof(rs422_port));
-    refresh_combo_ports(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), serial_list_ports, rs422_port);
+    refresh_combo_ports(GetDlgItem(g_hwnd, IDC_SENSOR_PORT_COMBO), serial_list_ports);
 }
 
 static void on_sensor_connect_clicked(void) {
