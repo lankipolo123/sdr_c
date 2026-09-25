@@ -7,6 +7,49 @@ this is the general, transferable practices: things that caused real bugs or
 wasted real time, and what fixed them. Apply whichever of these are relevant
 to your own stack.
 
+## For a React/Electron developer: how this maps to `sdr_react`
+
+`sdr_react` (Electron + React + TypeScript + Tailwind) is a separate,
+independent rewrite of this same hardware-control app — not a port of this
+codebase, a parallel one built from the same vendor hardware/protocol
+reference. If you're coming from `sdr_react` and need to understand what
+`sdr_c` is doing, here's the concept map (verified by reading both
+codebases directly, not assumed):
+
+| Win32 concept (`sdr_c`) | React/Electron equivalent (`sdr_react`) |
+| --- | --- |
+| `WndProc`'s one giant `switch(msg)` dispatching `WM_COMMAND`/`WM_DRAWITEM`/etc. for every control in the app | Each component owns its own event handlers (`onClick`, `onChange`) — no central dispatcher; see `ChannelCard.tsx`'s `onClick={() => tripped && resetKillSwitchOne(address)}` |
+| One process, direct C function calls — a button's `WM_COMMAND` handler calls `channel_turn_output_on(i)` straight into `channels.c`'s shared global state | **Two processes.** Electron's main process (Node.js — has DLL/serial access, in `src/main/`) and renderer (Chromium — has the UI, in `src/renderer/`) are separate; a click goes `ChannelCard.tsx` → `window.sdr.channels.turnOn(address)` (the `contextBridge` API in `src/preload/index.ts`) → IPC → `ChannelController` in `src/main/channelController.ts`, and state changes come back the same way, not a shared-memory write |
+| `static ChannelState g_channels[MAX_CHANNELS]` in `channels.c`, read directly by any function in the process | One `ChannelController` instance per channel (`src/main/channelController.ts`), each an `EventEmitter`; the renderer's `useChannel`/`useAllChannels` hooks hold their own mirrored copy, kept in sync over IPC — two copies by design, not one shared struct |
+| `add_ctrl()`/`add_channel_card()` imperatively creating and x/y-positioning a `HWND` per control | `ChannelCard.tsx` — a declarative function component; the browser's layout engine (plus Tailwind classes) does the positioning, no manual coordinates |
+| `WM_DRAWITEM` owner-draw — by-hand `RoundRect`+`DrawTextA` for every button, every repaint (see this file's own z-order/paint-order lesson above) | Tailwind utility classes (`className="rounded-[10px] border ..."`) — styling is declarative; the browser paints it, and there's no owner-draw/z-order footgun to hand-manage in the first place |
+| `InvalidateRect()`/`ui_invalidate_card()` — you manually mark which pixels are stale and must repaint | React's reconciler — call a state setter, React diffs and re-renders only what actually changed |
+| `transit_dll.c`'s `LoadLibraryA`/`GetProcAddress` FFI binding | `src/main/dll/transit.ts`'s `koffi.load()`/`lib.func()` — same FFI idea, different binding library, same DLL export names (`AutoConnectSDR`, `CommandTokens`, `SendCommandToSDR`, ...) |
+| `serial_port.c`'s `CreateFileA`/`SetCommState` | the `serialport` npm package (`src/main/serial/`) — a Node binding over the same underlying OS serial APIs |
+| The `CHANNEL_SEND_SETTLE_MS`-paced `WM_TIMER`/queue-drain loop in `channels.c` | `channelController.ts`'s `send()` — `setTimeout(..., SEND_SETTLE_MS)`; confirmed the *same* 300ms value, ported deliberately, not a coincidence |
+| `g_kill_switch_tripped[]` + `on_unit_kill_reset()` in `main.c` | `src/main/safety.ts`'s `SafetyController` class — same manual-reset-only, per-channel-trip design; confirmed identical `KILL_SWITCH_THRESHOLD_C` (60.0) |
+
+**Two real, concrete differences worth flagging, not just stylistic ones:**
+
+- **Mode selection**: `sdr_c` was *just* revised (direct decision, see the
+  git log) to remove Mode entirely from the UI — every channel is hardcoded
+  to Pseudo Random Noise, no dropdown, no Set button, on the card or in Bulk
+  Actions. `sdr_react` does **not** have this change yet — `ChannelCard.tsx`
+  and `BulkActionsBar.tsx` still have a live Mode `<select>` + "Set" button
+  wired to `MODE_NAMES`/`setMode()`, matching `sdr_c`'s *older* behavior. If
+  your task is bringing `sdr_react` in line with `sdr_c`'s current state,
+  this is the gap.
+- **Settings persistence**: `sdr_c` had its `save_settings()`/
+  `load_settings()` .ini restore removed at some point (see `channels.c`'s
+  own comment on this). `sdr_react` still has the full round trip —
+  `channelStore.ts`'s `loadChannelStates()`/`saveChannelStates()`, a
+  `channels.ini` with `[CH01]`/`mode`/`power`/`output` sections per channel.
+  `sdr_c`'s newer Load Config/Save Config buttons and close-time
+  "last state" save (see the git log around when those shipped) are a
+  different, more recent mechanism and don't exist in `sdr_react` at all
+  yet — `sdr_react`'s AppLayout only has a Kill Switch "Reset All" bar, no
+  equivalent close-confirmation dialog.
+
 ## Buffer safety with C-style formatting APIs
 
 `wsprintfA`/`sprintf`-family calls have **no bounds checking**. Twice in
