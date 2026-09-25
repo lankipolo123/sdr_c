@@ -101,6 +101,14 @@
 #define IDC_LOAD_CONFIG_BTN         1079
 #define IDC_SAVE_CONFIG_BTN         1080
 
+/* WM_CLOSE's confirmation dialog - 3 explicit choices instead of a
+ * plain OK/Cancel MessageBoxA, direct request. IDOK ("Turn Off and
+ * Close", the default/1st button) and IDCANCEL ("Cancel") are the
+ * usual dialog IDs; IDC_CLOSE_KEEP_RUNNING_BTN is the 3rd, custom one.
+ * See close_confirm_dlg_proc()/WM_CLOSE in main.c. */
+#define IDD_CLOSE_CONFIRM           1081
+#define IDC_CLOSE_KEEP_RUNNING_BTN  1082
+
 #define IDC_LOG_LISTBOX      1020
 #define IDC_LOG_CLEAR_BTN    1021
 /* Opens a bigger, dedicated popup window showing the whole log as one

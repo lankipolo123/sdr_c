@@ -3652,9 +3652,10 @@ static void on_reset_to_default_clicked(void) {
     }
 }
 
-/* App-close shutdown (WM_DESTROY) - direct request reversing part of
+/* WM_CLOSE's "Turn Off and Close" choice (the 1st/default button on
+ * IDD_CLOSE_CONFIRM - see close_confirm_dlg_proc()) - reverses part of
  * on_reset_to_default_clicked()'s own "power on at close" decision
- * (see its comment): closing now saves the current state first (see
+ * (see its comment): saves the current state first (see
  * save_last_state_to_ini()) and then turns every channel OFF for real,
  * same real-send path Close All uses, instead of powering everything
  * on. Kill-switch-tripped channels are included too, same as every
@@ -3669,6 +3670,17 @@ static void on_app_close_shutdown(void) {
         channel_turn_output_off(i);
     }
     log_add_status_change("App closing: last state saved, every channel commanded OFF");
+}
+
+/* WM_CLOSE's "Keep Running and Close" choice - the other real option
+ * alongside on_app_close_shutdown() above (Cancel, the 3rd, just stays
+ * open and doesn't reach either of these). Saves state the same way,
+ * but never sends a single OFF command - whatever's currently
+ * transmitting keeps transmitting after the app exits, same as this
+ * app's original pre-revision close behavior. */
+static void on_close_keep_running(void) {
+    save_last_state_to_ini();
+    log_add_status_change("App closing: last state saved, channels left running");
 }
 
 /* Command Panel's Save Config - writes every channel's Output/Level (not
@@ -5775,6 +5787,31 @@ static void relayout_for_size(HWND hwnd, int client_w, int client_h) {
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE);
 }
 
+/* IDD_CLOSE_CONFIRM's DLGPROC - just reports back which of the 3
+ * buttons was clicked (IDOK/IDC_CLOSE_KEEP_RUNNING_BTN/IDCANCEL) via
+ * EndDialog's return value; WM_CLOSE (below) does the actual work once
+ * DialogBoxParamA returns. WM_CLOSE on the dialog itself (its own
+ * titlebar X) is handled explicitly as a Cancel - a modal dialog's
+ * default proc does NOT do this on its own. */
+static INT_PTR CALLBACK close_confirm_dlg_proc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    (void)lParam;
+    switch (msg) {
+        case WM_COMMAND:
+            if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDC_CLOSE_KEEP_RUNNING_BTN ||
+                LOWORD(wParam) == IDCANCEL) {
+                EndDialog(hDlg, LOWORD(wParam));
+                return TRUE;
+            }
+            break;
+        case WM_CLOSE:
+            EndDialog(hDlg, IDCANCEL);
+            return TRUE;
+        default:
+            break;
+    }
+    return FALSE;
+}
+
 /* ---- WndProc ---- */
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -6910,36 +6947,38 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         case WM_CLOSE: {
-            /* Direct decision: closing now saves the current state and
-             * turns every channel off for real (see
-             * on_app_close_shutdown()), not just a local .ini write - so
-             * it needs a confirmation before doing it, unlike the old
-             * silent close. Cancel just swallows WM_CLOSE (no
-             * DestroyWindow call), which is the standard Win32 "stay
-             * open" idiom. */
-            int result = MessageBoxA(hwnd,
-                "Every channel's state will be saved, then every channel will be turned OFF before the app closes.\n\nClose ECM Controller?",
-                "Terminate ECM Controller", MB_OKCANCEL | MB_ICONWARNING);
-            if (result == IDOK) {
+            /* Direct request: 3 explicit choices instead of a plain
+             * OK/Cancel MessageBoxA - see IDD_CLOSE_CONFIRM/
+             * close_confirm_dlg_proc() above. The 1st/default button
+             * (IDOK) turns everything off; the 2nd leaves channels
+             * running as-is; either way state gets saved first (see
+             * on_app_close_shutdown()/on_close_keep_running()) and runs
+             * here, before WM_DESTROY's conn_disconnect() - same "while
+             * the connection is still open" requirement the old single-
+             * choice version already had. Cancel (or the dialog's own
+             * titlebar X) just returns without calling DestroyWindow,
+             * the standard Win32 "stay open" idiom. */
+            INT_PTR choice = DialogBoxParamA(GetModuleHandle(NULL), MAKEINTRESOURCE(IDD_CLOSE_CONFIRM),
+                                              hwnd, close_confirm_dlg_proc, 0);
+            if (choice == IDOK || choice == IDC_CLOSE_KEEP_RUNNING_BTN) {
+                DWORD loading_t0 = GetTickCount();
+                HWND loading_hwnd = loading_dialog_show(
+                    choice == IDOK ? "Saving state and shutting down..." : "Saving state...");
+                if (choice == IDOK) {
+                    on_app_close_shutdown();
+                } else {
+                    on_close_keep_running();
+                }
+                loading_dialog_hide(loading_hwnd, loading_t0);
                 DestroyWindow(hwnd);
             }
             return 0;
         }
 
         case WM_DESTROY:
-            /* Direct decision (reversed from an earlier one - see
-             * on_app_close_shutdown()'s own comment): every channel's
-             * state is saved, then every channel is commanded OFF for
-             * real, run while the connection is still open (before
-             * conn_disconnect() below). Loading dialog matches the one
-             * on launch - same minimum-visible-time reasoning, this is
-             * genuinely fast too. */
-            {
-                DWORD loading_t0 = GetTickCount();
-                HWND loading_hwnd = loading_dialog_show("Saving state and shutting down...");
-                on_app_close_shutdown();
-                loading_dialog_hide(loading_hwnd, loading_t0);
-            }
+            /* The channel save/shutdown-or-not decision itself now
+             * happens in WM_CLOSE above (before this fires) - see its
+             * own comment. This is just the generic teardown. */
             KillTimer(hwnd, ID_POLL_TIMER);
             if (conn_is_connected(&g_conn)) {
                 conn_disconnect(&g_conn);
